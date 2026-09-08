@@ -12,7 +12,9 @@
 //     only the statements will silently return nulls for them.
 
 import { generateWithFallback } from "./gemini";
-import { extractPdfPages, pagesToMarkedText } from "./pdf-pages";
+import {
+  extractPdfPages, pagesToMarkedTextWithGaps, imageOnlyPages,
+} from "./pdf-pages";
 import { type TokenUsage } from "./pricing";
 import {
   ENTITY_FIELDS, FINANCIAL_FIELDS, NARRATIVE_CONCEPTS,
@@ -258,27 +260,57 @@ export async function extractMbrsFromAfs(
   file: { buffer: Buffer; mimeType: string },
 ): Promise<MbrsExtractResult> {
   // Prefer the text layer — cheaper, and far more reliable for exact digits
-  // than reading them off a rasterised page.
+  // than reading them off a rasterised page. But the choice is not all or
+  // nothing: a report can be typed throughout and still have its signature
+  // sheets scanned back in. Yee Fatt was 44 text pages and 4 pictures, and the
+  // four held every signing date, the audit partner and his licence number.
+  // Those pages were dropped from the text blob and the PDF was never attached,
+  // so the model reported — accurately — that it had not been given them.
   let textLayer = "";
+  let scannedPages: number[] = [];
   try {
     const pages = await extractPdfPages(file.buffer);
-    textLayer = pagesToMarkedText(pages).slice(0, MAX_TEXT_CHARS);
+    scannedPages = imageOnlyPages(pages);
+    textLayer = pagesToMarkedTextWithGaps(pages).slice(0, MAX_TEXT_CHARS);
   } catch {
     textLayer = "";
   }
   const ocrUsed = textLayer.replace(/=== PAGE \d+ ===/g, "").trim().length < TEXT_LAYER_MIN_CHARS;
+  // Mostly text, but some pages are images: send both, and say which pages.
+  const hybrid = !ocrUsed && scannedPages.length > 0;
+
+  const gapNote =
+    `\nPages ${scannedPages.join(", ")} of this report have no text layer — they are scanned` +
+    ` images, and they are marked as such above. The complete PDF is attached: read those` +
+    ` pages from it. They usually carry the signature blocks — the directors' report and` +
+    ` statement by directors signing dates, the statutory declaration, and the auditors'` +
+    ` report with the signing partner's name and licence number.`;
+  const ocrNote =
+    "\nThe audited report is attached as a scanned PDF. Read it with OCR. Take particular care with digits — verify each figure against the printed subtotals before returning it.";
+  const pdfPart = {
+    inlineData: { mimeType: file.mimeType || "application/pdf", data: file.buffer.toString("base64") },
+  };
+
+  /** Assemble the model input for one pass, in whichever of the three modes
+   *  this document needs. `ocrHint` is the wording used when the whole report
+   *  is a scan; the hybrid and text modes always lead with the text layer. */
+  const buildParts = (instruction: string, ocrHint: string) =>
+    ocrUsed
+      ? [{ text: instruction }, { text: ocrHint }, pdfPart]
+      : hybrid
+        ? [
+            { text: instruction },
+            { text: `\nAUDITED FINANCIAL STATEMENTS:\n\n${textLayer}` },
+            { text: gapNote },
+            pdfPart,
+          ]
+        : [
+            { text: instruction },
+            { text: `\nAUDITED FINANCIAL STATEMENTS:\n\n${textLayer}` },
+          ];
 
   const instruction = [SYSTEM, "", fieldCatalogue(), "", narrativeBrief()].join("\n");
-  const parts = ocrUsed
-    ? [
-        { text: instruction },
-        { text: "\nThe audited report is attached as a scanned PDF. Read it with OCR. Take particular care with digits — verify each figure against the printed subtotals before returning it." },
-        { inlineData: { mimeType: file.mimeType || "application/pdf", data: file.buffer.toString("base64") } },
-      ]
-    : [
-        { text: instruction },
-        { text: `\nAUDITED FINANCIAL STATEMENTS:\n\n${textLayer}` },
-      ];
+  const parts = buildParts(instruction, ocrNote);
 
   const response = await generateWithFallback({
     contents: [{ role: "user", parts }],
@@ -334,16 +366,10 @@ export async function extractMbrsFromAfs(
   // values win for note-sourced fields — it saw the itemised note with one job,
   // where the first pass saw 48 pages and a hundred fields.
   try {
-    const notesParts = ocrUsed
-      ? [
-          { text: [NOTES_SYSTEM, "", notesFieldList()].join("\n") },
-          { text: "\nThe report is attached as a scanned PDF. Read the notes with OCR, and check each note's components against its printed total before answering." },
-          { inlineData: { mimeType: file.mimeType || "application/pdf", data: file.buffer.toString("base64") } },
-        ]
-      : [
-          { text: [NOTES_SYSTEM, "", notesFieldList()].join("\n") },
-          { text: `\nAUDITED FINANCIAL STATEMENTS:\n\n${textLayer}` },
-        ];
+    const notesParts = buildParts(
+      [NOTES_SYSTEM, "", notesFieldList()].join("\n"),
+      "\nThe report is attached as a scanned PDF. Read the notes with OCR, and check each note's components against its printed total before answering.",
+    );
     const nres = await generateWithFallback({
       contents: [{ role: "user", parts: notesParts }],
       config: { responseMimeType: "application/json", maxOutputTokens: 16384, temperature: 0 },
@@ -381,16 +407,10 @@ export async function extractMbrsFromAfs(
   // it returns MORE text than the first pass — a shorter answer means this pass
   // summarised too, and the fuller text is the better filing either way.
   try {
-    const narrParts = ocrUsed
-      ? [
-          { text: [NARRATIVE_SYSTEM, "", narrativeBrief()].join("\n") },
-          { text: "\nThe report is attached as a scanned PDF. Read it with OCR and transcribe each section in full." },
-          { inlineData: { mimeType: file.mimeType || "application/pdf", data: file.buffer.toString("base64") } },
-        ]
-      : [
-          { text: [NARRATIVE_SYSTEM, "", narrativeBrief()].join("\n") },
-          { text: `\nAUDITED FINANCIAL STATEMENTS:\n\n${textLayer}` },
-        ];
+    const narrParts = buildParts(
+      [NARRATIVE_SYSTEM, "", narrativeBrief()].join("\n"),
+      "\nThe report is attached as a scanned PDF. Read it with OCR and transcribe each section in full.",
+    );
     const rres = await generateWithFallback({
       contents: [{ role: "user", parts: narrParts }],
       config: { responseMimeType: "application/json", maxOutputTokens: 65536, temperature: 0 },

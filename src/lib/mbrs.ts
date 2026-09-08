@@ -86,8 +86,8 @@ export const SOFP_FIELDS: FieldSpec[] = [
   { key: "propertyPlantAndEquipment", label: "Property, plant and equipment", group: "sofp", type: "money", periodic: true },
   { key: "totalNoncurrentAssets", label: "Total non-current assets", group: "sofp", type: "money", periodic: true },
   { key: "otherReceivables", label: "Other (non-trade) receivables, incl. deposits", group: "sofp", type: "money", periodic: true, hint: "The non-trade subtotal INCLUDING deposits, but EXCLUDING prepayments, trade, and amounts due from holding company or related parties." },
-  { key: "receivablesDueFromHoldingCompany", label: "— of which due from holding company", group: "sofp", type: "money", periodic: true, hint: "Holding / parent company ONLY. Breakdown inside other receivables." },
-  { key: "receivablesDueFromRelatedParties", label: "— of which due from other related parties", group: "sofp", type: "money", periodic: true, hint: "Directors, subsidiaries, associates, companies under common control — NOT the holding company. Breakdown inside other receivables." },
+  { key: "receivablesDueFromHoldingCompany", label: "— of which due from holding company", group: "sofp", type: "money", periodic: true, hint: "Holding / parent company ONLY. Either a breakdown inside other receivables OR a separate line on the face of the statement — take it from wherever it is shown." },
+  { key: "receivablesDueFromRelatedParties", label: "— of which due from other related parties", group: "sofp", type: "money", periodic: true, hint: "Directors, subsidiaries, associates, companies under common control — NOT the holding company. Either a breakdown inside other receivables OR a separate line on the face of the statement (\"amount owing by directors\" is this field). Always fill it when such a balance exists — current assets will not add up without it." },
   { key: "currentTaxAssets", label: "Current tax assets / tax recoverable", group: "sofp", type: "money", periodic: true, hint: "A separate face line if present (tax recoverable / tax refundable). Leave blank if the statement has none." },
   { key: "cashAndCashEquivalents", label: "Cash and cash equivalents", group: "sofp", type: "money", periodic: true },
   { key: "totalCurrentAssets", label: "Total current assets", group: "sofp", type: "money", periodic: true },
@@ -96,6 +96,11 @@ export const SOFP_FIELDS: FieldSpec[] = [
   { key: "openingShareCapital", label: "Share capital at START of period", group: "sofp", type: "money", periodic: true, hint: "Opening balance row of the statement of changes in equity" },
   { key: "openingRetainedEarnings", label: "Retained earnings at START of period", group: "sofp", type: "money", periodic: true, hint: "Opening balance row of the statement of changes in equity" },
   { key: "openingTotalEquity", label: "Total equity at START of period", group: "sofp", type: "money", periodic: true, hint: "Opening balance row of the statement of changes in equity" },
+  // SSM's cash flow statement needs THREE cash dates, not two: this year's
+  // close, last year's close, and the opening balance of the comparative year.
+  // Our schema held two, so the third had nowhere to go and the box stayed
+  // empty in every filing.
+  { key: "openingCashAndCashEquivalents", label: "Cash at START of period", group: "cf", type: "money", periodic: true, hint: "The \"cash and cash equivalents at beginning of financial year\" line at the foot of the cash flow statement. Read BOTH columns: the previous-period column gives the opening balance of the comparative year." },
   { key: "buildings", label: "— of which buildings", group: "sofp", type: "money", periodic: true, hint: "Carrying amount from the PPE note. Breakdown inside PPE, not additional to it." },
   { key: "vehicles", label: "— of which motor vehicles", group: "sofp", type: "money", periodic: true, hint: "Carrying amount from the PPE note. Breakdown inside PPE." },
   { key: "plantAndEquipment", label: "— of which plant and machinery", group: "sofp", type: "money", periodic: true, hint: "Carrying amount from the PPE note. Breakdown inside PPE." },
@@ -108,7 +113,7 @@ export const SOFP_FIELDS: FieldSpec[] = [
   { key: "tradePayables", label: "Trade payables", group: "sofp", type: "money", periodic: true },
   { key: "otherPayablesAndAccruals", label: "Other payables and accruals", group: "sofp", type: "money", periodic: true, hint: "EXCLUDING amounts due to holding company or related parties, which have their own lines" },
   { key: "payablesDueToHoldingCompany", label: "— of which due to holding company", group: "sofp", type: "money", periodic: true, hint: "Holding / parent company ONLY. Breakdown inside other payables." },
-  { key: "payablesDueToRelatedParties", label: "— of which due to other related parties", group: "sofp", type: "money", periodic: true, hint: "Directors, subsidiaries, associates, companies under common control — NOT the holding company. Breakdown inside other payables." },
+  { key: "payablesDueToRelatedParties", label: "— of which due to other related parties", group: "sofp", type: "money", periodic: true, hint: "Directors, subsidiaries, associates, companies under common control — NOT the holding company. Either a breakdown inside other payables OR a separate line on the face of the statement. Always fill it when such a balance exists — current liabilities will not add up without it." },
   { key: "accruals", label: "— of which accruals", group: "sofp", type: "money", periodic: true, hint: "From the payables note" },
   { key: "prepayments", label: "Prepayments and accrued income", group: "sofp", type: "money", periodic: true, hint: "Reported BESIDE other receivables, not inside it" },
   { key: "deposits", label: "— of which deposits", group: "sofp", type: "money", periodic: true, hint: "A component INSIDE other receivables, reported separately as well" },
@@ -286,6 +291,12 @@ const DERIVED: Array<{
   // SSM's "other current receivables" concept is other + every related-party
   // balance; the face line we extract excludes related parties.
   { key: "otherReceivablesInclRelated", from: ["otherReceivables", "prepayments", "receivablesDueFromHoldingCompany", "receivablesDueFromRelatedParties"] },
+  // SSM splits what we read as one line. Its "miscellaneous" box is the
+  // non-trade balance NET of deposits, which get a box of their own, so the
+  // gross figure we extract belongs in the parent concept and this net one
+  // has to be computed. Verified on Yee Fatt: 792,793 - 45,300 = 747,493,
+  // the accepted filing's figure exactly.
+  { key: "otherReceivablesExclDeposits", from: ["otherReceivables"], minus: ["deposits"] },
   { key: "otherPayablesInclRelated", from: ["otherPayablesAndAccruals", "payablesDueToHoldingCompany", "payablesDueToRelatedParties"] },
   { key: "totalPayables", from: ["tradePayables", "otherPayablesAndAccruals", "payablesDueToHoldingCompany", "payablesDueToRelatedParties"] },
   {

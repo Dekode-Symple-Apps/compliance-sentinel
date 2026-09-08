@@ -92,7 +92,7 @@ SOFP = {
     "ssmt-mpers:OtherInvestmentProperty": "investmentProperty",
     "ssmt-mpers:InvestmentPropertyFreeholdLandAndBuilding": "investmentProperty",
     "ssmt-mpers:NoncurrentInvestmentsOtherThanInvestmentsAccountedForUsingEquityMethod": "otherInvestments",
-    "ssmt-mpers:OtherCurrentMiscellaneousNontradeReceivables": "otherReceivables",
+    "ssmt-mpers:OtherCurrentMiscellaneousNontradeReceivables": "otherReceivablesExclDeposits",
     "ssmt-mpers:OtherCurrentPayablesDueToOtherRelatedParties": "payablesDueToRelatedParties",
     "ssmt-mpers:InvestmentsInAssociatesUnquotedSharesNetOfImpairmentLosses": "investmentsInAssociates",
     "ssmt-mpers:CurrentSecuredBankLoansReceivedAndCurrentPortionOfNoncurrentSecuredBankLoansReceived": "currentBankLoans",
@@ -127,6 +127,10 @@ SOFP = {
 }
 PL = {
     "ifrs-smes:Revenue": "revenue",
+    # Both donors happened to file 0 here, so the multi-donor agreement rule
+    # read it as a constant and froze "0" into the template — which is how
+    # LS Contracts' real RM4,000 audit fee could never appear in any filing.
+    "ssmt-mpers:AuditorsRemuneration": "auditorsRemuneration",
     # Split by nature. Binding both to one "revenue" field emitted the full
     # amount twice; every filing reports one and zero for the other.
     "ifrs-smes:RevenueFromRenderingOfServices": "revenueFromServices",
@@ -317,6 +321,10 @@ def resolve(concept, ctx):
     if p is None:
         return None
     if p == "opening":
+        # The comparative year's opening cash sits at this instant too — the
+        # only non-equity fact SSM states at {PPE}.
+        if concept == "ifrs-smes:CashAndCashEquivalents" and PLAIN_CTX.match(ctx or ""):
+            return ("openingCashAndCashEquivalents", "previous")
         if concept not in EQUITY_CONCEPTS:
             return None
         if PLAIN_CTX.match(ctx or ""):
@@ -325,6 +333,14 @@ def resolve(concept, ctx):
             if (ctx or "").endswith("_" + member):
                 return (field, "previous")
         return None
+    # SSM states the share-capital figures twice: once undimensioned, and once
+    # tagged OrdinarySharesMember. Same company, same number — the member names
+    # the class of share, nothing more. Only the plain twin was bound, leaving
+    # the dimensioned one permanently empty. No equity-grid map uses this
+    # member, so folding it away here cannot disturb the SOCE columns below.
+    if ctx and ctx.endswith("_OrdinarySharesMember"):
+        ctx = ctx[: -len("_OrdinarySharesMember")]
+
     if not PLAIN_CTX.match(ctx or ""):
         # SOCE equity columns: bind the component we can identify. Previously
         # every dimensional fact kept the reference company's literal, which is
