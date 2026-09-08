@@ -103,6 +103,8 @@ SOFP = {
     "ssmt-mpers:OtherCurrentMiscellaneousNontradeReceivables": "otherReceivablesExclDeposits",
     "ssmt-mpers:OtherCurrentPayablesDueToOtherRelatedParties": "payablesDueToRelatedParties",
     "ssmt-mpers:InvestmentsInAssociatesUnquotedSharesNetOfImpairmentLosses": "investmentsInAssociates",
+    "ssmt-mpers:InvestmentPropertyFreeholdLandAndBuilding": "investmentPropertyFreehold",
+    "ssmt-mpers:OtherInvestmentProperty": "investmentPropertyOther",
     "ssmt-mpers:CurrentSecuredBankLoansReceivedAndCurrentPortionOfNoncurrentSecuredBankLoansReceived": "currentBankLoans",
     "ssmt-mpers:CurrentPortionOfFinanceLeaseLiabilities": "financeLeaseCurrent",
     "ssmt-mpers:NoncurrentPortionOfFinanceLeaseLiabilities": "financeLeaseNoncurrent",
@@ -187,6 +189,7 @@ CF = {
     "ifrs-smes:CashFlowsFromUsedInInvestingActivities": "cfFromInvestingActivities",
     "ifrs-smes:CashFlowsFromUsedInFinancingActivities": "cfFromFinancingActivities",
     "ifrs-smes:RepaymentsOfBorrowingsClassifiedAsFinancingActivities": "cfRepaymentOfBorrowings",
+    "ifrs-smes:PaymentsOfFinanceLeaseLiabilitiesClassifiedAsFinancingActivities": "cfLeaseRepayments",
     "ifrs-smes:IncomeTaxesPaidRefundClassifiedAsOperatingActivities": "incomeTaxPaid",
     # add-back of finance costs in the operating reconciliation = the P&L line
     "ifrs-smes:AdjustmentsForFinanceCosts": "financeCosts",
@@ -281,6 +284,13 @@ EQUITY_CHANGE_FIELDS = {
     "EquityAttributableToOwnersOfParentMember": "equityMovementTotal",
 }
 
+# The "Parent" column of the related-party grid — the holding company, whose
+# balance we already read off the face of the statement.
+RELATED_PARTY_PARENT = {
+    "ifrs-smes:AmountsReceivableRelatedPartyTransactions": "receivablesDueFromHoldingCompany",
+    "ifrs-smes:AmountsPayableRelatedPartyTransactions": "payablesDueToHoldingCompany",
+}
+
 BUSINESS_CONCEPTS = {
     "ssmt:MSICCode": "msicCode",
     "ssmt:DescriptionOfBusiness": "businessDescription",
@@ -349,6 +359,13 @@ def resolve(concept, ctx):
     # member, so folding it away here cannot disturb the SOCE columns below.
     if ctx and ctx.endswith("_OrdinarySharesMember"):
         ctx = ctx[: -len("_OrdinarySharesMember")]
+
+    # The related-party note is a grid: an undimensioned total plus one column
+    # per class of related party. The "Parent" column is exactly our holding
+    # company balance — including when it is nil, which is what all three
+    # filings state and what we were leaving blank.
+    if (ctx or "").endswith("_ParentMember") and concept in RELATED_PARTY_PARENT:
+        return (RELATED_PARTY_PARENT[concept], p)
 
     if not PLAIN_CTX.match(ctx or ""):
         # SOCE equity columns: bind the component we can identify. Previously

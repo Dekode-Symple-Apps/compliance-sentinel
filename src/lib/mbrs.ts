@@ -93,6 +93,8 @@ export const SOFP_FIELDS: FieldSpec[] = [
   { key: "totalCurrentAssets", label: "Total current assets", group: "sofp", type: "money", periodic: true },
   { key: "totalAssets", label: "Total assets", group: "sofp", type: "money", periodic: true },
   { key: "shareCapital", label: "Share capital", group: "sofp", type: "money", periodic: true },
+  { key: "investmentPropertyFreehold", label: "— of which freehold land and buildings", group: "sofp", type: "money", periodic: true, hint: "Fill this ONLY where the note says the property is FREEHOLD. If it says leasehold, or does not say, leave this blank and put the amount in other investment property instead. Breakdown inside investment property, not additional to it." },
+  { key: "investmentPropertyOther", label: "— of which other investment property", group: "sofp", type: "money", periodic: true, hint: "Investment property that is not freehold land and buildings — leasehold property and the like. Breakdown inside investment property." },
   { key: "openingShareCapital", label: "Share capital at START of period", group: "sofp", type: "money", periodic: true, hint: "Opening balance row of the statement of changes in equity" },
   { key: "openingRetainedEarnings", label: "Retained earnings at START of period", group: "sofp", type: "money", periodic: true, hint: "Opening balance row of the statement of changes in equity" },
   { key: "openingTotalEquity", label: "Total equity at START of period", group: "sofp", type: "money", periodic: true, hint: "Opening balance row of the statement of changes in equity" },
@@ -101,17 +103,17 @@ export const SOFP_FIELDS: FieldSpec[] = [
   // Our schema held two, so the third had nowhere to go and the box stayed
   // empty in every filing.
   { key: "openingCashAndCashEquivalents", label: "Cash at START of period", group: "cf", type: "money", periodic: true, hint: "The \"cash and cash equivalents at beginning of financial year\" line at the foot of the cash flow statement. Read BOTH columns: the previous-period column gives the opening balance of the comparative year." },
-  { key: "buildings", label: "— of which land and buildings", group: "sofp", type: "money", periodic: true, hint: "Carrying amount from the PPE note. Freehold or leasehold land and buildings together — SSM files them as one figure. Breakdown inside PPE, not additional to it." },
+  { key: "buildings", label: "— of which land and buildings", group: "sofp", type: "money", periodic: true, hint: "Carrying amount from the PPE note. Freehold or leasehold land and buildings together — SSM files them as one figure. Includes a showroom, factory, shoplot or premises column. Breakdown inside PPE, not additional to it." },
   { key: "vehicles", label: "— of which motor vehicles", group: "sofp", type: "money", periodic: true, hint: "Carrying amount from the PPE note. Breakdown inside PPE." },
-  { key: "plantAndEquipment", label: "— of which plant and machinery", group: "sofp", type: "money", periodic: true, hint: "Carrying amount from the PPE note. Breakdown inside PPE." },
+  { key: "plantAndEquipment", label: "— of which plant and machinery", group: "sofp", type: "money", periodic: true, hint: "Carrying amount from the PPE note. Plant, machinery, and also workshop tools and equipment — SSM groups tools here. Breakdown inside PPE." },
   { key: "financeLeaseCurrent", label: "Finance lease / hire purchase liabilities (current)", group: "sofp", type: "money", periodic: true },
   { key: "financeLeaseNoncurrent", label: "Finance lease / hire purchase liabilities (non-current)", group: "sofp", type: "money", periodic: true },
-  { key: "officeEquipment", label: "— of which office equipment, fixtures and fittings", group: "sofp", type: "money", periodic: true, hint: "Carrying amount from the PPE note. Breakdown inside PPE, not additional to it. ONLY the office equipment / furniture / fixtures and fittings column — do not fold in renovation, tools, signboards, containers or any other column; those go to the \"other\" field below." },
+  { key: "officeEquipment", label: "— of which office equipment, fixtures and fittings", group: "sofp", type: "money", periodic: true, hint: "Carrying amount from the PPE note. Breakdown inside PPE, not additional to it. Office equipment, furniture and fittings, AND renovation or fitting-out costs — SSM groups renovation here. Do not fold in workshop tools (plant and machinery) or signboards (other)." },
   // The PPE note routinely carries a column our four named categories do not
   // cover — renovation, tools, signboards. With nowhere to put it the model
   // folded it into office equipment, which is why that box read 71,239 against
   // SSM's 65,656: the 5,583 difference was exactly the unnamed column.
-  { key: "otherPropertyPlantAndEquipment", label: "— of which other property, plant and equipment", group: "sofp", type: "money", periodic: true, hint: "Any PPE note column that is NOT land/buildings, motor vehicles, plant and machinery, or office equipment — renovation, tools, signboards, containers and the like. Add them together if there are several. Breakdown inside PPE, not additional to it." },
+  { key: "otherPropertyPlantAndEquipment", label: "— of which other property, plant and equipment", group: "sofp", type: "money", periodic: true, hint: "Any PPE note column that fits none of the categories above — signboards, containers and the like. NOT renovation (office equipment) and NOT workshop tools (plant and machinery). Add them together if there are several. Breakdown inside PPE, not additional to it." },
   { key: "numberOfShares", label: "Number of shares issued and fully paid", group: "sofp", type: "number", periodic: true },
   { key: "retainedEarnings", label: "Retained profit / (accumulated loss)", group: "sofp", type: "money", periodic: true },
   { key: "totalEquity", label: "Total equity", group: "sofp", type: "money", periodic: true },
@@ -138,7 +140,7 @@ export const SOFP_FIELDS: FieldSpec[] = [
   { key: "inventories", label: "Inventories", group: "sofp", type: "money", periodic: true },
   { key: "tradeReceivables", label: "Trade receivables", group: "sofp", type: "money", periodic: true, hint: "Trade debtors only — other receivables have their own line" },
   { key: "totalNoncurrentLiabilities", label: "Total non-current liabilities", group: "sofp", type: "money", periodic: true },
-  { key: "noncurrentBorrowings", label: "— of which borrowings (non-current)", group: "sofp", type: "money", periodic: true },
+  { key: "noncurrentBorrowings", label: "— of which borrowings (non-current)", group: "sofp", type: "money", periodic: true, hint: "Bank borrowings, term loans AND lease or hire-purchase liabilities falling due after twelve months. EXCLUDE deferred tax liabilities — this is not the same figure as total non-current liabilities." },
   { key: "deferredTaxLiabilities", label: "— of which deferred tax", group: "sofp", type: "money", periodic: true },
   { key: "noncurrentBankLoans", label: "— of which bank / term loans (non-current)", group: "sofp", type: "money", periodic: true, hint: "Bank and term loans only, EXCLUDING hire purchase and lease liabilities" },
   { key: "currentBankLoans", label: "— of which bank / term loans (current)", group: "sofp", type: "money", periodic: true, hint: "Bank and term loans only, EXCLUDING hire purchase and lease liabilities" },
@@ -148,8 +150,8 @@ export const SOFP_FIELDS: FieldSpec[] = [
 /** Statement of profit or loss / comprehensive income. */
 export const PL_FIELDS: FieldSpec[] = [
   { key: "revenue", label: "Revenue", group: "pl", type: "money", periodic: true },
-  { key: "revenueFromGoods", label: "— of which sale of goods", group: "pl", type: "money", periodic: true, hint: "Leave blank if the company sells services only" },
-  { key: "revenueFromServices", label: "— of which rendering of services", group: "pl", type: "money", periodic: true, hint: "Leave blank if the company sells goods only" },
+  { key: "revenueFromGoods", label: "— of which sale of goods", group: "pl", type: "money", periodic: true, hint: "The sale-of-goods component ONLY. If revenue also includes rental or service income, exclude those — goods plus services plus rental must add back to total revenue, not exceed it. Leave blank if the company sells no goods." },
+  { key: "revenueFromServices", label: "— of which rendering of services", group: "pl", type: "money", periodic: true, hint: "The services component ONLY, excluding any goods or rental included in revenue. Leave blank if the company renders no services." },
   { key: "grossProfit", label: "Gross profit", group: "pl", type: "money", periodic: true },
   { key: "administrativeExpenses", label: "Administrative expenses", group: "pl", type: "money", periodic: true, hint: "Positive number — sign is applied by the mapper" },
   { key: "profitBeforeTax", label: "Profit / (loss) before tax", group: "pl", type: "money", periodic: true },
@@ -159,7 +161,7 @@ export const PL_FIELDS: FieldSpec[] = [
   // profit comes from anything but trading — QSK earned RM2.39m on RM66k of
   // revenue, essentially all of it other income.
   { key: "otherIncome", label: "Other income (total)", group: "pl", type: "money", periodic: true },
-  { key: "rentalIncome", label: "— of which rental income", group: "pl", type: "money", periodic: true, hint: "Component INSIDE other income, reported separately as well" },
+  { key: "rentalIncome", label: "— of which rental income", group: "pl", type: "money", periodic: true, hint: "Rental income, wherever the statement reports it. A property company usually presents it INSIDE revenue; everyone else puts it inside other income. Either way it is a component of the line above it, never additional to it." },
   { key: "dividendIncome", label: "— of which dividend income", group: "pl", type: "money", periodic: true, hint: "Component INSIDE other income, reported separately as well" },
   { key: "interestIncome", label: "— of which interest income", group: "pl", type: "money", periodic: true, hint: "Component INSIDE other income, reported separately as well" },
   { key: "gainsOnDisposal", label: "— of which gain on disposal of assets", group: "pl", type: "money", periodic: true, hint: "Component INSIDE other income. Positive for a gain." },
@@ -196,7 +198,10 @@ export const CF_FIELDS: FieldSpec[] = [
   { key: "cfPurchaseOfPpe", label: "Purchase of property, plant and equipment", group: "cf", type: "money", periodic: true },
   { key: "cfFromInvestingActivities", label: "Net cash from investing activities", group: "cf", type: "money", periodic: true },
   { key: "incomeTaxPaid", label: "Income taxes paid", group: "cf", type: "money", periodic: true, hint: "Negative number as shown in the cash flow (an outflow)" },
-  { key: "cfRepaymentOfBorrowings", label: "Repayment of borrowings", group: "cf", type: "money", periodic: true, hint: "Positive number — the gross repayment, as printed" },
+  { key: "cfRepaymentOfBorrowings", label: "Repayment of borrowings", group: "cf", type: "money", periodic: true, hint: "Positive number — the gross repayment of BANK BORROWINGS and term loans only. Lease and hire-purchase payments have their own field below; do not add them in here." },
+  // SSM keeps lease payments out of loan repayments. Yee Fatt's 126,336 was
+  // exactly 77,945 of borrowings plus 48,391 of leases, filed as one figure.
+  { key: "cfLeaseRepayments", label: "Payment of lease / hire-purchase liabilities", group: "cf", type: "money", periodic: true, hint: "Positive number. The financing-activities line for lease or hire-purchase liabilities, kept separate from bank borrowings." },
   { key: "cfFromFinancingActivities", label: "Net cash from financing activities", group: "cf", type: "money", periodic: true },
   { key: "cfNetIncreaseInCash", label: "Net increase / (decrease) in cash", group: "cf", type: "money", periodic: true },
 ];
@@ -317,6 +322,9 @@ const DERIVED: Array<{
   // two as the same number, so this loses nothing where the note is silent.
   { key: "relatedPartyReceivablesTotal", from: ["receivablesDueFromRelatedParties"], whenMissing: true },
   { key: "relatedPartyPayablesTotal", from: ["payablesDueToRelatedParties"], whenMissing: true },
+  // Where the note names only one kind of investment property, the whole
+  // balance is that kind; QSK's 1,111,549 is all leasehold, with freehold nil.
+  { key: "investmentPropertyOther", from: ["investmentProperty"], minus: ["investmentPropertyFreehold"], whenMissing: true },
   { key: "otherPayablesInclRelated", from: ["otherPayablesAndAccruals", "payablesDueToHoldingCompany", "payablesDueToRelatedParties"] },
   { key: "totalPayables", from: ["tradePayables", "otherPayablesAndAccruals", "payablesDueToHoldingCompany", "payablesDueToRelatedParties"] },
   {
@@ -329,8 +337,23 @@ const DERIVED: Array<{
 
 export const DERIVED_KEYS = new Set(DERIVED.map((d) => d.key));
 
-function deriveInto(values: PeriodValues): PeriodValues {
+/** A declared component that exactly equals its parent total is not a
+ *  component — it is the total echoed back because no split was found in the
+ *  note. Filing it as the named category asserts something the accounts never
+ *  said (QSK Realty's investment property is leasehold; calling all of it
+ *  freehold put a wrong figure in two boxes and emptied two more). Clearing it
+ *  lets the catch-all category take the balance instead. */
+function unsplitEcho(values: PeriodValues): PeriodValues {
   const out = { ...values };
+  const total = num(out.investmentProperty);
+  if (total !== null && total !== 0 && num(out.investmentPropertyFreehold) === total) {
+    out.investmentPropertyFreehold = null;
+  }
+  return out;
+}
+
+function deriveInto(values: PeriodValues): PeriodValues {
+  const out = unsplitEcho(values);
   for (const d of DERIVED) {
     if (d.whenMissing && typeof out[d.key] === "number") continue;
     const parts = d.from.map((k) => out[k]);
@@ -509,6 +532,10 @@ interface RollUp {
   parts: string[];
   label: string;
   group: FieldSpec["group"];
+  /** Defaults to "error". A few identities hold for most filings but not all —
+   *  rental income sits inside revenue for a property company and inside other
+   *  income for everyone else — so they flag for a look rather than block. */
+  severity?: ValidationIssue["severity"];
 }
 
 /** Arithmetic identities that must hold in any well-formed MPERS filing.
@@ -522,6 +549,13 @@ const ROLLUPS: RollUp[] = [
   { total: "totalCurrentLiabilities", parts: ["tradePayables", "otherPayablesAndAccruals", "payablesDueToHoldingCompany", "payablesDueToRelatedParties", "currentTaxLiabilities", "currentBorrowings"], label: "Current liabilities = trade + other payables + related parties + tax + borrowings", group: "sofp" },
   { total: "otherPayablesAndAccruals", parts: ["accruals", "otherNontradePayables"], label: "Other payables note reconciles to the face amount", group: "sofp" },
   { total: "profitBeforeTax", parts: ["grossProfit", "otherIncome", "administrativeExpenses", "sellingAndDistributionExpenses", "otherOperatingExpenses", "financeCosts"], label: "Profit before tax = gross profit + other income − expenses − finance costs", group: "pl" },
+  // SSM files an explicit 0 against the revenue categories a company does not
+  // use, and this identity proves which those are: LS Contracts sells only
+  // services, so goods are nil; Yee Fatt only goods; QSK's 66,784 is 32,684 of
+  // goods plus 34,100 of rent, so services are nil. Where the parts do not
+  // reconcile nothing is filled, so a company whose rent sits in other income
+  // is left alone rather than zeroed wrongly.
+  { total: "revenue", parts: ["revenueFromGoods", "revenueFromServices", "rentalIncome"], label: "Revenue = goods + services + rental", group: "pl", severity: "warning" },
 ];
 
 const NEGATED_PARTS = new Set(["administrativeExpenses", "sellingAndDistributionExpenses", "otherOperatingExpenses", "financeCosts"]);
@@ -547,7 +581,7 @@ function validatePeriod(values: PeriodValues, period: Period): ValidationIssue[]
     );
     if (Math.round(sum) !== Math.round(total)) {
       issues.push({
-        severity: "error",
+        severity: r.severity ?? "error",
         group: r.group,
         period,
         message: `${r.label} — expected ${fmt(total)}, components total ${fmt(sum)} (out by ${fmt(Math.abs(total - sum))}).`,
