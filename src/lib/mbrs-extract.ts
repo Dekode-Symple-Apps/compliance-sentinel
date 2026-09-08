@@ -268,14 +268,20 @@ export async function extractMbrsFromAfs(
   // so the model reported — accurately — that it had not been given them.
   let textLayer = "";
   let scannedPages: number[] = [];
+  let realTextChars = 0;
   try {
     const pages = await extractPdfPages(file.buffer);
     scannedPages = imageOnlyPages(pages);
     textLayer = pagesToMarkedTextWithGaps(pages).slice(0, MAX_TEXT_CHARS);
+    // Measure the REAL text, not the marked-up blob. The gap markers are prose
+    // of their own, and on a fully scanned report they alone run to thousands
+    // of characters — enough to look like a text layer and send a document
+    // with nothing readable in it down the hybrid path.
+    realTextChars = pages.reduce((n, p) => n + p.text.trim().length, 0);
   } catch {
     textLayer = "";
   }
-  const ocrUsed = textLayer.replace(/=== PAGE \d+ ===/g, "").trim().length < TEXT_LAYER_MIN_CHARS;
+  const ocrUsed = realTextChars < TEXT_LAYER_MIN_CHARS;
   // Mostly text, but some pages are images: send both, and say which pages.
   const hybrid = !ocrUsed && scannedPages.length > 0;
 
