@@ -101,12 +101,17 @@ export const SOFP_FIELDS: FieldSpec[] = [
   // Our schema held two, so the third had nowhere to go and the box stayed
   // empty in every filing.
   { key: "openingCashAndCashEquivalents", label: "Cash at START of period", group: "cf", type: "money", periodic: true, hint: "The \"cash and cash equivalents at beginning of financial year\" line at the foot of the cash flow statement. Read BOTH columns: the previous-period column gives the opening balance of the comparative year." },
-  { key: "buildings", label: "— of which buildings", group: "sofp", type: "money", periodic: true, hint: "Carrying amount from the PPE note. Breakdown inside PPE, not additional to it." },
+  { key: "buildings", label: "— of which land and buildings", group: "sofp", type: "money", periodic: true, hint: "Carrying amount from the PPE note. Freehold or leasehold land and buildings together — SSM files them as one figure. Breakdown inside PPE, not additional to it." },
   { key: "vehicles", label: "— of which motor vehicles", group: "sofp", type: "money", periodic: true, hint: "Carrying amount from the PPE note. Breakdown inside PPE." },
   { key: "plantAndEquipment", label: "— of which plant and machinery", group: "sofp", type: "money", periodic: true, hint: "Carrying amount from the PPE note. Breakdown inside PPE." },
   { key: "financeLeaseCurrent", label: "Finance lease / hire purchase liabilities (current)", group: "sofp", type: "money", periodic: true },
   { key: "financeLeaseNoncurrent", label: "Finance lease / hire purchase liabilities (non-current)", group: "sofp", type: "money", periodic: true },
-  { key: "officeEquipment", label: "— of which office equipment, fixtures and fittings", group: "sofp", type: "money", periodic: true, hint: "Carrying amount from the PPE note. Breakdown inside PPE, not additional to it." },
+  { key: "officeEquipment", label: "— of which office equipment, fixtures and fittings", group: "sofp", type: "money", periodic: true, hint: "Carrying amount from the PPE note. Breakdown inside PPE, not additional to it. ONLY the office equipment / furniture / fixtures and fittings column — do not fold in renovation, tools, signboards, containers or any other column; those go to the \"other\" field below." },
+  // The PPE note routinely carries a column our four named categories do not
+  // cover — renovation, tools, signboards. With nowhere to put it the model
+  // folded it into office equipment, which is why that box read 71,239 against
+  // SSM's 65,656: the 5,583 difference was exactly the unnamed column.
+  { key: "otherPropertyPlantAndEquipment", label: "— of which other property, plant and equipment", group: "sofp", type: "money", periodic: true, hint: "Any PPE note column that is NOT land/buildings, motor vehicles, plant and machinery, or office equipment — renovation, tools, signboards, containers and the like. Add them together if there are several. Breakdown inside PPE, not additional to it." },
   { key: "numberOfShares", label: "Number of shares issued and fully paid", group: "sofp", type: "number", periodic: true },
   { key: "retainedEarnings", label: "Retained profit / (accumulated loss)", group: "sofp", type: "money", periodic: true },
   { key: "totalEquity", label: "Total equity", group: "sofp", type: "money", periodic: true },
@@ -165,6 +170,16 @@ export const PL_FIELDS: FieldSpec[] = [
   { key: "auditorsRemuneration", label: "Auditors' remuneration", group: "pl", type: "money", periodic: true },
   { key: "keyManagementCompensation", label: "Key management personnel compensation", group: "pl", type: "money", periodic: true, hint: "Directors' remuneration and other key management pay, from the related-party note" },
   { key: "relatedPartyDividendIncome", label: "Dividend income from related parties", group: "pl", type: "money", periodic: true },
+  // The related-party NOTE totals, which are not the same figure as the
+  // balance-sheet breakdown. Yee Fatt shows 669,885 owing by directors on the
+  // face of the statement, while its note discloses 1,966,867 receivable from
+  // related parties in total. We were filing the face figure into the note's
+  // box. Where the note gives no separate total the face figure is the best
+  // available answer, so it falls back to it rather than filing nothing.
+  { key: "relatedPartyReceivablesTotal", label: "Total receivable from related parties (note)", group: "pl", type: "money", periodic: true, hint: "The TOTAL amount due from related parties disclosed in the related-party transactions note — all related parties together, which may exceed any single line on the balance sheet." },
+  { key: "relatedPartyPayablesTotal", label: "Total payable to related parties (note)", group: "pl", type: "money", periodic: true, hint: "The TOTAL amount owing to related parties disclosed in the related-party transactions note. Include amounts owing to a company in which a director has a substantial financial interest, even when the balance sheet shows it inside other payables." },
+  { key: "relatedPartyRevenueGoods", label: "Sales of goods to related parties", group: "pl", type: "money", periodic: true, hint: "From the related-party transactions note. Leave blank if the note shows no such transaction." },
+  { key: "relatedPartyRevenueServices", label: "Services rendered to related parties", group: "pl", type: "money", periodic: true, hint: "From the related-party transactions note. Leave blank if the note shows no such transaction." },
   { key: "relatedPartyRentalExpense", label: "Rental expense to related parties", group: "pl", type: "money", periodic: true },
 ];
 
@@ -297,6 +312,11 @@ const DERIVED: Array<{
   // has to be computed. Verified on Yee Fatt: 792,793 - 45,300 = 747,493,
   // the accepted filing's figure exactly.
   { key: "otherReceivablesExclDeposits", from: ["otherReceivables"], minus: ["deposits"] },
+  // Fallbacks: when the note states no total of its own, the balance-sheet
+  // related-party line is the closest true figure. QSK and LS both file the
+  // two as the same number, so this loses nothing where the note is silent.
+  { key: "relatedPartyReceivablesTotal", from: ["receivablesDueFromRelatedParties"], whenMissing: true },
+  { key: "relatedPartyPayablesTotal", from: ["payablesDueToRelatedParties"], whenMissing: true },
   { key: "otherPayablesInclRelated", from: ["otherPayablesAndAccruals", "payablesDueToHoldingCompany", "payablesDueToRelatedParties"] },
   { key: "totalPayables", from: ["tradePayables", "otherPayablesAndAccruals", "payablesDueToHoldingCompany", "payablesDueToRelatedParties"] },
   {

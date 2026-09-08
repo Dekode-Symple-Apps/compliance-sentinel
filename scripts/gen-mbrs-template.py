@@ -50,10 +50,13 @@ SOFP = {
     "ssmt-mpers:OtherCurrentReceivables": "otherReceivablesInclRelated",
     "ssmt-mpers:OtherCurrentReceivablesDueFromHoldingCompany": "receivablesDueFromHoldingCompany",
     "ssmt-mpers:OtherCurrentReceivablesDueFromRelatedParties": "receivablesDueFromRelatedParties",
-    "ifrs-smes:AmountsReceivableRelatedPartyTransactions": "receivablesDueFromRelatedParties",
-    "ifrs-smes:AmountsPayableRelatedPartyTransactions": "payablesDueToRelatedParties",
+    "ifrs-smes:AmountsReceivableRelatedPartyTransactions": "relatedPartyReceivablesTotal",
+    "ifrs-smes:AmountsPayableRelatedPartyTransactions": "relatedPartyPayablesTotal",
     "ifrs-smes:Buildings": "buildings",
     "ssmt-mpers:OfficeEquipmentFixtureAndFittings": "officeEquipment",
+    # Same story as inventories: unbound, and frozen at the donors' zero.
+    "ifrs-smes:LandAndBuildings": "buildings",
+    "ifrs-smes:OtherPropertyPlantAndEquipment": "otherPropertyPlantAndEquipment",
     "ifrs-smes:CurrentTaxAssetsCurrent": "currentTaxAssets",
     "ifrs-smes:CashAndCashEquivalents": "cashAndCashEquivalents",
     "ifrs-smes:Cash": "cashAndCashEquivalents",
@@ -79,6 +82,11 @@ SOFP = {
     "ifrs-smes:InvestmentsInAssociates": "investmentsInAssociates",
     "ifrs-smes:Inventories": "inventories",
     "ssmt-mpers:InventoriesTotal": "inventories",
+    # The filings use the ifrs-smes namespace for this one. Mapped only under
+    # ssmt-mpers, it stayed unbound — and both donors are property companies
+    # holding no stock, so the generator froze their shared "0" into the box.
+    # Yee Fatt is a car dealer; its 458,751 of vehicles could never appear.
+    "ifrs-smes:InventoriesTotal": "inventories",
     # Real concept names, learned from the multi-donor literal diff — the
     # ifrs-smes spellings guessed earlier never appear in an actual filing.
     "ssmt-mpers:CurrentTradeReceivables": "tradeReceivables",
@@ -143,7 +151,6 @@ PL = {
     "ssmt-mpers:RentalIncome": "rentalIncome",
     "ssmt-mpers:OtherIncomeDividend": "dividendIncome",
     "ssmt-mpers:OtherInterestIncome": "interestIncome",
-    "ifrs-smes:FinanceIncome": "interestIncome",
     "ssmt-mpers:GainsOnDisposalsOfNoncurrentAssets": "gainsOnDisposal",
     "ifrs-smes:OtherOperatingExpense": "otherOperatingExpenses",
     "ifrs-smes:OtherExpenseByFunction": "otherOperatingExpenses",
@@ -154,6 +161,8 @@ PL = {
     "ifrs-smes:FinanceCosts": "financeCosts",
     "ifrs-smes:KeyManagementPersonnelCompensation": "keyManagementCompensation",
     "ssmt-mpers:DividendIncomeRelatedPartyTransactions": "relatedPartyDividendIncome",
+    "ssmt-mpers:RevenueFromSaleOfGoodsRelatedPartyTransactions": "relatedPartyRevenueGoods",
+    "ssmt-mpers:RevenueFromRenderingOfServicesRelatedPartyTransactions": "relatedPartyRevenueServices",
     "ssmt-mpers:RentalExpensesRelatedPartyTransactions": "relatedPartyRentalExpense",
     "ifrs-smes:ProfitLossBeforeTax": "profitBeforeTax",
     "ssmt-mpers:AggregateProfitLossBeforeTax": "profitBeforeTax",
