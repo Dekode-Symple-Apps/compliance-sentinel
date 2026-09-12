@@ -412,6 +412,17 @@ def resolve(concept, ctx):
     for table in (SOFP, PL, CF):
         if concept in table:
             return (table[concept], p)
+    # The same local name exists under both ifrs-smes and ssmt-mpers for a
+    # number of concepts, and the filings do not always use the one we mapped.
+    # Three boxes were lost that way — inventories, cost of sales, related-party
+    # revenue — each frozen at the donors' zero because the other-namespace twin
+    # was unbound. When one namespace is mapped, the other means the same thing.
+    local = concept.split(":", 1)[1]
+    for alt in (f"ifrs-smes:{local}", f"ssmt-mpers:{local}"):
+        if alt != concept:
+            for table in (SOFP, PL, CF):
+                if alt in table:
+                    return (table[alt], p)
     return None
 
 

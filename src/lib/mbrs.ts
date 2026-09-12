@@ -171,7 +171,7 @@ export const PL_FIELDS: FieldSpec[] = [
   { key: "financeCosts", label: "Finance costs", group: "pl", type: "money", periodic: true, hint: "Positive number — sign is applied by the mapper" },
   { key: "auditorsRemuneration", label: "Auditors' remuneration", group: "pl", type: "money", periodic: true },
   { key: "keyManagementCompensation", label: "Key management personnel compensation", group: "pl", type: "money", periodic: true, hint: "Directors' remuneration and other key management pay, from the related-party note" },
-  { key: "relatedPartyDividendIncome", label: "Dividend income from related parties", group: "pl", type: "money", periodic: true },
+  { key: "relatedPartyDividendIncome", label: "Dividend income from related parties", group: "pl", type: "money", periodic: true, hint: "From the related-party transactions note. If the note exists but lists no dividend from related parties, enter 0. Leave blank ONLY if the report has no related-party note." },
   // The related-party NOTE totals, which are not the same figure as the
   // balance-sheet breakdown. Yee Fatt shows 669,885 owing by directors on the
   // face of the statement, while its note discloses 1,966,867 receivable from
@@ -180,21 +180,36 @@ export const PL_FIELDS: FieldSpec[] = [
   // available answer, so it falls back to it rather than filing nothing.
   { key: "relatedPartyReceivablesTotal", label: "Total receivable from related parties (note)", group: "pl", type: "money", periodic: true, hint: "The TOTAL amount due from related parties disclosed in the related-party transactions note — all related parties together, which may exceed any single line on the balance sheet." },
   { key: "relatedPartyPayablesTotal", label: "Total payable to related parties (note)", group: "pl", type: "money", periodic: true, hint: "The TOTAL amount owing to related parties disclosed in the related-party transactions note. Include amounts owing to a company in which a director has a substantial financial interest, even when the balance sheet shows it inside other payables." },
-  { key: "relatedPartyRevenueGoods", label: "Sales of goods to related parties", group: "pl", type: "money", periodic: true, hint: "From the related-party transactions note. Leave blank if the note shows no such transaction." },
-  { key: "relatedPartyRevenueServices", label: "Services rendered to related parties", group: "pl", type: "money", periodic: true, hint: "From the related-party transactions note. Leave blank if the note shows no such transaction." },
-  { key: "relatedPartyRentalExpense", label: "Rental expense to related parties", group: "pl", type: "money", periodic: true },
+  // SSM's preparers write 0 against every related-party transaction type the
+  // note does not list — the note is the complete statement of what occurred.
+  // Blank is reserved for a report with no related-party note at all.
+  { key: "relatedPartyRevenueGoods", label: "Sales of goods to related parties", group: "pl", type: "money", periodic: true, hint: "From the related-party transactions note. If the note exists but lists no sale of goods to related parties, enter 0. Leave blank ONLY if the report has no related-party note." },
+  { key: "relatedPartyRevenueServices", label: "Services rendered to related parties", group: "pl", type: "money", periodic: true, hint: "From the related-party transactions note. If the note exists but lists no services to related parties, enter 0. Leave blank ONLY if the report has no related-party note." },
+  { key: "relatedPartyRentalExpense", label: "Rental expense to related parties", group: "pl", type: "money", periodic: true, hint: "From the related-party transactions note. If the note exists but lists no rent paid to related parties, enter 0. Leave blank ONLY if the report has no related-party note." },
 ];
 
 /** Statement of cash flows (indirect method). */
 export const CF_FIELDS: FieldSpec[] = [
   { key: "depreciation", label: "Depreciation adjustment", group: "cf", type: "money", periodic: true },
-  { key: "cfChangeInTradeReceivables", label: "Cash flow: movement in TRADE receivables", group: "cf", type: "money", periodic: true, hint: "From the cash-flow statement. If it shows separate lines for trade and other receivables, fill BOTH this and the other-receivables line. If it shows only ONE combined line, put it here and leave the other blank." },
-  { key: "cfChangeInReceivables", label: "Cash flow: movement in OTHER receivables", group: "cf", type: "money", periodic: true, hint: "Only when the cash-flow statement shows a SEPARATE line for other receivables/deposits/prepayments. Leave blank if there is a single combined receivables line." },
-  { key: "cfChangeInTradePayables", label: "Change in TRADE payables", group: "cf", type: "money", periodic: true, hint: "Trade creditors only — other payables have their own line" },
-  { key: "cfChangeInOtherPayables", label: "Cash flow: movement in OTHER payables", group: "cf", type: "money", periodic: true, hint: "Only when the cash-flow statement shows a SEPARATE line for other payables/accruals. Leave blank if there is a single combined payables line." },
+  // How SSM's preparers read the working-capital lines, taken from the accepted
+  // filings. A single unlabelled "Changes in receivables" / "Changes in
+  // payables" line is the TRADE movement — for a trading company that is what
+  // the line is. Movements in amounts owing by/to directors, related parties
+  // or the holding company are the OTHER movement. Yee Fatt prints exactly
+  // those four lines; the model had been putting the unlabelled line in
+  // "other" and dropping the directors' line for want of a home.
+  { key: "cfChangeInTradeReceivables", label: "Cash flow: movement in TRADE receivables", group: "cf", type: "money", periodic: true, hint: "From the cash-flow statement, sign as printed. Put here: a line labelled trade receivables, OR a single unlabelled \"changes in receivables\" line (that IS the trade movement). Do not put director / related-party / holding-company movements here." },
+  { key: "cfChangeInReceivables", label: "Cash flow: movement in OTHER receivables", group: "cf", type: "money", periodic: true, hint: "From the cash-flow statement, sign as printed. Put here: a line for other receivables / deposits / prepayments, AND any line for amounts owing BY directors, related parties or the holding company. If there are several such lines, add them together. Leave blank only if the statement has none of these." },
+  { key: "cfChangeInTradePayables", label: "Change in TRADE payables", group: "cf", type: "money", periodic: true, hint: "From the cash-flow statement, sign as printed. Put here: a line labelled trade payables, OR a single unlabelled \"changes in payables\" line (that IS the trade movement). Do not put director / related-party / holding-company movements here." },
+  { key: "cfChangeInOtherPayables", label: "Cash flow: movement in OTHER payables", group: "cf", type: "money", periodic: true, hint: "From the cash-flow statement, sign as printed. Put here: a line for other payables / accruals, AND any line for amounts owing TO directors, related parties or the holding company. If there are several such lines, add them together. Leave blank only if the statement has none of these." },
   { key: "cfTotalAdjustments", label: "Total adjustments to reconcile profit", group: "cf", type: "money", periodic: true },
-  { key: "cfFromOperations", label: "Cash flows from operations", group: "cf", type: "money", periodic: true },
-  { key: "cfFromOperatingActivities", label: "Net cash from operating activities", group: "cf", type: "money", periodic: true },
+  // The indirect-method cash flow statement has three look-alike subtotals in
+  // a row. Unlabelled, the model picked "operating profit before working
+  // capital changes" for LS Contracts (216,450) where the accepted filing has
+  // "cash generated from operations" (21,282) — and the derived adjustments
+  // line inherited the 195,168 difference.
+  { key: "cfFromOperations", label: "Cash generated from / (used in) operations", group: "cf", type: "money", periodic: true, hint: "The subtotal AFTER the working-capital changes (receivables, payables, inventories, related-party movements) and BEFORE interest paid, interest received and tax paid. Often printed as \"Cash generated from operations\" or \"Net change in operations\". NOT \"operating profit before working capital changes\", which sits above the working-capital lines." },
+  { key: "cfFromOperatingActivities", label: "Net cash from operating activities", group: "cf", type: "money", periodic: true, hint: "The final operating-activities total, AFTER interest paid, interest received and tax paid. Printed as \"Net cash from/(used in) operating activities\" or \"Net change in operating activities\"." },
   { key: "cfPurchaseOfPpe", label: "Purchase of property, plant and equipment", group: "cf", type: "money", periodic: true },
   { key: "cfFromInvestingActivities", label: "Net cash from investing activities", group: "cf", type: "money", periodic: true },
   { key: "incomeTaxPaid", label: "Income taxes paid", group: "cf", type: "money", periodic: true, hint: "Negative number as shown in the cash flow (an outflow)" },
