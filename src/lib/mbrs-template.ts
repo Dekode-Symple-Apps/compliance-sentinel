@@ -1,14 +1,13 @@
 // AUTO-DERIVED from a real SSM MBRS Preparation Tool instance document
 // (FS-MPERS, taxonomy SSMxT_2022v1.0). Do not hand-edit — regenerate with:
-//   python3 scripts/gen-mbrs-template.py <sample-filing.xml>
+//   python3 scripts/gen-mbrs-template.py <donor.xml> [<donor2.xml>] --taxonomy scratch/ssmxt/catalogue.json
 //
-// WHY A TEMPLATE AND NOT A TAXONOMY ENGINE: SSM's taxonomy package (.xsd +
-// linkbases) is not vendored here, so a real sample instance is the only
-// authoritative description of the required fact set we have. The context set,
-// unit set, concept ordering and the structural zeros are reproduced verbatim;
-// facts carrying company data are bound to canonical fields instead. Replacing
-// this module with a taxonomy-driven mapper is the intended upgrade path and
-// touches nothing outside this file.
+// Donor filings supply the context set, unit set, concept ordering, the
+// dimensional grids and the structural literals. SSM's published taxonomy
+// (SSMxT 2022 v1.0, parsed by scripts/parse-ssm-taxonomy.py) then adds a slot
+// for every concept in the profile's presentation tree that we can bind and
+// no donor happened to use — the blank form, not just the three filled-in
+// copies we started from.
 //
 // All values are UNESCAPED. mbrs-xbrl.ts escapes exactly once on output.
 //
@@ -822,8 +821,43 @@ export const TEMPLATE_FACTS: TemplateFact[] = [
   {"c":"ssmt-mpers:DisclosureOfOtherIncomeExplanatory","ctx":"fromto_{CS}_{CE}","narrative":true},
   {"c":"ssmt-mpers:DisclosureOfOtherInvestmentsExplanatory","ctx":"fromto_{CS}_{CE}","narrative":true},
   {"c":"ssmt-mpers:DividendIncomeRelatedPartyTransactions","ctx":"fromto_{CS}_{CE}_SeparateMember_OtherRelatedPartiesMember","u":"MYR","d":"0"},
-  {"c":"ifrs-smes:KeyManagementPersonnelCompensation","ctx":"fromto_{CS}_{CE}_SeparateMember_KeyManagementPersonnelOfEntityOrParentMember","u":"MYR","d":"0"},
+  {"c":"ifrs-smes:KeyManagementPersonnelCompensation","ctx":"fromto_{CS}_{CE}_SeparateMember_KeyManagementPersonnelOfEntityOrParentMember","u":"MYR","d":"0","field":"keyManagementCompensation","period":"current"},
   {"c":"ssmt-mpers:RentalExpensesRelatedPartyTransactions","ctx":"fromto_{CS}_{CE}_SeparateMember_OtherRelatedPartiesMember","u":"MYR","d":"0"},
+  {"c":"ifrs-smes:AdjustmentsForDecreaseIncreaseInInventories","ctx":"fromto_{CS}_{CE}_SeparateMember","u":"MYR","d":"0","field":"cfChangeInInventories","period":"current"},
+  {"c":"ifrs-smes:AdjustmentsForDecreaseIncreaseInInventories","ctx":"fromto_{PS}_{PE}_SeparateMember","u":"MYR","d":"0","field":"cfChangeInInventories","period":"previous"},
+  {"c":"ifrs-smes:AmountsPayableRelatedPartyTransactions","ctx":"asof_{PE}_SeparateMember","u":"MYR","d":"0","field":"relatedPartyPayablesTotal","period":"previous"},
+  {"c":"ifrs-smes:AmountsReceivableRelatedPartyTransactions","ctx":"asof_{PE}_SeparateMember","u":"MYR","d":"0","field":"relatedPartyReceivablesTotal","period":"previous"},
+  {"c":"ifrs-smes:DepreciationPropertyPlantAndEquipment","ctx":"fromto_{CS}_{CE}_SeparateMember","u":"MYR","d":"0","field":"depreciation","period":"current"},
+  {"c":"ifrs-smes:DepreciationPropertyPlantAndEquipment","ctx":"fromto_{PS}_{PE}_SeparateMember","u":"MYR","d":"0","field":"depreciation","period":"previous"},
+  {"c":"ifrs-smes:InterestReceivedClassifiedAsOperatingActivities","ctx":"fromto_{CS}_{CE}_SeparateMember","u":"MYR","d":"0","field":"interestIncome","period":"current"},
+  {"c":"ifrs-smes:InterestReceivedClassifiedAsOperatingActivities","ctx":"fromto_{PS}_{PE}_SeparateMember","u":"MYR","d":"0","field":"interestIncome","period":"previous"},
+  {"c":"ifrs-smes:KeyManagementPersonnelCompensation","ctx":"fromto_{PS}_{PE}_SeparateMember","u":"MYR","d":"0","field":"keyManagementCompensation","period":"previous"},
+  {"c":"ifrs-smes:NumberOfSharesIssuedAndFullyPaid","ctx":"asof_{PE}_SeparateMember","u":"share","d":"INF","field":"numberOfShares","period":"previous"},
+  {"c":"ifrs-smes:PaymentsOfFinanceLeaseLiabilitiesClassifiedAsFinancingActivities","ctx":"fromto_{CS}_{CE}_SeparateMember","u":"MYR","d":"0","field":"cfLeaseRepayments","period":"current"},
+  {"c":"ifrs-smes:PaymentsOfFinanceLeaseLiabilitiesClassifiedAsFinancingActivities","ctx":"fromto_{PS}_{PE}_SeparateMember","u":"MYR","d":"0","field":"cfLeaseRepayments","period":"previous"},
+  {"c":"ifrs-smes:ProceedsFromSalesOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities","ctx":"fromto_{CS}_{CE}_SeparateMember","u":"MYR","d":"0","field":"cfProceedsFromDisposalOfPpe","period":"current"},
+  {"c":"ifrs-smes:ProceedsFromSalesOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities","ctx":"fromto_{PS}_{PE}_SeparateMember","u":"MYR","d":"0","field":"cfProceedsFromDisposalOfPpe","period":"previous"},
+  {"c":"ifrs-smes:Vehicles","ctx":"asof_{CE}_SeparateMember","u":"MYR","d":"0","field":"vehicles","period":"current"},
+  {"c":"ifrs-smes:Vehicles","ctx":"asof_{PE}_SeparateMember","u":"MYR","d":"0","field":"vehicles","period":"previous"},
+  {"c":"ssmt-mpers:AdjustmentsForFinanceIncome","ctx":"fromto_{CS}_{CE}_SeparateMember","u":"MYR","d":"0","field":"interestIncome","period":"current"},
+  {"c":"ssmt-mpers:AdjustmentsForFinanceIncome","ctx":"fromto_{PS}_{PE}_SeparateMember","u":"MYR","d":"0","field":"interestIncome","period":"previous"},
+  {"c":"ssmt-mpers:AuditorsRemunerationForAuditServices","ctx":"fromto_{CS}_{CE}_SeparateMember","u":"MYR","d":"0","field":"auditorsRemuneration","period":"current"},
+  {"c":"ssmt-mpers:AuditorsRemunerationForAuditServices","ctx":"fromto_{PS}_{PE}_SeparateMember","u":"MYR","d":"0","field":"auditorsRemuneration","period":"previous"},
+  {"c":"ssmt-mpers:CostOfInventories","ctx":"fromto_{CS}_{CE}_SeparateMember","u":"MYR","d":"0","field":"costOfSales","period":"current"},
+  {"c":"ssmt-mpers:CostOfInventories","ctx":"fromto_{PS}_{PE}_SeparateMember","u":"MYR","d":"0","field":"costOfSales","period":"previous"},
+  {"c":"ssmt-mpers:CurrentPortionOfFinanceLeaseLiabilities","ctx":"asof_{CE}_SeparateMember","u":"MYR","d":"0","field":"financeLeaseCurrent","period":"current"},
+  {"c":"ssmt-mpers:CurrentPortionOfFinanceLeaseLiabilities","ctx":"asof_{PE}_SeparateMember","u":"MYR","d":"0","field":"financeLeaseCurrent","period":"previous"},
+  {"c":"ssmt-mpers:DividendIncomeRelatedPartyTransactions","ctx":"fromto_{PS}_{PE}_SeparateMember","u":"MYR","d":"0","field":"relatedPartyDividendIncome","period":"previous"},
+  {"c":"ssmt-mpers:EquityBalanceRestated","ctx":"asof_{CE}_SeparateMember","u":"MYR","d":"0","field":"totalEquity","period":"current"},
+  {"c":"ssmt-mpers:GainsLossesOnDisposalsOfPropertyPlantAndEquipment","ctx":"fromto_{CS}_{CE}_SeparateMember","u":"MYR","d":"0","field":"gainsOnDisposal","period":"current"},
+  {"c":"ssmt-mpers:GainsLossesOnDisposalsOfPropertyPlantAndEquipment","ctx":"fromto_{PS}_{PE}_SeparateMember","u":"MYR","d":"0","field":"gainsOnDisposal","period":"previous"},
+  {"c":"ssmt-mpers:GainsOnDisposalsOfPropertyPlantAndEquipment","ctx":"fromto_{CS}_{CE}_SeparateMember","u":"MYR","d":"0","field":"gainsOnDisposal","period":"current"},
+  {"c":"ssmt-mpers:GainsOnDisposalsOfPropertyPlantAndEquipment","ctx":"fromto_{PS}_{PE}_SeparateMember","u":"MYR","d":"0","field":"gainsOnDisposal","period":"previous"},
+  {"c":"ssmt-mpers:NoncurrentPortionOfFinanceLeaseLiabilities","ctx":"asof_{CE}_SeparateMember","u":"MYR","d":"0","field":"financeLeaseNoncurrent","period":"current"},
+  {"c":"ssmt-mpers:NoncurrentPortionOfFinanceLeaseLiabilities","ctx":"asof_{PE}_SeparateMember","u":"MYR","d":"0","field":"financeLeaseNoncurrent","period":"previous"},
+  {"c":"ssmt-mpers:RentalExpensesRelatedPartyTransactions","ctx":"fromto_{PS}_{PE}_SeparateMember","u":"MYR","d":"0","field":"relatedPartyRentalExpense","period":"previous"},
+  {"c":"ssmt-mpers:SellingAndDistributionExpenses","ctx":"fromto_{CS}_{CE}_SeparateMember","u":"MYR","d":"0","field":"sellingAndDistributionExpenses","period":"current"},
+  {"c":"ssmt-mpers:SellingAndDistributionExpenses","ctx":"fromto_{PS}_{PE}_SeparateMember","u":"MYR","d":"0","field":"sellingAndDistributionExpenses","period":"previous"},
 ];
 
 export const TEMPLATE_CONTEXTS: Record<string, TemplateContext> = {

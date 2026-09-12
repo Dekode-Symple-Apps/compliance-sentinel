@@ -202,6 +202,11 @@ export const CF_FIELDS: FieldSpec[] = [
   // SSM keeps lease payments out of loan repayments. Yee Fatt's 126,336 was
   // exactly 77,945 of borrowings plus 48,391 of leases, filed as one figure.
   { key: "cfLeaseRepayments", label: "Payment of lease / hire-purchase liabilities", group: "cf", type: "money", periodic: true, hint: "Positive number. The financing-activities line for lease or hire-purchase liabilities, kept separate from bank borrowings." },
+  // Two more indirect-method lines the accepted filings carry — the taxonomy
+  // has boxes for them and Yee Fatt uses both (221,253 of stock movement;
+  // 163,000 of disposal proceeds in the comparative year).
+  { key: "cfChangeInInventories", label: "Cash flow: decrease (increase) in inventories", group: "cf", type: "money", periodic: true, hint: "The working-capital adjustment line for inventories in the cash flow statement, with the sign as printed — a decrease in stock is positive (cash released), an increase negative. Leave blank if there is no inventories line." },
+  { key: "cfProceedsFromDisposalOfPpe", label: "Proceeds from disposal of property, plant and equipment", group: "cf", type: "money", periodic: true, hint: "Positive number — the investing-activities receipt from selling fixed assets, as printed. Leave blank if none." },
   { key: "cfFromFinancingActivities", label: "Net cash from financing activities", group: "cf", type: "money", periodic: true },
   { key: "cfNetIncreaseInCash", label: "Net increase / (decrease) in cash", group: "cf", type: "money", periodic: true },
 ];

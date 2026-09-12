@@ -141,6 +141,12 @@ PL = {
     # read it as a constant and froze "0" into the template — which is how
     # LS Contracts' real RM4,000 audit fee could never appear in any filing.
     "ssmt-mpers:AuditorsRemuneration": "auditorsRemuneration",
+    # SSM's calc tree: AuditorsRemuneration = ForAuditServices + ForOtherServices.
+    # A company with one auditor and no non-audit fees files the whole amount
+    # under audit services (LS Contracts: 4,000 in both).
+    "ssmt-mpers:AuditorsRemunerationForAuditServices": "auditorsRemuneration",
+    "ifrs-smes:DepreciationPropertyPlantAndEquipment": "depreciation",
+    "ssmt-mpers:GainsOnDisposalsOfPropertyPlantAndEquipment": "gainsOnDisposal",
     # Split by nature. Binding both to one "revenue" field emitted the full
     # amount twice; every filing reports one and zero for the other.
     "ifrs-smes:RevenueFromRenderingOfServices": "revenueFromServices",
@@ -160,6 +166,9 @@ PL = {
     "ifrs-smes:CostOfSales": "costOfSales",
     "ssmt-mpers:OtherCostOfSales": "costOfSales",
     "ifrs-smes:CostOfInventories": "costOfSales",
+    # The filings state it under ssmt-mpers; unbound under that name it was
+    # frozen at the donors' zero — the inventories bug again, one row down.
+    "ssmt-mpers:CostOfInventories": "costOfSales",
     "ifrs-smes:FinanceCosts": "financeCosts",
     "ifrs-smes:KeyManagementPersonnelCompensation": "keyManagementCompensation",
     "ssmt-mpers:DividendIncomeRelatedPartyTransactions": "relatedPartyDividendIncome",
@@ -190,6 +199,14 @@ CF = {
     "ifrs-smes:CashFlowsFromUsedInFinancingActivities": "cfFromFinancingActivities",
     "ifrs-smes:RepaymentsOfBorrowingsClassifiedAsFinancingActivities": "cfRepaymentOfBorrowings",
     "ifrs-smes:PaymentsOfFinanceLeaseLiabilitiesClassifiedAsFinancingActivities": "cfLeaseRepayments",
+    # Indirect-method reconciliation lines the accepted filings carry and we
+    # had no box for. The disposal gain and finance income enter the calc tree
+    # with weight -1; the fact itself is stated positive, as in the accounts.
+    "ssmt-mpers:GainsLossesOnDisposalsOfPropertyPlantAndEquipment": "gainsOnDisposal",
+    "ssmt-mpers:AdjustmentsForFinanceIncome": "interestIncome",
+    "ifrs-smes:InterestReceivedClassifiedAsOperatingActivities": "interestIncome",
+    "ifrs-smes:AdjustmentsForDecreaseIncreaseInInventories": "cfChangeInInventories",
+    "ifrs-smes:ProceedsFromSalesOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities": "cfProceedsFromDisposalOfPpe",
     "ifrs-smes:IncomeTaxesPaidRefundClassifiedAsOperatingActivities": "incomeTaxPaid",
     # add-back of finance costs in the operating reconciliation = the P&L line
     "ifrs-smes:AdjustmentsForFinanceCosts": "financeCosts",
@@ -366,6 +383,13 @@ def resolve(concept, ctx):
     # filings state and what we were leaving blank.
     if (ctx or "").endswith("_ParentMember") and concept in RELATED_PARTY_PARENT:
         return (RELATED_PARTY_PARENT[concept], p)
+    # Key management personnel compensation under the key-management column is
+    # definitional — the concept and the member name the same people — so the
+    # figure the plain box carries is the figure this column carries. The
+    # "other related parties" column is NOT bound the same way: a company with
+    # a parent files its dividends and rent under the parent column instead.
+    if (ctx or "").endswith("_KeyManagementPersonnelOfEntityOrParentMember") and concept == "ifrs-smes:KeyManagementPersonnelCompensation":
+        return ("keyManagementCompensation", p)
 
     if not PLAIN_CTX.match(ctx or ""):
         # SOCE equity columns: bind the component we can identify. Previously
@@ -492,7 +516,69 @@ def parse_sample(path):
     return out, order, ctx_struct
 
 
+# Presentation roles that make up the by-function, current/non-current,
+# indirect-cash-flow FS-MPERS filing — the only profile this template serves.
+# The alternative layouts (by nature 32xxxx, by liquidity 22xxxx, direct method
+# 510000, OCI variants 4xxxxx) are deliberately left out.
+PROFILE_ROLES = {"020000", "120000", "120100", "130000", "200100", "200200", "210000", "210100",
+                 "300100", "300200", "310000", "310100", "500100", "520000", "610000", "620000",
+                 "710000", "720000", "730000", "740000", "750000"}
+PLAIN_CTXS = {"instant": ["asof_{CE}_SeparateMember", "asof_{PE}_SeparateMember"],
+              "duration": ["fromto_{CS}_{CE}_SeparateMember", "fromto_{PS}_{PE}_SeparateMember"]}
+
+
+def augment_from_taxonomy(merged, order, catalogue_path):
+    """Add a slot for every taxonomy concept we can bind that no donor used.
+
+    The donors decide what the template *contains*, and two property companies
+    never had vehicles, inventories, lease liabilities or cost of sales, so
+    those boxes did not exist — 64 facts in the held-out filings with nowhere
+    to land, and no extraction quality could reach them. The taxonomy is the
+    blank form itself: every concept in the profile's presentation tree that
+    resolves to a field gets its two standard plain-context slots. Only bound
+    concepts are added — an unbound box would emit nothing anyway — and the
+    dimensional grids (equity, related parties, auditors) stay donor-derived,
+    because their context shapes are not something the taxonomy states.
+    """
+    cat = json.load(open(catalogue_path, encoding="utf-8"))
+    elems = cat["elems"]
+    concepts = set()
+    for role, arcs in cat["pres"].items():
+        if role in PROFILE_ROLES:
+            for parent, child, _o in arcs:
+                concepts.add(parent); concepts.add(child)
+    added = []
+    for q in sorted(concepts):
+        e = elems.get(q)
+        if not e or e.get("abstract"):
+            continue
+        t = e.get("type") or ""
+        if t.startswith("monetary"):
+            u, d = "MYR", "0"
+        elif t.startswith("shares"):
+            u, d = "share", "INF"
+        else:
+            continue
+        for ctx in PLAIN_CTXS.get(e.get("period"), []):
+            if (q, ctx) in merged:
+                continue
+            r = resolve(q, ctx)
+            if not r:
+                continue
+            entry = {"c": q, "ctx": ctx, "u": u, "d": d, "field": r[0]}
+            if r[1]:
+                entry["period"] = r[1]
+            merged[(q, ctx)] = entry
+            order.append((q, ctx))
+            added.append(f"{q} @ {ctx}")
+    return added
+
+
 def main(*paths):
+    taxonomy = None
+    if "--taxonomy" in paths:
+        i = paths.index("--taxonomy"); taxonomy = paths[i + 1]
+        paths = paths[:i] + paths[i + 2:]
     merged, order, ctx_struct = {}, [], {}
     seen_literal = {}   # key -> set of literal values across donors
 
@@ -508,6 +594,8 @@ def main(*paths):
             elif "field" in e and "field" not in merged[key]:
                 merged[key] = e     # a later donor let us bind what an earlier one could not
         ctx_struct.update(sctx)
+
+    added = augment_from_taxonomy(merged, order, taxonomy) if taxonomy else []
 
     facts, bound, narrative, dropped, varying, unbound = [], 0, 0, [], [], []
     for key in order:
@@ -540,15 +628,14 @@ def main(*paths):
 
     header = f'''// AUTO-DERIVED from a real SSM MBRS Preparation Tool instance document
 // (FS-MPERS, taxonomy SSMxT_2022v1.0). Do not hand-edit — regenerate with:
-//   python3 scripts/gen-mbrs-template.py <sample-filing.xml>
+//   python3 scripts/gen-mbrs-template.py <donor.xml> [<donor2.xml>] --taxonomy scratch/ssmxt/catalogue.json
 //
-// WHY A TEMPLATE AND NOT A TAXONOMY ENGINE: SSM's taxonomy package (.xsd +
-// linkbases) is not vendored here, so a real sample instance is the only
-// authoritative description of the required fact set we have. The context set,
-// unit set, concept ordering and the structural zeros are reproduced verbatim;
-// facts carrying company data are bound to canonical fields instead. Replacing
-// this module with a taxonomy-driven mapper is the intended upgrade path and
-// touches nothing outside this file.
+// Donor filings supply the context set, unit set, concept ordering, the
+// dimensional grids and the structural literals. SSM's published taxonomy
+// (SSMxT 2022 v1.0, parsed by scripts/parse-ssm-taxonomy.py) then adds a slot
+// for every concept in the profile's presentation tree that we can bind and
+// no donor happened to use — the blank form, not just the three filled-in
+// copies we started from.
 //
 // All values are UNESCAPED. mbrs-xbrl.ts escapes exactly once on output.
 //
@@ -623,6 +710,8 @@ export interface TemplateContext {{
         print(f"dropped {len(dropped)} unbindable monetary literals (donor's money)")
     if varying:
         print(f"stripped {len(varying)} literals that DIFFER between donors (company data)")
+    if added:
+        print(f"added {len(added)} slots from the taxonomy for bound concepts no donor used")
     if unbound:
         from collections import Counter as _C
         u = _C(unbound)
