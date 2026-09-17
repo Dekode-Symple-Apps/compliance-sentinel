@@ -636,10 +636,10 @@ function CreditRiskReportsList() {
       <div className="p-8 max-w-[1400px] mx-auto space-y-8">
         <div className="flex items-end justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Credit Risk Alert</h1>
-            <p className="text-muted-foreground mt-1 text-lg">
-              Screen credit applications across 8 risk dimensions — every flag traced to a historical
-              case in the knowledge base.
+            <h1 className="text-3xl font-bold tracking-tight">Credit Risk Assessment</h1>
+            <p className="text-muted-foreground mt-1 text-base">
+              Upload a credit application to get a structured assessment — risk categories, policy check,
+              financial analysis and probes, every finding traced to its source.
             </p>
           </div>
           <Button
@@ -656,8 +656,8 @@ function CreditRiskReportsList() {
             <h2 className="font-bold text-sm uppercase tracking-[0.2em] text-muted-foreground">
               Screened Applications
             </h2>
-            <Badge variant="secondary" className="font-black text-[10px]">
-              {reports.data?.length ?? 0} TOTAL
+            <Badge variant="secondary" className="font-bold text-xs">
+              {reports.data?.length ?? 0} total
             </Badge>
           </div>
 
@@ -705,7 +705,7 @@ function CreditRiskReportsList() {
                       <div className="font-bold text-base truncate group-hover:text-red-700 transition-colors">
                         {r.title}
                       </div>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 font-medium">
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
                         {sj.pending_analysis ? (
                           <span className="text-red-600 font-semibold">Analysing…</span>
                         ) : sj.credit_status === "failed" ? (
@@ -727,7 +727,7 @@ function CreditRiskReportsList() {
                     {im && (
                       <Badge
                         variant="outline"
-                        className={cn("font-black text-[10px] uppercase tracking-widest px-2", im.classes)}
+                        className={cn("font-bold text-xs uppercase tracking-wide px-2", im.classes)}
                       >
                         {im.label}
                       </Badge>

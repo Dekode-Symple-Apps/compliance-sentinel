@@ -101,15 +101,15 @@ export function CreditUploadDialog({
             <ShieldAlert className="size-4 text-red-600" /> New Credit Risk Analysis
           </DialogTitle>
           <DialogDescription>
-            Upload a credit application. It's screened across 8 risk dimensions against the internal
-            case knowledge base — every flag traced back to a historical post-mortem case.
+            Upload the credit application as a PDF and confirm the borrower name. The system reads the full
+            document, assesses each risk category against the knowledge base, checks policy, and drafts the probes.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-5 py-2">
           {/* Step 1 — the application file */}
           <section className="space-y-2">
-            <div className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+            <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
               Step 1 · Credit application
             </div>
             <label
@@ -142,7 +142,7 @@ export function CreditUploadDialog({
 
           {/* Step 2 — borrower */}
           <section className="space-y-2">
-            <div className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+            <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
               Step 2 · Borrower / applicant name <span className="text-rose-500">*</span>
             </div>
             <input
@@ -152,8 +152,8 @@ export function CreditUploadDialog({
               placeholder="e.g. SB SDN BHD"
               className="w-full text-sm px-3 py-2 rounded-lg border bg-card focus:outline-none focus:ring-1 focus:ring-red-500"
             />
-            <p className="text-[11px] text-muted-foreground">
-              Auto-filled from the filename — adjust if needed. Used as the report title.
+            <p className="text-xs text-muted-foreground">
+              Suggested from the filename — please confirm it is the legal name of the applicant. Used as the report title.
             </p>
           </section>
         </div>
