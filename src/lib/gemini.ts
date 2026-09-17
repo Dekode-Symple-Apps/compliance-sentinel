@@ -1977,7 +1977,8 @@ export interface CreditMitigation {
 export interface CreditRiskFinding {
   segment: CreditRiskSegment;
   indicator: CreditRiskIndicator;
-  headline?: string;        // "<condition/clause that flags it> — <risk impact>" (≤16 words)
+  headline?: string;        // "<condition/clause that flags it> — <risk impact>" (≤16 words, carries the key figure)
+  whyItMatters?: string;    // one sentence: the consequence for the bank if unaddressed
   finding: string;          // "<observation>. This mirrors [Case XX] logic, which warns that ..."
   traceReference: string;   // EXACT KB case title (may be "" when no precedent genuinely fits)
   traceExcerpt: string;     // 2-3 sentence quoted lesson from that case ("" when none)
@@ -2009,6 +2010,36 @@ export interface AdverseNewsResult {
   foundConcerns: boolean;                       // whether material adverse items surfaced
 }
 
+/** The headline facts of the application, read as data (FR-3.01 – FR-3.04). */
+export interface ApplicationFacts {
+  borrower: string;
+  facilityType: string;        // e.g. "Term loan + trade lines"
+  facilityAmount: string;      // as printed, e.g. "RM 12,500,000"
+  applicationDate: string;     // as printed; "" if not stated
+  applicationType: string;     // Credit Application | Credit Request | Annual Review | Manual Paper | ""
+  segment: string;             // Corporate | Commercial | SME | ""
+  purpose: string;             // one sentence, from the application's own summary
+  notFound: string[];          // fields the application does not state
+}
+
+/** One row of the financial-analysis table (FR-3.05 / FR-3.06). */
+export interface FinancialRatio {
+  metric: string;              // e.g. "Debt service coverage"
+  current: string;             // latest period, as printed / computed
+  prior: string;               // comparative period; "" if none
+  movement: string;            // e.g. "▼ 0.3x", "+12%"; "" if n/a
+  flag: "adverse" | "watch" | "ok" | "none";
+  note: string;                // ≤ 20 words: what the figure means here
+}
+
+/** Sector conditions relevant to the applicant (report section 6). */
+export interface IndustryAssessment {
+  summary: string;             // 2-3 sentences, plain
+  outlook: "positive" | "neutral" | "negative" | "unknown";
+  internal: string[];          // points drawn from the application / KB — labelled internal
+  external: { text: string; source: string; uri?: string }[]; // web-sourced, each attributed
+}
+
 export interface CreditRiskAnalysis {
   applicationSummary: string;
   riskNarrative: string;   // plain-English prose risk assessment for the reviewer
@@ -2020,6 +2051,9 @@ export interface CreditRiskAnalysis {
   overallRisk: CreditRiskIndicator;
   financialAnomalies?: FinancialAnomaly[]; // forensic checks on the statements (added post-analysis)
   adverseNews?: AdverseNewsResult;          // external negative-news screening (added post-analysis)
+  applicationFacts?: ApplicationFacts;      // structured header facts (added post-analysis)
+  financialRatios?: FinancialRatio[];       // ratio / trend table (added post-analysis)
+  industryAssessment?: IndustryAssessment;  // sector conditions, internal + external (added post-analysis)
 }
 
 /** Display order + labels for the 8 risk segments (used by the report UI + .docx). */
@@ -2067,7 +2101,8 @@ Perform a comprehensive risk analysis of an incoming Credit Application by cross
       "segment": "one of: management | cash_flow | asset_quality | market_industry | operational_project | fraud_integrity | related_party | legal_recovery",
       "indicator": "one of: high | probe | low",
       "confidence": "integer 0-100 — how strong the evidence is: high when a retrieved case closely matches AND the application data is explicit; low when speculative or data is thin",
-      "headline": "<=16-word plain-English flag in the form 'condition — impact': the specific condition or clause in THIS application that triggers the risk, then its consequence. Name the RISK, not raw figures (e.g. 'Operating cash-flow deficit from debtor build-up — acute liquidity strain', 'Refusing contract-financing ring-fence — cash diversion exposure'). For a no-concern dimension, say so plainly.",
+      "headline": "<=16-word plain-English flag in the form 'condition — impact': the specific condition or clause in THIS application that triggers the risk, then its consequence. Include the ONE key figure or clause that makes it concrete (e.g. 'DSCR 0.9x against 1.2x policy floor — repayment capacity below threshold', 'Refusing contract-financing ring-fence — cash diversion exposure'). For a no-concern dimension, say so plainly.",
+      "whyItMatters": "ONE sentence (<=30 words): the consequence for the Bank if this is left unaddressed. Measured tone, no emphatic wording.",
       "finding": "Observation first, then (only if a case genuinely fits): This mirrors [Case XX] logic, which warns that ... — otherwise just the observation + 'No close historical precedent.'",
       "traceReference": "EXACT case title from AVAILABLE REFERENCES, or \"\" if none genuinely fits",
       "traceExcerpt": "2-3 sentence quote of the actual lesson from that case, or \"\" if no case cited",
@@ -2347,6 +2382,156 @@ ${args.applicationText.slice(0, 120000)}`;
     }))
     .slice(0, 10);
   return { anomalies, usage };
+}
+
+function parseJsonLoose(text: string | undefined): any {
+  try { return JSON.parse(text ?? "{}"); } catch { /* fall through */ }
+  const mm = (text ?? "").match(/\{[\s\S]*\}/);
+  if (mm) { try { return JSON.parse(mm[0]); } catch { /* keep {} */ } }
+  return {};
+}
+
+function usageOf(response: { usageMetadata?: unknown }): TokenUsage {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const m = (response.usageMetadata ?? {}) as any;
+  return {
+    inputTokens: m.promptTokenCount ?? 0,
+    outputTokens: m.candidatesTokenCount ?? 0,
+    thinkingTokens: m.thoughtsTokenCount ?? 0,
+    calls: 1,
+  };
+}
+
+const str = (v: unknown, max = 400) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+
+/**
+ * The header facts of the application, read as data rather than prose
+ * (FR-3.01 – FR-3.04, FR-3.09). Factual-only: anything the application does
+ * not state comes back in `notFound`, never estimated.
+ */
+export async function extractApplicationFacts(args: {
+  borrowerName: string;
+  applicationText: string;
+}): Promise<{ facts: ApplicationFacts; usage: TokenUsage }> {
+  const prompt = `Read the credit application and return its HEADER FACTS as data. Copy values as printed — do not rephrase, round or estimate. If a field is not stated, use "" and list its name in "notFound".
+
+Return ONLY JSON:
+{"borrower":"legal name as printed","facilityType":"e.g. Term loan; Trade lines; Overdraft — the facilities requested, comma-separated","facilityAmount":"total requested, as printed with currency, e.g. RM 12,500,000","applicationDate":"as printed","applicationType":"one of: Credit Application | Credit Request | Annual Review | Manual Paper | \"\"","segment":"one of: Corporate | Commercial | SME | \"\"","purpose":"ONE sentence on what the facility is for, taken from the application's own executive summary","notFound":["field names not stated"]}
+
+BORROWER (as confirmed by the user): ${args.borrowerName}
+CREDIT APPLICATION:
+${args.applicationText.slice(0, 60000)}`;
+
+  const response = await generateWithFallback(
+    { contents: [{ role: "user", parts: [{ text: prompt }] }], config: { responseMimeType: "application/json", maxOutputTokens: 1024 } },
+    { tier: "fast" },
+  );
+  const p = parseJsonLoose(response.text);
+  const facts: ApplicationFacts = {
+    borrower: str(p.borrower) || args.borrowerName,
+    facilityType: str(p.facilityType),
+    facilityAmount: str(p.facilityAmount, 80),
+    applicationDate: str(p.applicationDate, 40),
+    applicationType: str(p.applicationType, 40),
+    segment: str(p.segment, 20),
+    purpose: str(p.purpose, 500),
+    notFound: Array.isArray(p.notFound) ? p.notFound.filter((x: unknown) => typeof x === "string").slice(0, 8) : [],
+  };
+  return { facts, usage: usageOf(response) };
+}
+
+/**
+ * The financial analysis as a TABLE (FR-3.05 / FR-3.06): key ratios with the
+ * comparative period, the movement, and a one-line reading. Only ratios the
+ * statements actually support; no benchmark is applied unless the policy in
+ * the KB context states one (policy-bound assessment).
+ */
+export async function analyseFinancialRatios(args: {
+  borrowerName: string;
+  applicationText: string;
+  kbContext?: string;
+}): Promise<{ ratios: FinancialRatio[]; usage: TokenUsage }> {
+  const prompt = `You are a credit analyst. From the financial statements in this credit application, build the FINANCIAL ANALYSIS TABLE: 6-12 rows covering revenue, profitability, gearing, liquidity, coverage and working-capital activity — whichever the statements support. Use the figures AS PRINTED; compute a ratio only where both inputs are stated. Show the latest period and the prior period, and the movement between them.
+
+"flag" rules — POLICY-BOUND: mark "adverse" or "watch" ONLY where a threshold is stated in the CREDIT POLICY EXCERPTS below, or where the movement itself is clearly deteriorating; where the policy is silent and the trend is flat, use "ok"; where you cannot judge, use "none". Never apply a market-standard benchmark. "note" is <= 20 words, measured tone, and states the threshold if one applies.
+
+Return ONLY JSON: {"ratios":[{"metric":"...","current":"...","prior":"...","movement":"...","flag":"adverse|watch|ok|none","note":"..."}]}
+
+BORROWER: ${args.borrowerName}
+CREDIT POLICY EXCERPTS (thresholds, if any):
+${(args.kbContext ?? "").slice(0, 20000) || "(none provided)"}
+
+CREDIT APPLICATION (financial statements within):
+${args.applicationText.slice(0, 120000)}`;
+
+  const response = await generateWithFallback(
+    { contents: [{ role: "user", parts: [{ text: prompt }] }], config: { responseMimeType: "application/json", maxOutputTokens: 4096 } },
+    { tier: "quality" },
+  );
+  const p = parseJsonLoose(response.text);
+  const FLAGS = ["adverse", "watch", "ok", "none"];
+  const ratios: FinancialRatio[] = (Array.isArray(p.ratios) ? p.ratios : [])
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .filter((r: any) => r && typeof r.metric === "string" && typeof r.current === "string")
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((r: any) => ({
+      metric: str(r.metric, 60), current: str(r.current, 40), prior: str(r.prior, 40), movement: str(r.movement, 30),
+      flag: FLAGS.includes(r.flag) ? r.flag : "none", note: str(r.note, 160),
+    }))
+    .slice(0, 12);
+  return { ratios, usage: usageOf(response) };
+}
+
+/**
+ * Sector conditions relevant to the applicant (report section 6, FR-6.02).
+ * Internal points come from the application and the KB; external points come
+ * from web search and each is attributed. The two are kept apart so the
+ * origin of a statement is never ambiguous.
+ */
+export async function assessIndustry(args: {
+  borrowerName: string;
+  applicationSummary: string;
+  kbContext?: string;
+}): Promise<{ result: IndustryAssessment; usage: TokenUsage }> {
+  const prompt = `You are a credit analyst writing the INDUSTRY ASSESSMENT for a credit application. Identify the applicant's sector from the summary, then:
+1. INTERNAL points (3-5): what the application itself and the internal credit knowledge below say about sector exposure — demand, supply, concentration, regulation. No web content here.
+2. EXTERNAL points (2-5): using web search, current conditions in that sector in Malaysia (or the applicant's market) — each point attributed to a NAMED source with its URL. If nothing material is found, return an empty list; never state an external claim without a source.
+3. A 2-3 sentence summary and an outlook: positive | neutral | negative | unknown.
+Measured tone. Return ONLY JSON: {"summary":"...","outlook":"...","internal":["..."],"external":[{"text":"...","source":"publisher name","uri":"https://..."}]}
+
+BORROWER: ${args.borrowerName}
+APPLICATION SUMMARY: ${args.applicationSummary.slice(0, 3000)}
+INTERNAL CREDIT KNOWLEDGE (excerpts):
+${(args.kbContext ?? "").slice(0, 12000) || "(none)"}`;
+
+  const models = ["gemini-3.7-flash", "gemini-3.5-flash"];
+  let response: any = null; // eslint-disable-line @typescript-eslint/no-explicit-any
+  let lastErr: unknown;
+  for (const model of models) {
+    try {
+      response = await ai.models.generateContent({
+        model,
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: { tools: [{ googleSearch: {} }], maxOutputTokens: 4096 },
+      });
+      break;
+    } catch (e) { lastErr = e; }
+  }
+  if (!response) throw lastErr instanceof Error ? lastErr : new Error("industry assessment failed");
+  const p = parseJsonLoose(response.text);
+  const OUT = ["positive", "neutral", "negative", "unknown"];
+  const result: IndustryAssessment = {
+    summary: str(p.summary, 900),
+    outlook: OUT.includes(p.outlook) ? p.outlook : "unknown",
+    internal: Array.isArray(p.internal) ? p.internal.filter((x: unknown) => typeof x === "string").map((x: string) => x.trim()).slice(0, 6) : [],
+    external: (Array.isArray(p.external) ? p.external : [])
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .filter((e: any) => e && typeof e.text === "string" && typeof e.source === "string" && e.source.trim())
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((e: any) => ({ text: str(e.text, 300), source: str(e.source, 80), uri: typeof e.uri === "string" && /^https?:/.test(e.uri) ? e.uri : undefined }))
+      .slice(0, 6),
+  };
+  return { result, usage: usageOf(response) };
 }
 
 /**

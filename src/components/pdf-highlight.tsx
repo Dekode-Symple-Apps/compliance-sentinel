@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 // Vite resolves ?url to the emitted asset URL (same pattern as styles.css?url in
 // __root.tsx). Just a string — safe at module load / SSR; pdf.js itself is
@@ -53,25 +53,40 @@ function matchItems(items: any[], quote: string): number[] {
     });
 }
 
+const ZOOM_STEPS = [1, 1.25, 1.5, 2, 2.5];
+
 export function PdfHighlight({
   url,
   page,
   quote,
   className,
   height = 360,
+  controls = false,
+  fill = false,
 }: {
   url: string;
   page?: number;
   quote: string;
   className?: string;
   height?: number;
+  /** Show page navigation and zoom. Off by default — the compact evidence
+   *  cards elsewhere render one fixed page and need no chrome. */
+  controls?: boolean;
+  /** Fill the parent's height (parent must size itself) instead of `height`. */
+  fill?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [rects, setRects] = useState<Rect[]>([]);
-  const pageNum = Math.max(1, page || 1);
+  const citedPage = Math.max(1, page || 1);
+  // The page on screen. Seeded from the citation and re-seeded whenever a new
+  // citation arrives, but free to move once the reader starts paging.
+  const [pageNum, setPageNum] = useState(citedPage);
+  const [numPages, setNumPages] = useState(0);
+  const [zoom, setZoom] = useState(1);
+  useEffect(() => { setPageNum(citedPage); }, [citedPage, url]);
 
   useEffect(() => {
     let cancelled = false;
@@ -95,9 +110,11 @@ export function PdfHighlight({
 
         doc = await pdfjs.getDocument({ url }).promise;
         if (cancelled) return;
+        setNumPages(doc.numPages);
         const pg = await doc.getPage(Math.min(pageNum, doc.numPages));
         const base = pg.getViewport({ scale: 1 });
-        const cssWidth = scrollRef.current?.clientWidth || 480;
+        const fitWidth = scrollRef.current?.clientWidth || 480;
+        const cssWidth = Math.floor(fitWidth * zoom);
         const scale = cssWidth / base.width;
         const dpr = window.devicePixelRatio || 1;
         const vp = pg.getViewport({ scale });
@@ -119,7 +136,8 @@ export function PdfHighlight({
         const tc = await pg.getTextContent();
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const items = (tc.items as any[]).filter((it) => typeof it.str === "string" && it.str.trim());
-        const idx = matchItems(items, quote);
+        // The quote lives on the cited page; paging away shows the page clean.
+        const idx = pageNum === citedPage ? matchItems(items, quote) : [];
         const rs: Rect[] = idx.map((i) => {
           const it = items[i];
           const tx = pdfjs.Util.transform(vp.transform, it.transform);
@@ -149,21 +167,64 @@ export function PdfHighlight({
         /* noop */
       }
     };
-  }, [url, pageNum, quote]);
+  }, [url, pageNum, quote, zoom, citedPage]);
+
+  const sizeStyle = fill ? undefined : { height };
+  const sizeClass = fill ? "h-full min-h-0" : "";
 
   if (status === "error") {
     return (
       <iframe
         src={`${url}#page=${pageNum}`}
         title="source document"
-        className={cn("w-full bg-muted/20", className)}
-        style={{ height, border: 0 }}
+        className={cn("w-full bg-muted/20", sizeClass, className)}
+        style={{ ...sizeStyle, border: 0 }}
       />
     );
   }
 
+  const zi = ZOOM_STEPS.indexOf(zoom);
+  const bar = controls ? (
+    <div className="flex items-center gap-1 px-2 py-1.5 border-b bg-card text-xs shrink-0">
+      <button type="button" onClick={() => setPageNum((n) => Math.max(1, n - 1))} disabled={pageNum <= 1}
+        className="size-7 grid place-items-center rounded hover:bg-muted disabled:opacity-40" aria-label="Previous page">
+        <ChevronLeft className="size-4" />
+      </button>
+      <span className="tabular-nums px-1">
+        Page {pageNum}{numPages ? ` of ${numPages}` : ""}
+        {pageNum !== citedPage && (
+          <button type="button" onClick={() => setPageNum(citedPage)} className="ml-2 text-blue-600 hover:underline">
+            back to p.{citedPage}
+          </button>
+        )}
+      </span>
+      <button type="button" onClick={() => setPageNum((n) => (numPages ? Math.min(numPages, n + 1) : n + 1))}
+        disabled={!!numPages && pageNum >= numPages}
+        className="size-7 grid place-items-center rounded hover:bg-muted disabled:opacity-40" aria-label="Next page">
+        <ChevronRight className="size-4" />
+      </button>
+      <span className="ml-auto" />
+      <button type="button" onClick={() => setZoom(ZOOM_STEPS[Math.max(0, zi - 1)])} disabled={zi <= 0}
+        className="size-7 grid place-items-center rounded hover:bg-muted disabled:opacity-40" aria-label="Zoom out">
+        <ZoomOut className="size-4" />
+      </button>
+      <span className="tabular-nums w-11 text-center">{Math.round(zoom * 100)}%</span>
+      <button type="button" onClick={() => setZoom(ZOOM_STEPS[Math.min(ZOOM_STEPS.length - 1, zi + 1)])}
+        disabled={zi >= ZOOM_STEPS.length - 1}
+        className="size-7 grid place-items-center rounded hover:bg-muted disabled:opacity-40" aria-label="Zoom in">
+        <ZoomIn className="size-4" />
+      </button>
+      <button type="button" onClick={() => setZoom(1)} disabled={zoom === 1}
+        className="size-7 grid place-items-center rounded hover:bg-muted disabled:opacity-40" aria-label="Fit to width">
+        <Maximize2 className="size-4" />
+      </button>
+    </div>
+  ) : null;
+
   return (
-    <div ref={scrollRef} className={cn("relative overflow-auto bg-muted/10", className)} style={{ height }}>
+    <div className={cn("relative flex flex-col bg-muted/10", sizeClass, className)} style={sizeStyle}>
+      {bar}
+      <div ref={scrollRef} className="relative flex-1 min-h-0 overflow-auto">
       <div ref={stageRef} className="relative mx-auto">
         <canvas ref={canvasRef} className="block" />
         {rects.map((r, i) => (
@@ -188,6 +249,7 @@ export function PdfHighlight({
           </span>
         </div>
       )}
+      </div>
     </div>
   );
 }

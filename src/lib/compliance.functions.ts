@@ -2,7 +2,9 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { chunkDocument, generateAmendedDocument, extractRegulatoryChanges, extractFatfRequirements, mapChangeToSops, routeChangesToSops, analyzeSopAgainstGaps, buildSopTopicMap, generateAnalysisSummary, generateWithFallback, simplifyDocument, simplifyDocumentByUnits, detectDocumentDuplication, summarizeDocument, analyzeDocFigures, type FigureReview, analyzeCreditRisk, extractCreditRiskRetrievalQueries, chatCreditRisk, generateCreditMitigations, detectFinancialAnomalies, searchAdverseNews, AVAILABLE_MODELS, getDefaultModel, clearDefaultModelCache } from "./gemini";
+import { chunkDocument, generateAmendedDocument, extractRegulatoryChanges, extractFatfRequirements, mapChangeToSops, routeChangesToSops, analyzeSopAgainstGaps, buildSopTopicMap, generateAnalysisSummary, generateWithFallback, simplifyDocument, simplifyDocumentByUnits, detectDocumentDuplication, summarizeDocument, analyzeDocFigures, type FigureReview, analyzeCreditRisk, extractCreditRiskRetrievalQueries, chatCreditRisk, generateCreditMitigations, detectFinancialAnomalies, searchAdverseNews, AVAILABLE_MODELS, getDefaultModel, clearDefaultModelCache,
+  extractApplicationFacts, analyseFinancialRatios, assessIndustry,
+} from "./gemini";
 import { attachEvidence } from "./credit-evidence";
 import PizZip from "pizzip";
 import { applyEditsToDocx, looksLikeDocx, docxToText, docxToHtml, docxToSimplifyText, docxToSimplifyUnits, docxToStructuredUnits, dominantBodyProps, extractDocxFigures, applySimplificationToDocx, rebuildDocxBody, type SimplifyDocxEdit } from "./docx-editor";
@@ -11,7 +13,7 @@ import type { VerificationSummary, DocStructure, SectionCrossCheck, VerifiedActi
 import { runAuditPipeline, countFindings, generateRestructured, generateDocumentFromBrief, DEFAULT_RECOMMEND_GUIDANCE, proposeTargetedEdits, verifyFindings, deriveConcreteEdits, findingNeedsInput, findingInputSuggestion, generateFindingsExecSummary, type Finding, type ClaimUnit, type FindingCategory, type FindingSeverity } from "./recommend";
 import type { SimplificationAction } from "./gemini";
 import { getCallerTenant, assertRowTenant, ALL_TENANT_FEATURES } from "./tenant.functions";
-import { computeCost, addUsage, type RunCost } from "./pricing";
+import { computeCost, addUsage, EMPTY_USAGE, type RunCost } from "./pricing";
 
 /**
  * Appends one AI-spend entry to the report's cumulative cost ledger
@@ -7010,6 +7012,13 @@ export const runCreditRiskAnalysis = createServerFn({ method: "POST" })
       console.warn("[credit] adverse-news search failed:", (e as Error)?.message);
     }
 
+    // 5f–5h. The sections the report screen shows as data rather than prose:
+    // header facts, the ratio table, and the industry assessment. Each is
+    // non-fatal — the assessment stands without them, and the screen offers
+    // to fill any that are missing.
+    const extra = await runCreditSectionPasses({ borrowerName, applicationText, kbContext, applicationSummary: analysis.applicationSummary });
+    Object.assign(analysis, extra.sections);
+
     // 6. Store the structured result.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error: upErr } = await (supabase as any)
@@ -7049,6 +7058,96 @@ export const runCreditRiskAnalysis = createServerFn({ method: "POST" })
         .eq("id", report.id);
       throw e;
     }
+  });
+
+/** The three data-shaped sections, each best-effort. Shared by the analysis
+ *  run and by the backfill for reports analysed before these existed. */
+async function runCreditSectionPasses(args: {
+  borrowerName: string;
+  applicationText: string;
+  kbContext: string;
+  applicationSummary: string;
+  only?: Array<"facts" | "ratios" | "industry">;
+}) {
+  const want = (k: "facts" | "ratios" | "industry") => !args.only || args.only.includes(k);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sections: any = {};
+  let usage = EMPTY_USAGE;
+  if (want("facts")) {
+    try {
+      const r = await extractApplicationFacts({ borrowerName: args.borrowerName, applicationText: args.applicationText });
+      sections.applicationFacts = r.facts; usage = addUsage(usage, r.usage);
+    } catch (e) { console.warn("[credit] facts pass failed:", (e as Error)?.message); }
+  }
+  if (want("ratios")) {
+    try {
+      const r = await analyseFinancialRatios({ borrowerName: args.borrowerName, applicationText: args.applicationText, kbContext: args.kbContext });
+      sections.financialRatios = r.ratios; usage = addUsage(usage, r.usage);
+    } catch (e) { console.warn("[credit] ratio pass failed:", (e as Error)?.message); }
+  }
+  if (want("industry")) {
+    try {
+      const r = await assessIndustry({ borrowerName: args.borrowerName, applicationSummary: args.applicationSummary, kbContext: args.kbContext });
+      sections.industryAssessment = r.result; usage = addUsage(usage, r.usage);
+    } catch (e) { console.warn("[credit] industry pass failed:", (e as Error)?.message); }
+  }
+  return { sections, usage };
+}
+
+/**
+ * Bring a report analysed before the data-shaped sections existed up to the
+ * current format, without re-running the whole (~5-call) analysis. Runs only
+ * the passes whose output is missing and merges them into credit_analysis.
+ */
+export const backfillCreditSections = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({ reportId: z.string() }))
+  .handler(async ({ data, context }) => {
+    const supabase = context.supabase;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: report } = await (supabase as any)
+      .from("analysis_reports")
+      .select("id, title, summary_json, source_file_url, tenant_id")
+      .eq("id", data.reportId)
+      .single();
+    if (!report) throw new Error("Report not found");
+    const { tenantId } = await getCallerTenant(context.userId);
+    assertRowTenant(report.tenant_id, tenantId);
+    const analysis = report.summary_json?.credit_analysis;
+    if (!analysis) throw new Error("This report has not been analysed yet.");
+
+    const only: Array<"facts" | "ratios" | "industry"> = [];
+    if (!analysis.applicationFacts) only.push("facts");
+    if (!analysis.financialRatios) only.push("ratios");
+    if (!analysis.industryAssessment) only.push("industry");
+    if (!only.length) return { updated: [] as string[] };
+
+    const borrowerName = report.summary_json?.borrower_name ?? report.title ?? "the borrower";
+    let applicationText = "";
+    if (only.includes("facts") || only.includes("ratios")) {
+      if (!report.source_file_url) throw new Error("Source application file is no longer available.");
+      const ab = await fetch(report.source_file_url).then((r) => r.arrayBuffer());
+      const buf = Buffer.from(new Uint8Array(ab));
+      const { extractPdfPages } = await import("./pdf-pages");
+      applicationText = (await extractPdfPages(buf)).map((p) => p.text).join("\n\n");
+    }
+    const { sections, usage } = await runCreditSectionPasses({
+      borrowerName, applicationText, kbContext: "", applicationSummary: analysis.applicationSummary ?? "", only,
+    });
+    const merged = { ...analysis, ...sections };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any)
+      .from("analysis_reports")
+      .update({
+        summary_json: {
+          ...(report.summary_json ?? {}),
+          credit_analysis: merged,
+          usage: addUsage(report.summary_json?.usage ?? EMPTY_USAGE, usage),
+        },
+      })
+      .eq("id", report.id);
+    if (error) throw new Error(`Failed to save: ${error.message}`);
+    return { updated: Object.keys(sections) };
   });
 
 /**
