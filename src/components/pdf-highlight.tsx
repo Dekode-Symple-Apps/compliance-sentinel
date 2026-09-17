@@ -177,7 +177,7 @@ export function PdfHighlight({
       <iframe
         src={`${url}#page=${pageNum}`}
         title="source document"
-        className={cn("w-full bg-muted/20", sizeClass, className)}
+        className={cn("w-full bg-white", sizeClass, className)}
         style={{ ...sizeStyle, border: 0 }}
       />
     );
@@ -185,9 +185,9 @@ export function PdfHighlight({
 
   const zi = ZOOM_STEPS.indexOf(zoom);
   const bar = controls ? (
-    <div className="flex items-center gap-1 px-2 py-1.5 border-b bg-card text-xs shrink-0">
+    <div className="flex items-center gap-1 px-2 py-1.5 border-b bg-white text-xs shrink-0">
       <button type="button" onClick={() => setPageNum((n) => Math.max(1, n - 1))} disabled={pageNum <= 1}
-        className="size-7 grid place-items-center rounded hover:bg-muted disabled:opacity-40" aria-label="Previous page">
+        className="size-7 grid place-items-center rounded border border-transparent hover:border-border disabled:opacity-40" aria-label="Previous page">
         <ChevronLeft className="size-4" />
       </button>
       <span className="tabular-nums px-1">
@@ -200,29 +200,29 @@ export function PdfHighlight({
       </span>
       <button type="button" onClick={() => setPageNum((n) => (numPages ? Math.min(numPages, n + 1) : n + 1))}
         disabled={!!numPages && pageNum >= numPages}
-        className="size-7 grid place-items-center rounded hover:bg-muted disabled:opacity-40" aria-label="Next page">
+        className="size-7 grid place-items-center rounded border border-transparent hover:border-border disabled:opacity-40" aria-label="Next page">
         <ChevronRight className="size-4" />
       </button>
       <span className="ml-auto" />
       <button type="button" onClick={() => setZoom(ZOOM_STEPS[Math.max(0, zi - 1)])} disabled={zi <= 0}
-        className="size-7 grid place-items-center rounded hover:bg-muted disabled:opacity-40" aria-label="Zoom out">
+        className="size-7 grid place-items-center rounded border border-transparent hover:border-border disabled:opacity-40" aria-label="Zoom out">
         <ZoomOut className="size-4" />
       </button>
       <span className="tabular-nums w-11 text-center">{Math.round(zoom * 100)}%</span>
       <button type="button" onClick={() => setZoom(ZOOM_STEPS[Math.min(ZOOM_STEPS.length - 1, zi + 1)])}
         disabled={zi >= ZOOM_STEPS.length - 1}
-        className="size-7 grid place-items-center rounded hover:bg-muted disabled:opacity-40" aria-label="Zoom in">
+        className="size-7 grid place-items-center rounded border border-transparent hover:border-border disabled:opacity-40" aria-label="Zoom in">
         <ZoomIn className="size-4" />
       </button>
       <button type="button" onClick={() => setZoom(1)} disabled={zoom === 1}
-        className="size-7 grid place-items-center rounded hover:bg-muted disabled:opacity-40" aria-label="Fit to width">
+        className="size-7 grid place-items-center rounded border border-transparent hover:border-border disabled:opacity-40" aria-label="Fit to width">
         <Maximize2 className="size-4" />
       </button>
     </div>
   ) : null;
 
   return (
-    <div className={cn("relative flex flex-col bg-muted/10", sizeClass, className)} style={sizeStyle}>
+    <div className={cn("relative flex flex-col bg-white", sizeClass, className)} style={sizeStyle}>
       {bar}
       <div ref={scrollRef} className="relative flex-1 min-h-0 overflow-auto">
       <div ref={stageRef} className="relative mx-auto">
@@ -243,7 +243,7 @@ export function PdfHighlight({
         ))}
       </div>
       {status === "loading" && (
-        <div className="absolute inset-0 grid place-items-center bg-card/60 text-xs text-muted-foreground">
+        <div className="absolute inset-0 grid place-items-center bg-white/80 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-2">
             <Loader2 className="size-4 animate-spin" /> Loading source page…
           </span>

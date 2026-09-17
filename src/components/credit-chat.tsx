@@ -128,7 +128,7 @@ function ChatBody({
                 <button
                   key={s}
                   onClick={() => send(s)}
-                  className="text-left text-sm border rounded-lg px-3 py-2 hover:bg-muted/50 hover:border-red-200 text-foreground transition-colors"
+                  className="text-left text-sm border rounded-lg px-3 py-2 hover:border-red-400 text-foreground transition-colors bg-white"
                 >
                   {s}
                 </button>
@@ -144,7 +144,7 @@ function ChatBody({
                 {m.content}
               </div>
             ) : (
-              <div className="max-w-[94%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed bg-muted/60 text-foreground">
+              <div className="max-w-[94%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed border bg-white text-foreground">
                 <Markdown components={MD}>{m.content}</Markdown>
               </div>
             )}
@@ -153,7 +153,7 @@ function ChatBody({
 
         {busy && (
           <div className="flex justify-start">
-            <div className="bg-muted/60 rounded-2xl px-3.5 py-2.5 text-sm text-muted-foreground inline-flex items-center gap-2">
+            <div className="border bg-white rounded-2xl px-3.5 py-2.5 text-sm text-muted-foreground inline-flex items-center gap-2">
               <Loader2 className="size-3.5 animate-spin" /> Thinking…
             </div>
           </div>
@@ -172,7 +172,7 @@ function ChatBody({
           }}
           placeholder="Ask about the risk or a case…"
           disabled={busy}
-          className="flex-1 text-sm px-3 py-2 rounded-lg border bg-card focus:outline-none focus:ring-1 focus:ring-red-500 disabled:opacity-60"
+          className="flex-1 text-sm px-3 py-2 rounded-lg border bg-white focus:outline-none focus:ring-1 focus:ring-red-500 disabled:opacity-60"
         />
         <Button
           onClick={() => send(input)}
@@ -214,7 +214,7 @@ export function CreditChatPanel({
         <button
           type="button"
           onClick={onClose}
-          className="ml-auto size-8 grid place-items-center rounded-md hover:bg-muted text-muted-foreground"
+          className="ml-auto size-8 grid place-items-center rounded-md border border-transparent hover:border-border text-muted-foreground"
           aria-label="Close"
         >
           <X className="size-4" />
@@ -225,30 +225,32 @@ export function CreditChatPanel({
   );
 }
 
-/** Dialog variant — kept for any caller that wants the chat as a modal. */
+/** The chat as a pop-up. "Case NN" in an answer hands off to `onCite`. */
 export function CreditChat({
   open,
   onOpenChange,
   reportId,
   borrower,
+  onCite,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   reportId: string;
   borrower: string;
+  onCite?: (caseRef: string) => void;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl p-0 gap-0 flex flex-col h-[80vh]">
+      <DialogContent className="max-w-2xl p-0 gap-0 flex flex-col h-[80vh] bg-white">
         <DialogHeader className="px-5 py-3.5 border-b shrink-0">
           <DialogTitle className="flex items-center gap-2 text-base">
-            <Sparkles className="size-4 text-red-600" /> Ask about {borrower}'s risk
+            <Sparkles className="size-4 text-red-600" /> Ask about this assessment
           </DialogTitle>
           <DialogDescription className="text-sm">
-            Answers draw only from this report's analysis and the case knowledge base.
+            {borrower} · answers cite the application and the knowledge base.
           </DialogDescription>
         </DialogHeader>
-        <ChatBody reportId={reportId} borrower={borrower} />
+        <ChatBody reportId={reportId} borrower={borrower} onCite={onCite} />
       </DialogContent>
     </Dialog>
   );
