@@ -7087,7 +7087,7 @@ async function runCreditSectionPasses(args: {
   }
   if (want("industry")) {
     try {
-      const r = await assessIndustry({ borrowerName: args.borrowerName, applicationSummary: args.applicationSummary, kbContext: args.kbContext });
+      const r = await assessIndustry({ borrowerName: args.borrowerName, applicationSummary: args.applicationSummary, applicationText: args.applicationText, kbContext: args.kbContext });
       sections.industryAssessment = r.result; usage = addUsage(usage, r.usage);
     } catch (e) { console.warn("[credit] industry pass failed:", (e as Error)?.message); }
   }
@@ -7124,7 +7124,7 @@ export const backfillCreditSections = createServerFn({ method: "POST" })
 
     const borrowerName = report.summary_json?.borrower_name ?? report.title ?? "the borrower";
     let applicationText = "";
-    if (only.includes("facts") || only.includes("ratios")) {
+    if (only.length) {
       if (!report.source_file_url) throw new Error("Source application file is no longer available.");
       const ab = await fetch(report.source_file_url).then((r) => r.arrayBuffer());
       const buf = Buffer.from(new Uint8Array(ab));

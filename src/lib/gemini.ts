@@ -2491,10 +2491,19 @@ ${args.applicationText.slice(0, 120000)}`;
 export async function assessIndustry(args: {
   borrowerName: string;
   applicationSummary: string;
+  /** The application text itself. The summary alone misled the sector call on
+   *  KH Group — a steel business whose summary led with a property
+   *  subsidiary's permit — so the sector is read from the business
+   *  description in the paper, not from what the facilities are for. */
+  applicationText?: string;
   kbContext?: string;
 }): Promise<{ result: IndustryAssessment; usage: TokenUsage }> {
-  const prompt = `You are a credit analyst writing the INDUSTRY ASSESSMENT for a credit application. Identify the applicant's sector from the summary, then:
-1. INTERNAL points (3-5): what the application itself and the internal credit knowledge below say about sector exposure — demand, supply, concentration, regulation. No web content here.
+  const prompt = `You are a credit analyst writing the INDUSTRY ASSESSMENT for a credit application.
+
+FIRST identify the applicant's PRINCIPAL sector from the business description / principal activities in the application (what the company makes, sells or does — NOT what the facility is for, and not a subsidiary's side activity). Name it in the summary. If the group spans two material sectors, cover the principal one and mention the other in one sentence.
+
+Then:
+1. INTERNAL points (3-5): what the application and the internal credit knowledge below say about conditions in THAT SECTOR — demand, pricing, input costs, competition, regulation, cyclicality. These are about the industry, not a restatement of the borrower's own risks (leverage, covenants and funding structure belong elsewhere in the report).
 2. EXTERNAL points (2-5): using web search, current conditions in that sector in Malaysia (or the applicant's market) — each point attributed to a NAMED source with its URL. If nothing material is found, return an empty list; never state an external claim without a source.
 3. A 2-3 sentence summary and an outlook: positive | neutral | negative | unknown.
 Measured tone. Return ONLY JSON: {"summary":"...","outlook":"...","internal":["..."],"external":[{"text":"...","source":"publisher name","uri":"https://..."}]}
@@ -2502,7 +2511,8 @@ Measured tone. Return ONLY JSON: {"summary":"...","outlook":"...","internal":[".
 BORROWER: ${args.borrowerName}
 APPLICATION SUMMARY: ${args.applicationSummary.slice(0, 3000)}
 INTERNAL CREDIT KNOWLEDGE (excerpts):
-${(args.kbContext ?? "").slice(0, 12000) || "(none)"}`;
+${(args.kbContext ?? "").slice(0, 12000) || "(none)"}
+${args.applicationText ? `\nCREDIT APPLICATION (read the business description here):\n${args.applicationText.slice(0, 40000)}` : ""}`;
 
   const models = ["gemini-3.7-flash", "gemini-3.5-flash"];
   let response: any = null; // eslint-disable-line @typescript-eslint/no-explicit-any
