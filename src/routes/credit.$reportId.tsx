@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { supabase } from "@/integrations/supabase/client";
 import { runCreditRiskAnalysis, backfillCreditSections } from "@/lib/compliance.functions";
@@ -100,8 +99,7 @@ const FIN_SEV: Record<"high" | "medium" | "low", { label: string; classes: strin
  *  (FR-7.01). Every section renders every time; an empty one says so. */
 const SECTIONS = [
   { id: "overview", label: "Application overview" },
-  { id: "risks", label: "Risk alerts" },
-  { id: "mitigations", label: "Suggested mitigations" },
+  { id: "risks", label: "Risk alerts & mitigations" },
   { id: "financial", label: "Financial analysis" },
   { id: "policy", label: "Policy check" },
   { id: "industry", label: "Industry assessment" },
@@ -365,7 +363,6 @@ function CreditReportPage() {
 
   const sectionCounts: Partial<Record<SectionId, number>> = {
     risks: counts.high + counts.probe,
-    mitigations: concerns.filter((c) => (c.finding?.mitigations?.length ?? 0) > 0).length,
     financial: (analysis.financialRatios?.length ?? 0) + (analysis.financialAnomalies?.length ?? 0),
     policy: analysis.policyAlerts.filter((a) => a.status !== "pass").length,
     adverse: analysis.adverseNews?.foundConcerns ? analysis.adverseNews.sources?.length ?? 1 : 0,
@@ -489,7 +486,7 @@ function CreditReportPage() {
             </Section>
 
             {/* 2. Risk alerts */}
-            <Section id="risks" n={2} title="Risk alerts" sub="most significant first — click a row to see the evidence"
+            <Section id="risks" n={2} title="Risk alerts & mitigations" sub="most significant first, each with its suggested mitigation — click a row to see the evidence"
               aside={filter !== "all" ? (
                 <button onClick={() => setFilter("all")} className="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
                   Showing {IND_META[filter].short.toLowerCase()} only · clear <X className="size-3.5" />
@@ -499,10 +496,11 @@ function CreditReportPage() {
                 <Table>
                   <TableHeader>
                     <TableRow className={TR_HEAD}>
-                      <TableHead className={cn(TH, "w-[11rem]")}>Risk category</TableHead>
-                      <TableHead className={cn(TH, "w-[6.5rem]")}>Indicator</TableHead>
+                      <TableHead className={cn(TH, "w-[10rem]")}>Risk category</TableHead>
+                      <TableHead className={cn(TH, "w-[6rem]")}>Indicator</TableHead>
                       <TableHead className={TH}>Finding</TableHead>
-                      <TableHead className={cn(TH, "w-[13rem]")}>Precedent</TableHead>
+                      <TableHead className={cn(TH, "w-[22rem]")}>Suggested mitigation</TableHead>
+                      <TableHead className={cn(TH, "w-[11rem]")}>Precedent</TableHead>
                       <TableHead className={cn(TH, "w-8")} />
                     </TableRow>
                   </TableHeader>
@@ -514,6 +512,22 @@ function CreditReportPage() {
                           <TableCell className="font-semibold text-sm">{label}</TableCell>
                           <TableCell><Badge variant="outline" className={cn("font-bold text-xs", m.classes)}>{m.short}</Badge></TableCell>
                           <TableCell className="text-sm leading-snug group-hover:underline decoration-muted-foreground/40 underline-offset-2">{line}</TableCell>
+                          <TableCell className="text-sm leading-snug">
+                            {(finding?.mitigations?.length ?? 0) > 0 ? (
+                              <ul className="space-y-1.5">
+                                {finding!.mitigations!.map((mi, i) => (
+                                  <li key={i} className="flex items-start gap-1.5">
+                                    <CheckCircle2 className="size-3.5 text-emerald-600 mt-0.5 shrink-0" />
+                                    <span>{mi.action} <MitigationTag source={mi.source} reference={mi.reference} /></span>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (finding?.indicator ?? "low") === "low" ? (
+                              <span className="text-muted-foreground">—</span>
+                            ) : (
+                              <span className="text-muted-foreground italic">None suggested</span>
+                            )}
+                          </TableCell>
                           <TableCell className="text-sm">
                             {finding?.traceReference ? (
                               <span className="inline-flex items-center gap-1.5 text-blue-800"><BookOpen className="size-3.5 shrink-0" /><span className="truncate">{cleanCaseTitle(finding.traceReference)}</span></span>
@@ -523,7 +537,7 @@ function CreditReportPage() {
                         </TableRow>
                       );
                     })}
-                    {rowsToShow.length === 0 && <TableRow className={TR}><TableCell colSpan={5} className="text-sm text-muted-foreground py-6 text-center">Nothing to report for this filter.</TableCell></TableRow>}
+                    {rowsToShow.length === 0 && <TableRow className={TR}><TableCell colSpan={6} className="text-sm text-muted-foreground py-6 text-center">Nothing to report for this filter.</TableCell></TableRow>}
                   </TableBody>
                 </Table>
                 {filter !== "low" && lowRows.length > 0 && (
@@ -535,29 +549,7 @@ function CreditReportPage() {
               </Frame>
             </Section>
 
-            {/* 3. Suggested mitigations */}
-            <Section id="mitigations" n={3} title="Suggested mitigations" sub="against each material risk identified">
-              {concerns.some((c) => (c.finding?.mitigations?.length ?? 0) > 0) ? (
-                <Frame>
-                  <Table>
-                    <TableHeader><TableRow className={TR_HEAD}><TableHead className={cn(TH, "w-[11rem]")}>Risk</TableHead><TableHead className={TH}>Mitigation</TableHead><TableHead className={cn(TH, "w-[12rem]")}>Basis</TableHead></TableRow></TableHeader>
-                    <TableBody>
-                      {concerns.flatMap(({ key, label, finding }) =>
-                        (finding?.mitigations ?? []).map((mi, i) => (
-                          <TableRow key={`${key}-${i}`} className={cn(TR, "cursor-pointer")} onClick={() => openEvidence(label, finding)}>
-                            <TableCell className="text-sm">{i === 0 && <span className="inline-flex items-center gap-1.5 font-semibold"><span className={cn("size-1.5 rounded-full", IND_META[finding!.indicator].dot)} />{label}</span>}</TableCell>
-                            <TableCell className="text-sm leading-snug">{mi.action}</TableCell>
-                            <TableCell><MitigationTag source={mi.source} reference={mi.reference} /></TableCell>
-                          </TableRow>
-                        )),
-                      )}
-                    </TableBody>
-                  </Table>
-                </Frame>
-              ) : <Empty>No material risks requiring mitigation.</Empty>}
-            </Section>
-
-            {/* 4. Financial analysis */}
+            {/* 3. Financial analysis */}
             <Section id="financial" n={4} title="Financial analysis" sub="ratios and trends, then anomalies in the statements">
               {analysis.financialRatios?.length ? (
                 <Frame>
@@ -611,7 +603,7 @@ function CreditReportPage() {
               ) : <p className="text-sm text-muted-foreground">No inconsistencies found in the financial statements.</p>}
             </Section>
 
-            {/* 5. Policy check */}
+            {/* 4. Policy check */}
             <Section id="policy" n={5} title="Policy check" sub="each policy point marked fail, probe or compliant, with the clause">
               {analysis.policyAlerts.length ? (
                 <Frame>
@@ -634,7 +626,7 @@ function CreditReportPage() {
               ) : <Empty>No policy points were raised against this application.</Empty>}
             </Section>
 
-            {/* 6. Industry assessment */}
+            {/* 5. Industry assessment */}
             <Section id="industry" n={6} title="Industry assessment" sub="sector conditions — internal and external sources labelled">
               {ia ? (
                 <div className="space-y-3">
@@ -670,7 +662,7 @@ function CreditReportPage() {
               ) : <Empty>Industry assessment not yet generated for this report.</Empty>}
             </Section>
 
-            {/* 7. Adverse news */}
+            {/* 6. Adverse news */}
             <Section id="adverse" n={7} title="Adverse news screening" sub="external negative coverage against the applicant name">
               {analysis.adverseNews && (analysis.adverseNews.summary || analysis.adverseNews.sources?.length) ? (
                 <div className="space-y-3">
@@ -694,7 +686,7 @@ function CreditReportPage() {
               ) : <Empty>Nothing was found. The applicant name was screened and no material adverse coverage surfaced.</Empty>}
             </Section>
 
-            {/* 8. Questions for probe */}
+            {/* 7. Questions for probe */}
             <Section id="probes" n={8} title="Questions for probe" sub="for the credit manager to raise with the relationship team or the borrower">
               {analysis.probeQuestions.length ? (
                 <Frame>
@@ -712,7 +704,7 @@ function CreditReportPage() {
               ) : <Empty>No probe questions were generated.</Empty>}
             </Section>
 
-            {/* 9. Overall recap */}
+            {/* 8. Overall recap */}
             <Section id="recap" n={9} title="Overall recap">
               {analysis.riskNarrative ? (
                 <div className="space-y-4 max-w-3xl">
@@ -744,7 +736,7 @@ function CreditReportPage() {
               ) : <Empty>No recap was generated.</Empty>}
             </Section>
 
-            {/* 10. References */}
+            {/* 9. References */}
             <Section id="references" n={10} title="References" sub="every knowledge base document and external source cited">
               <Frame>
                 <Table>
@@ -881,8 +873,6 @@ function CostRow({ label, value }: { label: string; value: string }) {
  * (FR-7.03). Sized to the screen so the page is actually readable.
  */
 function EvidenceDialog({ item, borrower, onClose }: { item: { finding: CreditRiskFinding; label: string } | null; borrower: string; onClose: () => void }) {
-  const [tab, setTab] = useState<"app" | "kb">("app");
-  useEffect(() => { setTab("app"); }, [item]);
   const finding = item?.finding;
   const m = IND_META[finding?.indicator ?? "low"];
   const ev = finding?.evidence ?? {};
@@ -905,40 +895,30 @@ function EvidenceDialog({ item, borrower, onClose }: { item: { finding: CreditRi
               {why && <p className="text-sm text-muted-foreground leading-snug mt-1"><span className="font-semibold text-foreground/70">Why it matters: </span>{why}</p>}
             </div>
 
-            {/* paired passages — application beside the case it mirrors */}
-            <div className={cn("grid border-b shrink-0 divide-x", hasKb ? "grid-cols-2" : "grid-cols-1")}>
-              <button type="button" onClick={() => setTab("app")} className={cn("text-left bg-white p-3.5 space-y-1 border-b-2", tab === "app" ? "border-b-red-600" : "border-b-transparent")}>
-                <div className="text-xs uppercase tracking-wide font-semibold text-muted-foreground inline-flex items-center gap-1.5"><FileText className="size-3.5" /> Application{ev.applicationPage ? ` · p.${ev.applicationPage}` : ""}</div>
-                <p className="text-sm leading-snug line-clamp-4"><Highlighted text={appQuote} terms={finding.matchTerms} /></p>
-              </button>
+            {/* application and the case it mirrors, side by side: full passage, then the page (FR-5.04, FR-7.03) */}
+            <div className={cn("flex-1 min-h-0 grid divide-x", hasKb ? "grid-cols-2" : "grid-cols-1")}>
+              <SourceColumn
+                icon={FileText}
+                tone="app"
+                title="Credit application"
+                page={ev.applicationPage}
+                url={ev.applicationFileUrl}
+                quote={appQuote}
+                terms={finding.matchTerms}
+              />
               {hasKb && (
-                <button type="button" onClick={() => setTab("kb")} className={cn("text-left bg-white p-3.5 space-y-1 border-b-2", tab === "kb" ? "border-b-red-600" : "border-b-transparent")}>
-                  <div className="text-xs uppercase tracking-wide font-semibold text-blue-800 inline-flex items-center gap-1.5"><BookOpen className="size-3.5" /> {cleanCaseTitle(finding.traceReference)}{ev.casePage ? ` · p.${ev.casePage}` : ""}</div>
-                  <p className="text-sm leading-snug line-clamp-4 italic">“<Highlighted text={finding.traceExcerpt} terms={finding.matchTerms} />”</p>
-                </button>
+                <SourceColumn
+                  icon={BookOpen}
+                  tone="kb"
+                  title={cleanCaseTitle(finding.traceReference)}
+                  page={ev.casePage}
+                  url={ev.caseFileUrl}
+                  quote={finding.traceExcerpt}
+                  terms={finding.matchTerms}
+                  italic
+                />
               )}
             </div>
-
-            {/* the source, one document at a time, filling the dialog */}
-            <Tabs value={tab} onValueChange={(v) => setTab(v as "app" | "kb")} className="flex-1 min-h-0 flex flex-col">
-              <div className="px-3 pt-2 pb-1 shrink-0 flex items-center gap-2">
-                <TabsList className="h-8 bg-white border">
-                  <TabsTrigger value="app" className="text-xs h-7 data-[state=active]:bg-white data-[state=active]:shadow-none data-[state=active]:font-semibold">Application PDF</TabsTrigger>
-                  {hasKb && <TabsTrigger value="kb" className="text-xs h-7 data-[state=active]:bg-white data-[state=active]:shadow-none data-[state=active]:font-semibold">Knowledge base PDF</TabsTrigger>}
-                </TabsList>
-                {(tab === "app" ? ev.applicationFileUrl : ev.caseFileUrl) && (
-                  <a href={tab === "app" ? ev.applicationFileUrl : ev.caseFileUrl} target="_blank" rel="noopener noreferrer" className="ml-auto text-xs inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"><ExternalLink className="size-3" /> Open in new tab</a>
-                )}
-              </div>
-              <TabsContent value="app" className="flex-1 min-h-0 mt-0 border-t bg-white">
-                {ev.applicationFileUrl ? <PdfHighlight url={ev.applicationFileUrl} page={ev.applicationPage} quote={appQuote} controls fill className="bg-white" /> : <NoSource />}
-              </TabsContent>
-              {hasKb && (
-                <TabsContent value="kb" className="flex-1 min-h-0 mt-0 border-t bg-white">
-                  {ev.caseFileUrl ? <PdfHighlight url={ev.caseFileUrl} page={ev.casePage} quote={finding.traceExcerpt} controls fill className="bg-white" /> : <NoSource />}
-                </TabsContent>
-              )}
-            </Tabs>
 
             {(finding.mitigations?.length ?? 0) > 0 && (
               <div className="border-t px-5 py-2.5 shrink-0 max-h-28 overflow-y-auto bg-white">
@@ -954,6 +934,29 @@ function EvidenceDialog({ item, borrower, onClose }: { item: { finding: CreditRi
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** One side of the evidence pop-up: the cited passage in full (scrolls if
+ *  long), then the source page filling the rest of the height. */
+function SourceColumn({ icon: Icon, tone, title, page, url, quote, terms, italic }: {
+  icon: typeof FileText; tone: "app" | "kb"; title: string; page?: number; url?: string; quote: string; terms?: string[]; italic?: boolean;
+}) {
+  return (
+    <div className="flex flex-col min-h-0 bg-white">
+      <div className="px-4 pt-3 pb-2.5 border-b shrink-0 space-y-1.5">
+        <div className={cn("text-xs uppercase tracking-wide font-semibold inline-flex items-center gap-1.5 w-full", tone === "kb" ? "text-blue-800" : "text-muted-foreground")}>
+          <Icon className="size-3.5 shrink-0" /><span className="truncate">{title}</span>{page != null && <span className="shrink-0">· p.{page}</span>}
+          {url && <a href={url} target="_blank" rel="noopener noreferrer" className="ml-auto normal-case tracking-normal font-normal text-muted-foreground hover:text-foreground inline-flex items-center gap-1 shrink-0"><ExternalLink className="size-3" /> Open</a>}
+        </div>
+        <p className={cn("text-sm leading-relaxed max-h-36 overflow-y-auto pr-1", italic && "italic")}>
+          {italic ? "“" : ""}<Highlighted text={quote} terms={terms} />{italic ? "”" : ""}
+        </p>
+      </div>
+      <div className="flex-1 min-h-0">
+        {url ? <PdfHighlight url={url} page={page} quote={quote} controls fill className="bg-white" /> : <NoSource />}
+      </div>
+    </div>
   );
 }
 

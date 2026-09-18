@@ -232,10 +232,10 @@ function buildDocumentXml(analysis: CreditRiskAnalysis, meta: CreditDocxMeta): s
   body.push(para(run("Executive summary", { b: true, sz: 20 }), { spaceBefore: 80, spaceAfter: 20 }));
   body.push(para(run(analysis.applicationSummary || "—", { sz: 20 }), { spaceAfter: 120 }));
 
-  // ── 2. Risk alerts (FR-5.09: category · indicator · finding · reference) ──
-  body.push(sectionTitle(2, "Risk alerts"));
+  // ── 2. Risk alerts & mitigations (FR-5.09 + FR-5.06, grouped per risk) ──
+  body.push(sectionTitle(2, "Risk alerts & mitigations"));
   {
-    const C = [1700, 1100, 4200, 2360];
+    const C = [1500, 1000, 3000, 2560, 1300];
     const ordered = [...CREDIT_RISK_SEGMENTS].sort((a, b) => (IND[byKey.get(a.key)?.indicator ?? "low"].rank ?? 2) - (IND[byKey.get(b.key)?.indicator ?? "low"].rank ?? 2));
     const rows = ordered.map(({ key, label }, i) => {
       const f = byKey.get(key); const ind = IND[f?.indicator ?? "low"]; const { line, why } = lines(f);
@@ -244,31 +244,21 @@ function buildDocumentXml(analysis: CreditRiskAnalysis, meta: CreditDocxMeta): s
       const ref = f?.traceReference
         ? para(run(`${f.traceReference}${f.evidence?.casePage != null ? ` · p.${f.evidence.casePage}` : ""}`, { b: true, sz: 16, color: "1D4ED8" }))
         : para(run("No close precedent", { i: true, sz: 16, color: "94A3B8" }));
-      return `<w:tr>${cell(para(run(label, { b: true, sz: 18 })), { w: C[0], fill: z })}${cell(para(run(ind.label, { b: true, sz: 18, color: ind.color })), { w: C[1], fill: z })}${cell(findingCell, { w: C[2], fill: z })}${cell(ref, { w: C[3], fill: z })}</w:tr>`;
+      const mits = f?.mitigations ?? [];
+      const mitCell = mits.length
+        ? mits.map((mi) => {
+            const basis = mi.source === "case" ? (mi.reference ?? "case") : mi.source === "policy" ? (mi.reference ?? "policy") : "best practice";
+            return para(run("•  ", { sz: 16 }) + run(mi.action, { sz: 16 }) + run(`  [${basis}]`, { sz: 14, color: muted }), { spaceAfter: 20 });
+          }).join("")
+        : para(run((f?.indicator ?? "low") === "low" ? "—" : "None suggested", { i: true, sz: 16, color: "94A3B8" }));
+      return `<w:tr>${cell(para(run(label, { b: true, sz: 18 })), { w: C[0], fill: z })}${cell(para(run(ind.label, { b: true, sz: 18, color: ind.color })), { w: C[1], fill: z })}${cell(findingCell, { w: C[2], fill: z })}${cell(mitCell, { w: C[3], fill: z })}${cell(ref, { w: C[4], fill: z })}</w:tr>`;
     }).join("");
-    body.push(table(th(["Risk category", "Indicator", "Finding", "Precedent"], C) + rows, C));
+    body.push(table(th(["Risk category", "Indicator", "Finding", "Suggested mitigation", "Precedent"], C) + rows, C));
     body.push(EMPTY_PARA);
   }
 
-  // ── 3. Suggested mitigations ──
-  body.push(sectionTitle(3, "Suggested mitigations"));
-  {
-    const C = [1900, 5260, 2200];
-    const rows: string[] = [];
-    for (const { key, label } of CREDIT_RISK_SEGMENTS) {
-      const f = byKey.get(key);
-      if (!f || (f.indicator ?? "low") === "low" || !f.mitigations?.length) continue;
-      f.mitigations.forEach((mi, i) => {
-        const basis = mi.source === "case" ? (mi.reference ?? "case") : mi.source === "policy" ? (mi.reference ?? "policy") : "best practice";
-        rows.push(`<w:tr>${cell(para(run(i === 0 ? label : "", { b: true, sz: 18 })), { w: C[0] })}${cell(para(run(mi.action, { sz: 18 })), { w: C[1] })}${cell(para(run(basis, { sz: 16, color: muted })), { w: C[2] })}</w:tr>`);
-      });
-    }
-    body.push(rows.length ? table(th(["Risk", "Mitigation", "Basis"], C) + rows.join(""), C) : emptyLine("No material risks requiring mitigation."));
-    body.push(EMPTY_PARA);
-  }
-
-  // ── 4. Financial analysis (FR-3.06: tables, not narrative) ──
-  body.push(sectionTitle(4, "Financial analysis"));
+  // ── 3. Financial analysis (FR-3.06: tables, not narrative) ──
+  body.push(sectionTitle(3, "Financial analysis"));
   if (analysis.financialRatios?.length) {
     const C = [2200, 1300, 1300, 1200, 1200, 2160];
     const FL: Record<string, { l: string; c: string }> = { adverse: { l: "Adverse", c: "B91C1C" }, watch: { l: "Watch", c: "B45309" }, ok: { l: "Within policy", c: "047857" }, none: { l: "", c: muted } };
@@ -288,8 +278,8 @@ function buildDocumentXml(analysis: CreditRiskAnalysis, meta: CreditDocxMeta): s
   }
   body.push(EMPTY_PARA);
 
-  // ── 5. Policy check ──
-  body.push(sectionTitle(5, "Policy check"));
+  // ── 4. Policy check ──
+  body.push(sectionTitle(4, "Policy check"));
   if (analysis.policyAlerts.length) {
     const C = [1400, 2800, 5160];
     const order = { fail: 0, probe: 1, pass: 2 } as const;
@@ -305,8 +295,8 @@ function buildDocumentXml(analysis: CreditRiskAnalysis, meta: CreditDocxMeta): s
   }
   body.push(EMPTY_PARA);
 
-  // ── 6. Industry assessment (internal / external labelled, FR-6.02) ──
-  body.push(sectionTitle(6, "Industry assessment"));
+  // ── 5. Industry assessment (internal / external labelled, FR-6.02) ──
+  body.push(sectionTitle(5, "Industry assessment"));
   if (analysis.industryAssessment) {
     const ia = analysis.industryAssessment;
     body.push(para(run(`Outlook: ${ia.outlook === "unknown" ? "unclear" : ia.outlook}`, { b: true, sz: 18, color: ia.outlook === "negative" ? "B91C1C" : ia.outlook === "positive" ? "047857" : muted }), { spaceAfter: 20 }));
@@ -320,8 +310,8 @@ function buildDocumentXml(analysis: CreditRiskAnalysis, meta: CreditDocxMeta): s
   }
   body.push(EMPTY_PARA);
 
-  // ── 7. Adverse news screening ──
-  body.push(sectionTitle(7, "Adverse news screening"));
+  // ── 6. Adverse news screening ──
+  body.push(sectionTitle(6, "Adverse news screening"));
   if (analysis.adverseNews && (analysis.adverseNews.summary || analysis.adverseNews.sources?.length)) {
     for (const raw of (analysis.adverseNews.summary || "").split(/\n/)) {
       const line = raw.trim(); if (!line) continue;
@@ -337,14 +327,14 @@ function buildDocumentXml(analysis: CreditRiskAnalysis, meta: CreditDocxMeta): s
   }
   body.push(EMPTY_PARA);
 
-  // ── 8. Questions for probe ──
-  body.push(sectionTitle(8, "Questions for probe"));
+  // ── 7. Questions for probe ──
+  body.push(sectionTitle(7, "Questions for probe"));
   if (analysis.probeQuestions.length) analysis.probeQuestions.forEach((q, i) => body.push(bullet(q, `${i + 1}.  `)));
   else body.push(emptyLine("No probe questions were generated."));
   body.push(EMPTY_PARA);
 
-  // ── 9. Overall recap ──
-  body.push(sectionTitle(9, "Overall recap"));
+  // ── 8. Overall recap ──
+  body.push(sectionTitle(8, "Overall recap"));
   if (analysis.riskNarrative?.trim()) {
     for (const raw of analysis.riskNarrative.split(/\n/)) {
       const line = raw.trim(); if (!line) continue;
@@ -356,8 +346,8 @@ function buildDocumentXml(analysis: CreditRiskAnalysis, meta: CreditDocxMeta): s
   }
   body.push(EMPTY_PARA);
 
-  // ── 10. References ──
-  body.push(sectionTitle(10, "References"));
+  // ── 9. References ──
+  body.push(sectionTitle(9, "References"));
   if (analysis.referencesUsed.length) for (const r of analysis.referencesUsed) body.push(para(run(`•  ${r}`, { sz: 18, color: "1D4ED8" }), { indentLeft: 360, spaceAfter: 16 }));
   else body.push(emptyLine("No knowledge base documents were cited."));
   if (analysis.adverseNews?.sources?.length) for (const s of analysis.adverseNews.sources.slice(0, 8)) body.push(para(run(`•  ${s.title} (external) — ${s.uri}`, { sz: 16, color: "1D4ED8" }), { indentLeft: 360, spaceAfter: 16 }));
