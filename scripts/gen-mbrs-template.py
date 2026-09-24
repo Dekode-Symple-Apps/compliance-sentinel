@@ -20,6 +20,7 @@ To support a new filing variant (FS-MFRS, a different taxonomy year), run this
 against a sample of that variant and extend the mapping tables below.
 """
 import json
+from collections import defaultdict
 import re
 import sys
 from datetime import date, timedelta
@@ -52,7 +53,8 @@ SOFP = {
     "ssmt-mpers:OtherCurrentReceivablesDueFromRelatedParties": "receivablesDueFromRelatedParties",
     "ifrs-smes:AmountsReceivableRelatedPartyTransactions": "relatedPartyReceivablesTotal",
     "ifrs-smes:AmountsPayableRelatedPartyTransactions": "relatedPartyPayablesTotal",
-    "ifrs-smes:Buildings": "buildings",
+    # Buildings is a CHILD of land and buildings, not the same figure — it is
+    # left to the note-line tagging so land can be told apart when present.
     "ssmt-mpers:OfficeEquipmentFixtureAndFittings": "officeEquipment",
     # Same story as inventories: unbound, and frozen at the donors' zero.
     "ifrs-smes:LandAndBuildings": "buildings",
@@ -152,6 +154,12 @@ PL = {
     "ifrs-smes:RevenueFromRenderingOfServices": "revenueFromServices",
     "ssmt-mpers:RevenueFromRenderingOfOtherServices": "revenueFromServices",
     "ifrs-smes:RevenueFromSaleOfGoods": "revenueFromGoods",
+    "ssmt-mpers:RevenueFromSaleOfConstructionContracts": "revenueFromConstructionContracts",
+    "ifrs-smes:OtherRevenue": "otherRevenue",
+    "ssmt-mpers:MiscellaneousOtherFeesAndCommissionIncome": "feesAndCommissionIncome",
+    "ssmt-mpers:OtherMiscellaneousIncome": "otherMiscellaneousIncome",
+    # QSK's 56,330.42 of "other expenses" is exactly what SSM files here.
+    "ssmt-mpers:OtherMiscellaneousExpenses": "otherOperatingExpenses",
     "ssmt-mpers:RevenueFromSaleOfOtherGoods": "revenueFromGoods",
     "ifrs-smes:GrossProfit": "grossProfit",
     "ifrs-smes:AdministrativeExpense": "administrativeExpenses",
@@ -199,17 +207,21 @@ CF = {
     "ifrs-smes:CashFlowsFromUsedInFinancingActivities": "cfFromFinancingActivities",
     "ifrs-smes:RepaymentsOfBorrowingsClassifiedAsFinancingActivities": "cfRepaymentOfBorrowings",
     "ifrs-smes:PaymentsOfFinanceLeaseLiabilitiesClassifiedAsFinancingActivities": "cfLeaseRepayments",
+    "ifrs-smes:InterestPaidClassifiedAsOperatingActivities": "cfInterestPaid",
+    "ifrs-smes:AdjustmentsForNoncashIncomeTaxExpense": "cfTaxAdjustment",
     # Indirect-method reconciliation lines the accepted filings carry and we
     # had no box for. The disposal gain and finance income enter the calc tree
     # with weight -1; the fact itself is stated positive, as in the accounts.
-    "ssmt-mpers:GainsLossesOnDisposalsOfPropertyPlantAndEquipment": "gainsOnDisposal",
-    "ssmt-mpers:AdjustmentsForFinanceIncome": "interestIncome",
-    "ifrs-smes:InterestReceivedClassifiedAsOperatingActivities": "interestIncome",
+    "ssmt-mpers:GainsLossesOnDisposalsOfPropertyPlantAndEquipment": "cfGainOnDisposalPpeAdjustment",
+    "ssmt-mpers:GainsLossesOnDisposalsOfInvestmentProperties": "cfGainOnDisposalInvPropAdjustment",
+    "ssmt-mpers:AdjustmentsForDividendIncome": "cfDividendIncomeAdjustment",
+    "ssmt-mpers:AdjustmentsForFinanceIncome": "cfFinanceIncomeAdjustment",
+    "ifrs-smes:InterestReceivedClassifiedAsOperatingActivities": "cfInterestReceived",
     "ifrs-smes:AdjustmentsForDecreaseIncreaseInInventories": "cfChangeInInventories",
     "ifrs-smes:ProceedsFromSalesOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities": "cfProceedsFromDisposalOfPpe",
     "ifrs-smes:IncomeTaxesPaidRefundClassifiedAsOperatingActivities": "incomeTaxPaid",
     # add-back of finance costs in the operating reconciliation = the P&L line
-    "ifrs-smes:AdjustmentsForFinanceCosts": "financeCosts",
+    "ifrs-smes:AdjustmentsForFinanceCosts": "cfFinanceCostsAdjustment",
     "ifrs-smes:IncreaseDecreaseInCashAndCashEquivalents": "cfNetIncreaseInCash",
     "ifrs-smes:IncreaseDecreaseInCashAndCashEquivalentsBeforeEffectOfExchangeRateChanges": "cfNetIncreaseInCash",
 }
@@ -235,17 +247,10 @@ DEI = {
     "ssmt:RegistrationNumberOfAuditFirm": "auditFirmRegistrationNumber",
     "ssmt:NameOfAuditFirm": "auditFirmName",
     "ssmt:AddressOne": "auditFirmAddress",
+    "ssmt:AddressTwo": "auditFirmAddress2",
     "ssmt:PostcodeOfAuditFirm": "auditFirmPostcode",
     "ssmt:TownWhereAuditFirmIsLocated": "auditFirmTown",
     "ssmt:StateWhereAuditFirmIsLocated": "auditFirmState",
-    "ssmt:NameOfFirstDirectorWhoSignedDirectorsReport": "director1Name",
-    "ssmt:IdentificationNumberOfFirstDirectorWhoSignedDirectorsReport": "director1Id",
-    "ssmt:NameOfSecondDirectorWhoSignedDirectorsReport": "director2Name",
-    "ssmt:IdentificationNumberOfSecondDirectorWhoSignedDirectorsReport": "director2Id",
-    "ssmt:NameOfFirstDirectorWhoSignedStatementByDirectors": "director1Name",
-    "ssmt:IdentificationNumberOfFirstDirectorWhoSignedStatementByDirectors": "director1Id",
-    "ssmt:NameOfSecondDirectorWhoSignedStatementByDirectors": "director2Name",
-    "ssmt:IdentificationNumberOfSecondDirectorWhoSignedStatementByDirectors": "director2Id",
     "ssmt:DateOfSigningDirectorsReport": "directorsReportDate",
     "ssmt:DateOfSigningStatementByDirectors": "directorsReportDate",
     "ssmt:NumberOfDirectorsSigningDirectorsReport": "numberOfDirectorsSigning",
@@ -256,6 +261,47 @@ DEI = {
     "ssmt:DateOfStatutoryDeclaration": "statutoryDeclarationDate",
     "ssmt:DateOfCirculationOfFinancialStatementsAndReportsToMembers": "circulationDate",
 }
+# Signing directors 1–5, on both the directors' report and the statement by
+# directors. Derived from the taxonomy's concept names by pattern because the
+# names are irregular: the second SBD director's type is
+# "TypeOfIdentificationNumberOf…", the third's responsibility flag ends
+# "…OfTheCompany", and the other-person concepts mix "FinancialStatements" and
+# "FinancialManagement". The ID type and responsibility flag used to be frozen
+# donor literals — "MyKad", first director responsible, second not — which
+# filed a phantom second director for a one-director company.
+_ORDINALS = {"First": "1", "Second": "2", "Third": "3", "Fourth": "4", "Fifth": "5"}
+_DIRECTOR_RE = re.compile(
+    r"^(?P<kind>NameOf|IdentificationNumberOf|TypeOfIdentificationOf|TypeOfIdentificationNumberOf)"
+    r"(?P<ord>First|Second|Third|Fourth|Fifth)DirectorWhoSigned(?:DirectorsReport|StatementByDirectors)$"
+)
+_RESPONSIBLE_RE = re.compile(r"^DisclosureWhether(?P<ord>First|Second|Third|Fourth|Fifth)DirectorIsAlsoPrimarilyResponsible")
+_OTHER_PERSON = {
+    "NameOfOtherPersonPrimarilyResponsible": "otherResponsibleName",
+    "IdentificationNumberOfOtherPersonPrimarilyResponsible": "otherResponsibleId",
+    "TypeOfIdentificationOfOtherPersonPrimarilyResponsible": "otherResponsibleIdType",
+}
+
+
+def director_field(concept):
+    """ssmt:…Director… concept -> extraction field, or None."""
+    if not concept.startswith("ssmt:"):
+        return None
+    local = concept[5:]
+    m = _DIRECTOR_RE.match(local)
+    if m:
+        n = _ORDINALS[m.group("ord")]
+        kind = m.group("kind")
+        suffix = "Name" if kind == "NameOf" else ("Id" if kind == "IdentificationNumberOf" else "IdType")
+        return f"director{n}{suffix}"
+    m = _RESPONSIBLE_RE.match(local)
+    if m:
+        return f"director{_ORDINALS[m.group('ord')]}Responsible"
+    for prefix, field in _OTHER_PERSON.items():
+        if local.startswith(prefix):
+            return field
+    return None
+
+
 # A company declares up to three business activities, each on its own
 # NatureOfBusinessAxis member with its OWN MSIC code and description.
 BUSINESS_SLOTS = {"BusinessOneMember": "1", "BusinessTwoMember": "2", "BusinessThreeMember": "3"}
@@ -353,6 +399,9 @@ def resolve(concept, ctx):
         return None
     if concept in DEI:
         return (DEI[concept], None)
+    df = director_field(concept)
+    if df:
+        return (df, None)
     p = period_of(ctx)
     if p is None:
         return None
@@ -568,6 +617,26 @@ def augment_from_taxonomy(merged, order, catalogue_path):
             u, d = "MYR", "0"
         elif t.startswith("shares"):
             u, d = "share", "INF"
+        elif t.startswith("textBlock") and e.get("period") == "duration":
+            # Every note and policy the form provides, not just the ones the
+            # donors happened to write — the narrative pass fills whichever
+            # the report actually contains and leaves the rest empty.
+            ctx = "fromto_{CS}_{CE}"
+            if (q, ctx) not in merged:
+                merged[(q, ctx)] = {"c": q, "ctx": ctx, "narrative": True}
+                order.append((q, ctx))
+                added.append(f"{q} @ {ctx}")
+            continue
+        elif director_field(q) and e.get("period") == "duration":
+            # Directors three to five, and the other responsible person: no
+            # donor had them, so the slot comes from the taxonomy. Entity facts
+            # sit on the plain period context, with no unit.
+            ctx = "fromto_{CS}_{CE}"
+            if (q, ctx) not in merged:
+                merged[(q, ctx)] = {"c": q, "ctx": ctx, "field": director_field(q)}
+                order.append((q, ctx))
+                added.append(f"{q} @ {ctx}")
+            continue
         else:
             continue
         for ctx in PLAIN_CTXS.get(e.get("period"), []):
@@ -582,7 +651,61 @@ def augment_from_taxonomy(merged, order, catalogue_path):
             merged[(q, ctx)] = entry
             order.append((q, ctx))
             added.append(f"{q} @ {ctx}")
+    # The second address line shares the auditor's typed-dimension context
+    # with the first; donors that printed one line had no slot for it.
+    one = next((k for k in merged if k[0] == "ssmt:AddressOne"), None)
+    if one and ("ssmt:AddressTwo", one[1]) not in merged:
+        merged[("ssmt:AddressTwo", one[1])] = {"c": "ssmt:AddressTwo", "ctx": one[1], "field": "auditFirmAddress2"}
+        order.append(("ssmt:AddressTwo", one[1]))
+        added.append(f"ssmt:AddressTwo @ {one[1]}")
     return added
+
+
+NARRATIVE_LABEL_SOURCE = {}
+
+# Totals whose note breakdown is read line by line and mapped into SSM's
+# calculation tree (role 200200), rather than asked for as named fields.
+TAG_ROOTS = ["ifrs-smes:PropertyPlantAndEquipment", "ifrs-smes:InvestmentProperty", "ifrs-smes:InventoriesTotal"]
+TAG_CTX = {"current": "asof_{CE}_SeparateMember", "previous": "asof_{PE}_SeparateMember"}
+
+
+def build_tag_trees(merged, order, catalogue_path):
+    """For each tagged total, its subtree from SSM's calculation linkbase, with
+    each node's parent, label and (if one exists) the field it is already bound
+    to. Unbound nodes get `tagged` slots; bound nodes keep their field, and the
+    reconciled breakdown is written into that field so review screen and filing
+    agree. Frozen donor literals inside a subtree are replaced — a breakdown is
+    either proven by the arithmetic or left blank, never inherited."""
+    cat = json.load(open(catalogue_path, encoding="utf-8"))
+    labs = cat.get("labels", {})
+    kids = defaultdict(list)
+    for p, c, w, o in cat.get("cal", {}).get("200200", []):
+        kids[p].append((o, c))
+    trees = []
+    for root in TAG_ROOTS:
+        root_field = (merged.get((root, TAG_CTX["current"])) or {}).get("field")
+        if not root_field:
+            continue
+        nodes = []
+
+        def walk(q, parent):
+            for _o, c in sorted(kids.get(q, [])):
+                bound = (merged.get((c, TAG_CTX["current"])) or {}).get("field")
+                nodes.append({"c": c, "parent": parent, "label": (labs.get(c) or {}).get("label", c.split(":")[1]),
+                              "field": bound or "", "leaf": not kids.get(c)})
+                for period, ctx in TAG_CTX.items():
+                    e = merged.get((c, ctx))
+                    if e and e.get("field"):
+                        continue
+                    merged[(c, ctx)] = {"c": c, "ctx": ctx, "u": "MYR", "d": "0", "tagged": True, "period": period}
+                    if (c, ctx) not in order:
+                        order.append((c, ctx))
+                walk(c, c)
+
+        walk(root, root)
+        trees.append({"root": root, "rootField": root_field,
+                      "rootLabel": (labs.get(root) or {}).get("label", root), "nodes": nodes})
+    return trees
 
 
 def main(*paths):
@@ -606,14 +729,20 @@ def main(*paths):
                 merged[key] = e     # a later donor let us bind what an earlier one could not
         ctx_struct.update(sctx)
 
+    donor_narratives = [k[0] for k in order if merged[k].get("narrative")]
     added = augment_from_taxonomy(merged, order, taxonomy) if taxonomy else []
+    tag_trees = build_tag_trees(merged, order, taxonomy) if taxonomy else []
+    global NARRATIVE_LABEL_SOURCE
+    if taxonomy:
+        _labs = json.load(open(taxonomy, encoding="utf-8")).get("labels", {})
+        NARRATIVE_LABEL_SOURCE = {q: (v.get("label") or next(iter(v.values()), "")) for q, v in _labs.items()}
 
     facts, bound, narrative, dropped, varying, unbound = [], 0, 0, [], [], []
     for key in order:
         e = merged[key]
         name = e["c"]
-        if e.get("narrative"):
-            narrative += 1
+        if e.get("narrative") or e.get("tagged"):
+            narrative += 1 if e.get("narrative") else 0
             facts.append(e)
             continue
         if "field" in e:
@@ -674,6 +803,8 @@ export interface TemplateFact {{
   period?: "current" | "previous";
   /** Filled from the extracted narratives map, keyed by `c`. */
   narrative?: boolean;
+  /** Filled from the reconciled note-line tagging (x.tagged[c][period]). */
+  tagged?: boolean;
 }}
 
 export interface TemplateContext {{
@@ -711,9 +842,48 @@ export interface TemplateContext {{
         "/** XBRL concepts that carry company narrative prose (…Explanatory). */\n"
         "export const NARRATIVE_CONCEPTS: string[] = [\n"
         + "".join(f"  {tsj(c)},\n" for c in narr)
-        + "];\n"
+        + "];\n\n"
+        "/** SSM's own label for each narrative concept — given to the model so it\n"
+        " *  knows which section of the report each key means. */\n"
+        "/** The sections real filings used — every mandatory text block among\n"
+        " *  them. The main extraction pass asks only for these; the dedicated\n"
+        " *  narrative pass asks for the full list. */\n"
+        "export const NARRATIVE_CORE: string[] = [\n"
+        + "".join(f"  {tsj(c)},\n" for c in dict.fromkeys(donor_narratives))
+        + "];\n\n"
+        "export const NARRATIVE_LABELS: Record<string, string> = {\n"
+        + "".join(f"  {tsj(c)}: {tsj(NARRATIVE_LABEL_SOURCE.get(c, ''))},\n" for c in narr)
+        + "};\n"
     )
     open(f"{SRC_DIR}/mbrs-narratives.ts", "w").write(narr_out)
+
+    # SSM's calculation linkbase for the profile's roles: parent = sum of
+    # weighted children. Emitted for the consistency check SSM's own validator
+    # runs on a submitted instance, so we can catch it before they do.
+    if taxonomy:
+        cal = json.load(open(taxonomy, encoding="utf-8")).get("cal", {})
+        # Kept per role: a parent can carry different breakdowns in different
+        # roles (comprehensive income = owners + NCI in one, profit + OCI in
+        # another), and summing them together would double-count.
+        arcs = sorted({(role, p, c, int(w)) for role, lst in cal.items() for (p, c, w, _o) in lst})
+        calc_out = (
+            "// AUTO-DERIVED from SSMxT 2022 calculation linkbases — regenerate with\n"
+            "// scripts/gen-mbrs-template.py --taxonomy. [role, parent, child, weight]\n\n"
+            "export const MBRS_CALC: [string, string, string, number][] = [\n"
+            + "".join(f"  [{tsj(r)}, {tsj(p)}, {tsj(c)}, {w}],\n" for r, p, c, w in arcs)
+            + "];\n\n"
+            "/** Totals read as note lines and mapped into SSM's tree (see mbrs-extract). */\n"
+            "export interface TagNode { c: string; parent: string; label: string; field: string; leaf: boolean }\n"
+            "export interface TagTree { root: string; rootField: string; rootLabel: string; nodes: TagNode[] }\n"
+            "export const TAG_TREES: TagTree[] = " + json.dumps(tag_trees, ensure_ascii=False, indent=1) + ";\n\n"
+            "/** SSM's label for each concept above, for messages a filer can read. */\n"
+            "export const MBRS_CALC_LABELS: Record<string, string> = {\n"
+            + "".join(f"  {tsj(q)}: {tsj(NARRATIVE_LABEL_SOURCE.get(q, q.split(':')[-1]))},\n"
+                      for q in sorted({x for _r, p, c, _w in arcs for x in (p, c)}))
+            + "};\n"
+        )
+        open(f"{SRC_DIR}/mbrs-calc.ts", "w").write(calc_out)
+        print(f"wrote {SRC_DIR}/mbrs-calc.ts ({len(arcs)} calculation arcs)")
 
     print(f"facts {len(facts)} (bound {bound}, narrative {narrative}, "
           f"literal {len(facts)-bound-narrative}) | contexts {len(ctx_struct)}")

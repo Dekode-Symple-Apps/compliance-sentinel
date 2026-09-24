@@ -31,6 +31,9 @@ export interface FieldSpec {
 
 /** Company / filing metadata. Sourced from the cover pages, directors' report,
  *  statement by directors and the auditors' report — not the statements. */
+/** The five signing-director slots SSM's form provides. */
+export const DIRECTOR_SLOTS = ["director1", "director2", "director3", "director4", "director5"] as const;
+
 export const ENTITY_FIELDS: FieldSpec[] = [
   { key: "entityName", label: "Company name", group: "entity", type: "text", periodic: false },
   { key: "registrationNumber", label: "Registration no. (new format)", group: "entity", type: "text", periodic: false, hint: "12-digit MyCoID, e.g. 202101011095" },
@@ -48,10 +51,33 @@ export const ENTITY_FIELDS: FieldSpec[] = [
   { key: "currentPeriodEnd", label: "Current FY end", group: "entity", type: "date", periodic: false },
   { key: "previousPeriodStart", label: "Previous FY start", group: "entity", type: "date", periodic: false },
   { key: "previousPeriodEnd", label: "Previous FY end", group: "entity", type: "date", periodic: false },
-  { key: "director1Name", label: "First signing director", group: "entity", type: "text", periodic: false },
-  { key: "director1Id", label: "First director ID no.", group: "entity", type: "text", periodic: false },
+  // Up to five directors sign the directors' report and statement by
+  // directors; SSM requires name, identification type and number for each
+  // one who signed (rules Mandatory-fs-mpers-130 to 138). Identification is
+  // rarely printed for every signer — it is typically only on the statutory
+  // declaration — so blanks here are expected and go to the filer.
+  { key: "director1Name", label: "First signing director", group: "entity", type: "text", periodic: false, hint: "Name as signed on the directors' report / statement by directors, in signing order" },
+  { key: "director1Id", label: "First director ID no.", group: "entity", type: "text", periodic: false, hint: "Only if printed in the report. Leave blank otherwise — never infer." },
+  { key: "director1IdType", label: "First director ID type", group: "entity", type: "text", periodic: false, hint: "The label printed beside the number: NRIC / IC / MyKad, MyPR, MyKAS, or Passport. Blank if not printed." },
   { key: "director2Name", label: "Second signing director", group: "entity", type: "text", periodic: false },
   { key: "director2Id", label: "Second director ID no.", group: "entity", type: "text", periodic: false },
+  { key: "director2IdType", label: "Second director ID type", group: "entity", type: "text", periodic: false },
+  { key: "director3Name", label: "Third signing director", group: "entity", type: "text", periodic: false, hint: "Only if a third director signed. Leave blank otherwise." },
+  { key: "director3Id", label: "Third director ID no.", group: "entity", type: "text", periodic: false },
+  { key: "director3IdType", label: "Third director ID type", group: "entity", type: "text", periodic: false },
+  { key: "director4Name", label: "Fourth signing director", group: "entity", type: "text", periodic: false, hint: "Only if a fourth director signed." },
+  { key: "director4Id", label: "Fourth director ID no.", group: "entity", type: "text", periodic: false },
+  { key: "director4IdType", label: "Fourth director ID type", group: "entity", type: "text", periodic: false },
+  { key: "director5Name", label: "Fifth signing director", group: "entity", type: "text", periodic: false, hint: "Only if a fifth director signed." },
+  { key: "director5Id", label: "Fifth director ID no.", group: "entity", type: "text", periodic: false },
+  { key: "director5IdType", label: "Fifth director ID type", group: "entity", type: "text", periodic: false },
+  // The statutory declaration is made by the person primarily responsible
+  // for the company's financial management. SSM asks, per signing director,
+  // whether that is them — and if it is none of them, who it is (rule
+  // Mandatory-fs-mpers-139). Reading the declarant answers all of it.
+  { key: "declarantName", label: "Statutory declaration made by", group: "entity", type: "text", periodic: false, hint: "The person making the statutory declaration (\"I, <name>, being the director/officer primarily responsible for the financial management…\"), exactly as printed" },
+  { key: "declarantId", label: "Declarant ID no.", group: "entity", type: "text", periodic: false, hint: "The identification number printed in the statutory declaration, as printed" },
+  { key: "declarantIdType", label: "Declarant ID type", group: "entity", type: "text", periodic: false, hint: "The label printed beside that number: NRIC / IC / MyKad, MyPR, MyKAS, or Passport" },
   { key: "directorsReportDate", label: "Directors' report date", group: "entity", type: "date", periodic: false },
   { key: "boardApprovalDate", label: "Date approved by the Board", group: "entity", type: "date", periodic: false, hint: "Statement by Directors / Directors' report signing date if not stated separately" },
   { key: "statutoryDeclarationDate", label: "Statutory declaration date", group: "entity", type: "date", periodic: false, hint: "Date the statutory declaration was signed before the Commissioner for Oaths" },
@@ -74,7 +100,9 @@ export const ENTITY_FIELDS: FieldSpec[] = [
   { key: "auditorLicenseNumber", label: "Auditor licence no.", group: "entity", type: "text", periodic: false },
   { key: "auditFirmName", label: "Audit firm", group: "entity", type: "text", periodic: false },
   { key: "auditFirmRegistrationNumber", label: "Audit firm AF no.", group: "entity", type: "text", periodic: false },
-  { key: "auditFirmAddress", label: "Audit firm address", group: "entity", type: "text", periodic: false },
+  // SSM files the audit firm's address as printed lines, not one string.
+  { key: "auditFirmAddress", label: "Audit firm address (line 1)", group: "entity", type: "text", periodic: false, hint: "The FIRST printed line of the audit firm's address only, exactly as printed (e.g. \"Lot 9071, 1st Floor\")" },
+  { key: "auditFirmAddress2", label: "Audit firm address (line 2)", group: "entity", type: "text", periodic: false, hint: "The SECOND printed line of the address, before postcode and town (e.g. \"Batu 2 ¼, Jalan Bakri\"). Blank if the address is one line." },
   { key: "auditFirmPostcode", label: "Audit firm postcode", group: "entity", type: "text", periodic: false },
   { key: "auditFirmTown", label: "Audit firm town", group: "entity", type: "text", periodic: false },
   { key: "auditFirmState", label: "Audit firm state", group: "entity", type: "text", periodic: false },
@@ -152,6 +180,15 @@ export const PL_FIELDS: FieldSpec[] = [
   { key: "revenue", label: "Revenue", group: "pl", type: "money", periodic: true },
   { key: "revenueFromGoods", label: "— of which sale of goods", group: "pl", type: "money", periodic: true, hint: "The sale-of-goods component ONLY. If revenue also includes rental or service income, exclude those — goods plus services plus rental must add back to total revenue, not exceed it. Leave blank if the company sells no goods." },
   { key: "revenueFromServices", label: "— of which rendering of services", group: "pl", type: "money", periodic: true, hint: "The services component ONLY, excluding any goods or rental included in revenue. Leave blank if the company renders no services." },
+  // Revenue is classified exactly as the auditor disclosed it — never
+  // re-classified by the preparer. The auditor's classification is in the
+  // revenue note, the revenue-recognition policy and the face caption; only
+  // where none of those describes the revenue is "other revenue" the home.
+  // (An earlier wording said only "if unclear, other revenue", and the model
+  // put a design firm's whole services revenue there — its policy note said
+  // "rendering of services" all along.)
+  { key: "revenueFromConstructionContracts", label: "— of which construction contracts", group: "pl", type: "money", periodic: true, hint: "Revenue the report itself describes as from construction contracts. Do not re-classify service or project income into this." },
+  { key: "otherRevenue", label: "— of which other revenue", group: "pl", type: "money", periodic: true, hint: "ONLY revenue the report describes in terms that fit none of goods, services, construction contracts or rental — or revenue the report does not describe at all. If the revenue note, the revenue-recognition accounting policy, or the income statement caption says services / goods / rental, that IS the auditor's classification: use that field, not this one." },
   { key: "grossProfit", label: "Gross profit", group: "pl", type: "money", periodic: true },
   { key: "administrativeExpenses", label: "Administrative expenses", group: "pl", type: "money", periodic: true, hint: "Positive number — sign is applied by the mapper" },
   { key: "profitBeforeTax", label: "Profit / (loss) before tax", group: "pl", type: "money", periodic: true },
@@ -165,6 +202,11 @@ export const PL_FIELDS: FieldSpec[] = [
   { key: "dividendIncome", label: "— of which dividend income", group: "pl", type: "money", periodic: true, hint: "Component INSIDE other income, reported separately as well" },
   { key: "interestIncome", label: "— of which interest income", group: "pl", type: "money", periodic: true, hint: "Component INSIDE other income, reported separately as well" },
   { key: "gainsOnDisposal", label: "— of which gain on disposal of assets", group: "pl", type: "money", periodic: true, hint: "Component INSIDE other income. Positive for a gain." },
+  { key: "feesAndCommissionIncome", label: "— of which fees and commission", group: "pl", type: "money", periodic: true, hint: "Component INSIDE other income: any item the report describes as a fee or commission — commission received, management fee, booking fee forfeited. Other income is often itemised NOT in its own note but in the \"profit before tax is arrived at … after crediting\" list: read that too. Enter 0 only if other income is itemised and none of the items is a fee or commission; blank if it is not itemised anywhere." },
+  // SSM's catch-all line, and arithmetically the residual: Yee Fatt 2024's
+  // 86,642 of other income is 984 interest + 60,321 disposal gain + 14,143
+  // fees + 11,194 miscellaneous. Derived when not read directly.
+  { key: "otherMiscellaneousIncome", label: "— of which miscellaneous other income", group: "pl", type: "money", periodic: true, hint: "Component INSIDE other income that is not interest, dividends, rent, disposal gains or fees — e.g. discount received, insurance claims — summed from the other-income note or the \"profit before tax is arrived at … after crediting\" list." },
   { key: "costOfSales", label: "Cost of sales", group: "pl", type: "money", periodic: true, hint: "Positive number — sign is applied by the mapper" },
   { key: "otherOperatingExpenses", label: "Other operating expenses", group: "pl", type: "money", periodic: true, hint: "Positive number — sign is applied by the mapper" },
   { key: "sellingAndDistributionExpenses", label: "Selling and distribution expenses", group: "pl", type: "money", periodic: true, hint: "Positive number — sign is applied by the mapper. Leave blank if the statement has no such line." },
@@ -217,6 +259,21 @@ export const CF_FIELDS: FieldSpec[] = [
   // SSM keeps lease payments out of loan repayments. Yee Fatt's 126,336 was
   // exactly 77,945 of borrowings plus 48,391 of leases, filed as one figure.
   { key: "cfLeaseRepayments", label: "Payment of lease / hire-purchase liabilities", group: "cf", type: "money", periodic: true, hint: "Positive number. The financing-activities line for lease or hire-purchase liabilities, kept separate from bank borrowings." },
+  { key: "cfInterestPaid", label: "Interest paid (operating activities)", group: "cf", type: "money", periodic: true, hint: "The \"Interest paid\" line in operating activities, with the sign as printed (normally negative). Leave blank if the statement shows interest paid elsewhere or not at all." },
+  // Reconciliation lines read from the CASH FLOW STATEMENT, never borrowed
+  // from the income statement. They used to reuse interestIncome,
+  // financeCosts and gainsOnDisposal — so a company whose cash flow
+  // statement printed no such line was filed as if it did, and the totals
+  // failed SSM's calculation check (Yee Fatt's operating cash flow was
+  // 52,217 out: the interest paid line it had no field for). SSM files each
+  // as a positive amount; the calculation weight carries the sign.
+  { key: "cfFinanceCostsAdjustment", label: "Cash flow: finance costs added back", group: "cf", type: "money", periodic: true, hint: "The interest / finance cost line ADDED BACK among the adjustments in the cash flow statement, as a positive number. Blank if the statement has no such line — do not take it from the income statement." },
+  { key: "cfFinanceIncomeAdjustment", label: "Cash flow: finance income deducted", group: "cf", type: "money", periodic: true, hint: "The interest / finance income line DEDUCTED among the adjustments (printed in brackets), as a POSITIVE number. Blank if the statement has no such line." },
+  { key: "cfDividendIncomeAdjustment", label: "Cash flow: dividend income deducted", group: "cf", type: "money", periodic: true, hint: "Dividend income DEDUCTED among the adjustments, as a POSITIVE number. Blank if none." },
+  { key: "cfGainOnDisposalPpeAdjustment", label: "Cash flow: gain on disposal of PPE", group: "cf", type: "money", periodic: true, hint: "Gain on disposal of property, plant and equipment among the adjustments — POSITIVE for a gain, negative for a loss. Blank if none." },
+  { key: "cfGainOnDisposalInvPropAdjustment", label: "Cash flow: gain on disposal of investment property", group: "cf", type: "money", periodic: true, hint: "Gain on disposal of investment property among the adjustments — POSITIVE for a gain, negative for a loss. Blank if none." },
+  { key: "cfInterestReceived", label: "Interest received (operating activities)", group: "cf", type: "money", periodic: true, hint: "The \"Interest received\" line in operating activities, positive. Blank if the statement has no such line." },
+  { key: "cfTaxAdjustment", label: "Income tax adjustment (cash flow reconciliation)", group: "cf", type: "money", periodic: true, hint: "An income-tax line among the ADJUSTMENTS reconciling profit to cash from operations — not \"tax paid\". Sign as printed. Leave blank if there is none." },
   // Two more indirect-method lines the accepted filings carry — the taxonomy
   // has boxes for them and Yee Fatt uses both (221,253 of stock movement;
   // 163,000 of disposal proceeds in the comparative year).
@@ -252,6 +309,12 @@ export interface MbrsExtraction {
   na?: string[];
   /** Free-text notes from the extractor about anything ambiguous. */
   extractionNotes?: string[];
+  /** Note breakdowns mapped into SSM's calculation tree, per concept and
+   *  period — only for concepts with no named field, and only when the lines
+   *  reconciled to the total (see reconcileTagging in mbrs-extract). */
+  tagged?: Record<string, { current?: number | null; previous?: number | null }>;
+  /** The note lines the tagging pass read, kept as evidence for the reviewer. */
+  tagLines?: { root: string; lines: { label: string; concept: string; current: number | null; previous: number | null; conceptLabel?: string }[] }[];
   /** Per-field agreement across consensus runs, keyed "current.<field>" etc.
    *  Only fields that were NOT unanimous are recorded. */
   agreement?: Record<string, { level: "unanimous" | "majority" | "disputed"; candidates: Array<number | string | null> }>;
@@ -357,6 +420,13 @@ const DERIVED: Array<{
 
 export const DERIVED_KEYS = new Set(DERIVED.map((d) => d.key));
 
+/** Entity values computed in normalizeEntity rather than extracted — never
+ *  asked of the model, but bound in the template. */
+export const DERIVED_ENTITY_KEYS = new Set([
+  ...DIRECTOR_SLOTS.map((d) => `${d}Responsible`),
+  "otherResponsibleName", "otherResponsibleId", "otherResponsibleIdType",
+]);
+
 /** A declared component that exactly equals its parent total is not a
  *  component — it is the total echoed back because no split was found in the
  *  note. Filing it as the named category asserts something the accounts never
@@ -405,6 +475,26 @@ function deriveInto(values: PeriodValues): PeriodValues {
  * zero, not assumed. Where the sum does NOT reconcile, something real is
  * missing and the box stays blank for the reviewer.
  */
+/** Miscellaneous other income is SSM's residual line: whatever of other
+ *  income is not interest, dividends, disposal gains, fees — or rent, when the
+ *  rent sits in other income rather than revenue. Filled only when the model
+ *  did not read it and only when the result is not negative, so a
+ *  mis-classified component surfaces rather than being papered over. */
+function otherIncomeResidual(values: PeriodValues): PeriodValues {
+  const out = { ...values };
+  const oi = num(out.otherIncome);
+  if (oi === null || num(out.otherMiscellaneousIncome) !== null) return out;
+  const rev = num(out.revenue);
+  const revParts = ["revenueFromGoods", "revenueFromServices", "rentalIncome", "revenueFromConstructionContracts", "otherRevenue"]
+    .reduce((a, k) => a + (num(out[k]) ?? 0), 0);
+  const rentInRevenue = rev !== null && num(out.rentalIncome) !== null && Math.round(revParts) === Math.round(rev);
+  const named = ["interestIncome", "dividendIncome", "gainsOnDisposal", "feesAndCommissionIncome", ...(rentInRevenue ? [] : ["rentalIncome"])]
+    .reduce((a, k) => a + (num(out[k]) ?? 0), 0);
+  const residual = Math.round((oi - named) * 100) / 100;
+  if (residual >= 0) out.otherMiscellaneousIncome = residual;
+  return out;
+}
+
 function zeroFillProvenNil(values: PeriodValues): PeriodValues {
   const out = { ...values };
   for (const r of ROLLUPS) {
@@ -421,19 +511,80 @@ function zeroFillProvenNil(values: PeriodValues): PeriodValues {
   return out;
 }
 
+const RESPONSIBLE = "Primarily responsible for financial management of the company";
+const NOT_RESPONSIBLE = "Not primarily responsible for financial management of the company";
+/** SSM's TypeOfIdentification enumeration, for the values a report prints. */
+const IC_FAMILY = new Set(["MyKad", "MyPR", "MyKAS", "Old IC number"]);
+
+function normPerson(v?: string): string {
+  return String(v ?? "").toLowerCase().replace(/\b(dato'?|datuk|tan sri|dr|mr|mrs|ms|madam|puan|encik)\b\.?/g, "")
+    .replace(/[^a-z]/g, "");
+}
+
+/** Printed label (or, failing that, the number's shape) → SSM's enumeration.
+ *  A 12-digit number with no label is taken as MyKad — the MyPR and MyKAS
+ *  cards share the format, so validation flags the inference for review. */
+function canonicalIdType(printed?: string, id?: string): string | undefined {
+  const t = String(printed ?? "").toLowerCase();
+  if (/passport/.test(t)) return "Passport number";
+  if (/mypr|permanent resident/.test(t)) return "MyPR";
+  if (/mykas|temporary resident/.test(t)) return "MyKAS";
+  if (/old\s*i\.?\s*c/.test(t)) return "Old IC number";
+  if (/army|military|tentera/.test(t)) return "Military ID number";
+  if (/police|polis/.test(t)) return "Police ID number";
+  if (/nric|mykad|i\.?\s*c\.?|identity card|kad pengenalan/.test(t)) return "MyKad";
+  if (!t && id && String(id).replace(/\D/g, "").length === 12 && /^[\d\s-]+$/.test(String(id))) return "MyKad";
+  return printed?.trim() || undefined;
+}
+
 /** Identifier fields SSM wants unpunctuated, but which are printed with
  *  separators on the page ("730516-08-5119", "AF : 1346"). Normalising here
  *  rather than in the prompt keeps it deterministic. */
 function normalizeEntity(entity: EntityValues): EntityValues {
   const out = { ...entity };
 
-  for (const k of ["director1Id", "director2Id"]) {
-    const v = out[k];
-    if (v) out[k] = v.replace(/\D/g, "");
+  // Identification: map the printed label onto SSM's enumeration, and strip
+  // separators only from the 12-digit identity-card family. A passport number
+  // is alphanumeric — stripping every non-digit, as this used to, mangles it.
+  for (const who of [...DIRECTOR_SLOTS, "declarant"]) {
+    const idKey = `${who}Id`, typeKey = `${who}IdType`;
+    const type = canonicalIdType(out[typeKey], out[idKey]);
+    if (type) out[typeKey] = type;
+    const id = out[idKey];
+    if (id && (!type || IC_FAMILY.has(type))) {
+      const digits = id.replace(/\D/g, "");
+      if (digits.length === 12) out[idKey] = digits;
+    }
   }
 
-  const signing = ["director1Name", "director2Name"].filter((k) => (out[k] ?? "").trim()).length;
-  if (signing > 0) out.numberOfDirectorsSigning = String(signing);
+  const signers = DIRECTOR_SLOTS.filter((d) => (out[`${d}Name`] ?? "").trim());
+  if (signers.length > 0) out.numberOfDirectorsSigning = String(signers.length);
+
+  // Who is primarily responsible for financial management — derived from the
+  // statutory declarant, never assumed. These were frozen donor literals
+  // ("first director yes, second no"), which filed a phantom second director
+  // for a one-director company and would misstate any company whose second
+  // director makes the declaration.
+  const declarant = normPerson(out.declarantName);
+  if (declarant && signers.length) {
+    let matched = false;
+    for (const d of signers) {
+      const isHim = normPerson(out[`${d}Name`]) === declarant;
+      matched ||= isHim;
+      out[`${d}Responsible`] = isHim ? RESPONSIBLE : NOT_RESPONSIBLE;
+      // The declaration usually carries the only printed ID — lend it to the
+      // director who made it.
+      if (isHim && !out[`${d}Id`] && out.declarantId) {
+        out[`${d}Id`] = out.declarantId;
+        if (out.declarantIdType) out[`${d}IdType`] = out.declarantIdType;
+      }
+    }
+    if (!matched) {
+      out.otherResponsibleName = out.declarantName;
+      out.otherResponsibleId = out.declarantId;
+      out.otherResponsibleIdType = out.declarantIdType;
+    }
+  }
 
   const st = canonicalState(out.auditFirmState);
   if (st) out.auditFirmState = st;
@@ -489,8 +640,8 @@ export function canonicalState(raw: string | undefined | null): string | null {
 }
 
 export function normalizeExtraction(x: MbrsExtraction): MbrsExtraction {
-  const current = zeroFillProvenNil(deriveInto(x.current ?? {}));
-  const previous = zeroFillProvenNil(deriveInto(x.previous ?? {}));
+  const current = zeroFillProvenNil(otherIncomeResidual(deriveInto(x.current ?? {})));
+  const previous = zeroFillProvenNil(otherIncomeResidual(deriveInto(x.previous ?? {})));
   return {
     ...x,
     entity: normalizeEntity(x.entity ?? {}),
@@ -575,10 +726,17 @@ const ROLLUPS: RollUp[] = [
   // goods plus 34,100 of rent, so services are nil. Where the parts do not
   // reconcile nothing is filled, so a company whose rent sits in other income
   // is left alone rather than zeroed wrongly.
-  { total: "revenue", parts: ["revenueFromGoods", "revenueFromServices", "rentalIncome"], label: "Revenue = goods + services + rental", group: "pl", severity: "warning" },
+  // The printed adjustments must explain the gap between profit before tax
+  // and cash generated from operations (cfTotalAdjustments is that gap). A
+  // warning, not an error: a company can print a reconciling line we do not
+  // model, and that is for the reviewer to see, not a reason to block.
+  { total: "cfTotalAdjustments", parts: ["depreciation", "cfFinanceCostsAdjustment", "cfFinanceIncomeAdjustment", "cfDividendIncomeAdjustment", "cfGainOnDisposalPpeAdjustment", "cfGainOnDisposalInvPropAdjustment", "cfTaxAdjustment", "cfChangeInInventories", "cfChangeInTradeReceivables", "cfChangeInReceivables", "cfChangeInTradePayables", "cfChangeInOtherPayables"], label: "Cash flow adjustments explain profit before tax → cash from operations", group: "cf", severity: "warning" },
+  { total: "revenue", parts: ["revenueFromGoods", "revenueFromServices", "rentalIncome", "revenueFromConstructionContracts", "otherRevenue"], label: "Revenue = goods + services + rental + construction contracts + other", group: "pl", severity: "warning" },
 ];
 
-const NEGATED_PARTS = new Set(["administrativeExpenses", "sellingAndDistributionExpenses", "otherOperatingExpenses", "financeCosts"]);
+const NEGATED_PARTS = new Set(["administrativeExpenses", "sellingAndDistributionExpenses", "otherOperatingExpenses", "financeCosts",
+  // deducted in the cash flow reconciliation (calculation weight -1)
+  "cfFinanceIncomeAdjustment", "cfDividendIncomeAdjustment", "cfGainOnDisposalPpeAdjustment", "cfGainOnDisposalInvPropAdjustment"]);
 
 function num(v: number | null | undefined): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
@@ -758,6 +916,33 @@ export function validateExtraction(x: MbrsExtraction): ValidationIssue[] {
         .join(", ")}.`,
       fields: blank,
     });
+  }
+
+  // Every director who signed needs identification (Mandatory-fs-mpers-130
+  // to 138). The report rarely prints it for every signer, so this is the
+  // filer's job. A warning, not a blocking error — the same treatment as the
+  // MSIC codes, the other mandatory field that only the filer can supply —
+  // so the draft can still be generated and reviewed while it is gathered.
+  const ORD = ["first", "second", "third", "fourth", "fifth"];
+  DIRECTOR_SLOTS.forEach((d, i) => {
+    if (!String(x.entity[`${d}Name`] ?? "").trim()) return;
+    const miss = [`${d}Id`, `${d}IdType`].filter((k) => !String(x.entity[k] ?? "").trim());
+    if (miss.length) {
+      issues.push({
+        severity: "warning", group: "entity",
+        message: `SSM requires identification for the ${ORD[i]} signing director before lodgement — enter the ${miss.map((k) => (k.endsWith("Type") ? "ID type" : "ID number")).join(" and ")}.`,
+        fields: miss,
+      });
+    }
+    const type = String(x.entity[`${d}IdType`] ?? ""), id = String(x.entity[`${d}Id`] ?? "").replace(/\D/g, "");
+    if (IC_FAMILY.has(type) && type !== "Old IC number" && id && id.length !== 12) {
+      issues.push({ severity: "error", group: "entity", fields: [`${d}Id`],
+        message: `The ${ORD[i]} director's ${type} number must be 12 digits (got ${id.length}).` });
+    }
+  });
+  if (DIRECTOR_SLOTS.some((d) => String(x.entity[`${d}Name`] ?? "").trim()) && !String(x.entity.declarantName ?? "").trim()) {
+    issues.push({ severity: "warning", group: "entity", fields: ["declarantName"],
+      message: "Could not read who made the statutory declaration, so which director is primarily responsible for financial management is not set — confirm it before filing." });
   }
 
   for (const k of ["currentPeriodStart", "currentPeriodEnd", "previousPeriodStart", "previousPeriodEnd"]) {

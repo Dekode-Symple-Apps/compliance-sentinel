@@ -23,6 +23,7 @@ import { MsicField } from "@/components/msic-field";
 import { computeCost } from "@/lib/pricing";
 import { AiCostTooltip } from "@/components/ai-cost-tooltip";
 import { cn } from "@/lib/utils";
+import type { CalcInconsistency } from "@/lib/mbrs-xbrl";
 
 export const Route = createFileRoute("/mbrs/$reportId")({
   component: MbrsFilingPage,
@@ -182,6 +183,11 @@ function MbrsFilingPage() {
 
   const totalToFill = SECTIONS.reduce((n, s) => n + stats[s.group].toFill.length, 0);
   const errors = issues.filter((i) => i.severity === "error");
+  const warnings = issues.filter((i) => i.severity === "warning");
+  // SSM's own calculation rules, run on the facts the filing would contain —
+  // totals that do not equal the parts also reported. Not blocking: SSM's
+  // validator treats them as inconsistencies to explain, not rejections.
+  const calcChecks: CalcInconsistency[] = sj.mbrs_calc ?? [];
 
   const jumpTo = useCallback((group: Group, fieldKey?: string) => {
     setCollapsed((prev) => {
@@ -439,6 +445,7 @@ function MbrsFilingPage() {
                     {[
                       errors.length && `${errors.length} error${errors.length === 1 ? "" : "s"}`,
                       totalToFill && `${totalToFill} to fill in`,
+                      calcChecks.length && `${calcChecks.length} total${calcChecks.length === 1 ? "" : "s"} not adding up`,
                     ].filter(Boolean).join(" · ")}
                   </span>
                 )}
@@ -457,6 +464,39 @@ function MbrsFilingPage() {
                     </li>
                   ))}
                 </ul>
+              )}
+              {warnings.length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {warnings.map((i, n) => (
+                    <li key={n}>
+                      <button
+                        onClick={() => jumpTo(i.group, i.fields[0])}
+                        className="text-left text-[13px] text-amber-800 hover:underline underline-offset-2"
+                      >
+                        {i.period && <span className="capitalize">{i.period} — </span>}
+                        {i.message}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {calcChecks.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-gray-200">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+                    Checked against SSM's calculation rules
+                  </div>
+                  <ul className="space-y-1.5">
+                    {calcChecks.map((c, n) => (
+                      <li key={n} className="text-[13px] text-amber-800 leading-snug">
+                        {c.period && <span className="capitalize">{c.period} year — </span>}
+                        <span className="font-semibold">{c.parentLabel}</span> is{" "}
+                        {c.reported.toLocaleString()} but the parts reported add up to {c.summed.toLocaleString()}
+                        {" "}(difference {Math.abs(c.reported - c.summed).toLocaleString()}).{" "}
+                        <span className="text-gray-600">Parts: {c.childLabels.join(", ")}.</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
             </section>
 
@@ -661,11 +701,68 @@ function MbrsFilingPage() {
                 </section>
               );
             })}
+
+            {/* What the tagging pass read — the evidence behind every breakdown
+                category SSM's form asks for, so a reviewer can see which printed
+                line went where and whether it added up. */}
+            {(view?.tagLines?.length ?? 0) > 0 && (
+              <section className="rounded-lg border border-gray-200 overflow-hidden bg-white">
+                <div className="px-4 py-3 border-b border-gray-200">
+                  <h2 className="text-sm font-semibold text-gray-900">Breakdowns read from the notes</h2>
+                  <p className="text-[13px] text-gray-600 mt-0.5">
+                    Each printed line and the SSM category it was filed under. A breakdown is filed only when its lines add up to the total above; every category the note did not use is then filed as nil.
+                  </p>
+                </div>
+                {view!.tagLines!.map((note) => {
+                  const status = (view?.extractionNotes ?? []).filter(
+                    (n) => /reconciled|not filed|could not be verified|ignored/.test(n) && n.toLowerCase().includes(rootName(note.root)),
+                  );
+                  return (
+                    <div key={note.root} className="px-4 py-3 border-b border-gray-100 last:border-b-0">
+                      <div className="text-[13px] font-semibold text-gray-800 mb-1.5">{rootName(note.root)}</div>
+                      <table className="w-full text-[13px]">
+                        <thead>
+                          <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
+                            <th className="font-semibold py-1 pr-3">As printed</th>
+                            <th className="font-semibold py-1 pr-3">Filed under</th>
+                            <th className="font-semibold py-1 pr-3 text-right">Current</th>
+                            <th className="font-semibold py-1 text-right">Previous</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {note.lines.map((l, i) => (
+                            <tr key={i} className="border-t border-gray-100">
+                              <td className="py-1 pr-3 text-gray-900">{l.label}</td>
+                              <td className="py-1 pr-3 text-gray-700">{l.conceptLabel || l.concept}</td>
+                              <td className="py-1 pr-3 text-right tabular-nums">{fmtMoney(l.current)}</td>
+                              <td className="py-1 text-right tabular-nums text-gray-600">{fmtMoney(l.previous)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {status.map((n, i) => (
+                        <p key={i} className={cn("text-[13px] mt-1.5", /not filed|could not/.test(n) ? "text-amber-800" : "text-gray-600")}>{n}</p>
+                      ))}
+                    </div>
+                  );
+                })}
+              </section>
+            )}
           </div>
         </div>
       </div>
     </AppShell>
   );
+}
+
+/** "ifrs-smes:PropertyPlantAndEquipment" → "property, plant and equipment" — for
+ *  matching the reconciliation log lines, which use SSM's label. */
+function rootName(root: string): string {
+  return ({
+    "ifrs-smes:PropertyPlantAndEquipment": "property, plant and equipment",
+    "ifrs-smes:InvestmentProperty": "investment property",
+    "ifrs-smes:InventoriesTotal": "inventories",
+  } as Record<string, string>)[root] ?? root.split(":")[1];
 }
 
 function NaButton({ onClick }: { onClick: () => void }) {

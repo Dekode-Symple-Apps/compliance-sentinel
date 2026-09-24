@@ -7361,6 +7361,7 @@ export const runMbrsExtraction = createServerFn({ method: "POST" })
       }
       const normalized = normalizeExtraction(extraction);
       const issues = validateExtraction(normalized);
+      const calcCheck = (await import("./mbrs-xbrl")).generateMbrsXbrl(normalized).calcInconsistencies;
 
       const cost = computeCost(usage, model);
       let sj = await freshSj(supabase, report.id, report.summary_json ?? {});
@@ -7379,6 +7380,7 @@ export const runMbrsExtraction = createServerFn({ method: "POST" })
             mbrs_error: null,
             mbrs_extraction: normalized,
             mbrs_issues: issues,
+            mbrs_calc: calcCheck,
             mbrs_ocr_used: ocrUsed,
             mbrs_model: model,
             mbrs_principal_activities: principalActivities,
@@ -7440,6 +7442,7 @@ export const saveMbrsExtraction = createServerFn({ method: "POST" })
       na: data.na ?? prev.na ?? [],
     });
     const issues = validateExtraction(merged);
+    const calcCheck = (await import("./mbrs-xbrl")).generateMbrsXbrl(merged).calcInconsistencies;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (supabase as any)
@@ -7449,6 +7452,7 @@ export const saveMbrsExtraction = createServerFn({ method: "POST" })
           ...sj,
           mbrs_extraction: merged,
           mbrs_issues: issues,
+            mbrs_calc: calcCheck,
           mbrs_reviewed_at: new Date().toISOString(),
         },
       })
@@ -7488,7 +7492,7 @@ export const generateMbrsXml = createServerFn({ method: "POST" })
       throw new Error(`Cannot generate — ${issues.filter((i) => i.severity === "error").length} validation error(s) must be fixed first:\n• ${first.join("\n• ")}`);
     }
 
-    const { xml, factCount, skipped } = generateMbrsXbrl(extraction);
+    const { xml, factCount, skipped, calcInconsistencies } = generateMbrsXbrl(extraction);
     const filename = mbrsFilename(extraction);
 
     const fresh = await freshSj(supabase, report.id, sj);
@@ -7502,11 +7506,12 @@ export const generateMbrsXml = createServerFn({ method: "POST" })
           mbrs_generated_at: new Date().toISOString(),
           mbrs_fact_count: factCount,
           mbrs_skipped_count: skipped.length,
+          mbrs_calc: calcInconsistencies,
         },
       })
       .eq("id", report.id);
 
-    return { xml, filename, factCount, skipped };
+    return { xml, filename, factCount, skipped, calcInconsistencies };
   });
 
 // ─────────────────────────────────────────────────────────────────────────────

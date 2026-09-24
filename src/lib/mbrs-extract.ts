@@ -16,6 +16,8 @@ import {
   extractPdfPages, pagesToMarkedTextWithGaps, imageOnlyPages,
 } from "./pdf-pages";
 import { type TokenUsage } from "./pricing";
+import { NARRATIVE_LABELS, NARRATIVE_CORE } from "./mbrs-narratives";
+import { TAG_TREES, type TagTree } from "./mbrs-calc";
 import {
   ENTITY_FIELDS, FINANCIAL_FIELDS, NARRATIVE_CONCEPTS,
   emptyExtraction, type MbrsExtraction,
@@ -38,7 +40,11 @@ function fieldCatalogue(): string {
   return `ENTITY / FILING FIELDS (strings; dates strictly yyyy-mm-dd):\n${ent}\n\nFINANCIAL LINE ITEMS (numbers, captured for BOTH periods):\n${fin}`;
 }
 
-const SYSTEM = `You extract structured data from Malaysian audited financial statements (AFS) so it can be converted into an SSM MBRS XBRL filing.
+const SYSTEM = `NON-NEGOTIABLE RULES FOR MBRS LODGEMENT
+- The financial statements are adopted by the board and audited. This is a lodgement, not an adjustment: transcribe figures exactly as the report presents them. Never correct, re-compute, re-classify or "tidy" a figure.
+- Classify every item — revenue especially — exactly as the auditor disclosed it. The auditor's classification is stated in the notes, the accounting policies and the statement captions (e.g. a revenue-recognition policy for "rendering of services" means the revenue IS services). Use the broad "other" field only when none of those describes the item; never infer a category the report does not state, and never override one it does.
+
+You extract structured data from Malaysian audited financial statements (AFS) so it can be converted into an SSM MBRS XBRL filing.
 
 Accuracy matters more than completeness. A wrong number is far worse than a null: the filing is machine-validated by SSM and a mis-keyed figure produces a rejected submission or a materially false statutory filing. If you cannot read a value with confidence, return null and name the field in "missing".
 
@@ -71,12 +77,16 @@ Return ONLY a JSON object of this shape — no markdown fence, no commentary:
   "extractionNotes": ["<short note about anything ambiguous>", ...]
 }`;
 
-function narrativeBrief(): string {
+/** `core` limits the list to the sections real filings used. The main pass
+ *  asks only for those — 143 keys there would crowd out the figures and risk
+ *  truncating the JSON that carries them; the narrative pass asks for all. */
+function narrativeBrief(core = false): string {
+  const keys = core ? NARRATIVE_CORE : NARRATIVE_CONCEPTS;
   return `NARRATIVE DISCLOSURE BLOCKS
 Reproduce the corresponding section of the report as faithful text for each key below, preserving headings and paragraph breaks. Use simple HTML (<p>, <ul>, <li>, <b>) or plain text with newlines. If a section genuinely does not appear in the document, use an empty string — never invent disclosure text.
 
-Keys:
-${NARRATIVE_CONCEPTS.map((c) => `  "${c}"`).join("\n")}`;
+Keys (each with SSM's name for the section it holds):
+${keys.map((c) => `  "${c}"${NARRATIVE_LABELS[c] ? ` — ${NARRATIVE_LABELS[c]}` : ""}`).join("\n")}`;
 }
 
 export interface MbrsExtractResult {
@@ -136,6 +146,7 @@ const NOTE_SOURCED = [
   "buildings", "officeEquipment", "noncurrentBorrowings", "currentBorrowings",
   "deferredTaxLiabilities", "keyManagementCompensation", "auditorsRemuneration",
   "relatedPartyDividendIncome", "relatedPartyRentalExpense",
+  "feesAndCommissionIncome", "otherMiscellaneousIncome", "dividendIncome", "gainsOnDisposal", "interestIncome",
 ] as const;
 
 /**
@@ -315,7 +326,7 @@ export async function extractMbrsFromAfs(
             { text: `\nAUDITED FINANCIAL STATEMENTS:\n\n${textLayer}` },
           ];
 
-  const instruction = [SYSTEM, "", fieldCatalogue(), "", narrativeBrief()].join("\n");
+  const instruction = [SYSTEM, "", fieldCatalogue(), "", narrativeBrief(true)].join("\n");
   const parts = buildParts(instruction, ocrNote);
 
   const response = await generateWithFallback({
@@ -407,6 +418,46 @@ export async function extractMbrsFromAfs(
     // Non-fatal by design: the first pass already produced a usable extraction,
     // and a filing without the refined note figures is better than no filing.
     console.warn("MBRS notes pass failed (non-fatal):", err);
+  }
+
+  // Tagging pass: breakdown notes read as printed lines and mapped into SSM's
+  // calculation tree, then trusted only if they reconcile to the totals the
+  // passes above extracted. Non-fatal — without it the named fields stand.
+  try {
+    const tres = await generateWithFallback({
+      contents: [{ role: "user", parts: buildParts(
+        [TAG_SYSTEM, "", tagBrief()].join("\n"),
+        "\nThe report is attached as a scanned PDF. Read the notes with OCR and list each breakdown line with its carrying amount.",
+      ) }],
+      config: { responseMimeType: "application/json", maxOutputTokens: 8192, temperature: 0 },
+    }, { tier: "quality" });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tm = (tres.usageMetadata ?? {}) as any;
+    usage.inputTokens += tm.promptTokenCount ?? 0;
+    usage.outputTokens += tm.candidatesTokenCount ?? 0;
+    usage.thinkingTokens += tm.thoughtsTokenCount ?? 0;
+    usage.calls += 1;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let tp: any = {};
+    try { tp = JSON.parse(tres.text ?? "{}"); }
+    catch { const mm3 = (tres.text ?? "").match(/\{[\s\S]*\}/); if (mm3) { try { tp = JSON.parse(mm3[0]); } catch { /* keep {} */ } } }
+    const notes: TaggedNote[] = (Array.isArray(tp.notes) ? tp.notes : [])
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .filter((n: any) => n && typeof n.root === "string" && Array.isArray(n.lines))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((n: any) => ({ root: n.root, lines: n.lines
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .filter((l: any) => l && typeof l.concept === "string")
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((l: any) => ({ label: String(l.label ?? ""), concept: l.concept, current: toNum(l.current), previous: toNum(l.previous),
+          conceptLabel: TAG_TREES.flatMap((t) => t.nodes).find((x) => x.c === l.concept)?.label ?? "" })) }));
+    const r = reconcileTagging(notes, extraction.current, extraction.previous);
+    for (const w of r.fieldWrites) extraction[w.period][w.field] = w.value;
+    if (Object.keys(r.tagged).length) extraction.tagged = r.tagged;
+    extraction.tagLines = notes;
+    extraction.extractionNotes = [...(extraction.extractionNotes ?? []), ...r.log];
+  } catch (err) {
+    console.warn("MBRS tagging pass failed (non-fatal):", err);
   }
 
   // Third pass: the narrative disclosures, transcribed in full. Kept only when
@@ -590,4 +641,140 @@ export async function extractMbrsConsensus(
     agreement,
     individual: results.map((r) => r.extraction),
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Note-line tagging: breakdowns read as printed and mapped into SSM's tree.
+//
+// SSM's form breaks property, plant and equipment into some fifteen classes,
+// investment property into five, inventories into five. Asking for each as a
+// named field would not scale to the rest of the taxonomy and would dilute the
+// prompt; instead the note is read as the lines it actually prints, each line
+// is mapped to one concept in that total's calculation subtree, and arithmetic
+// decides whether the mapping is trusted: the lines must roll up to the total
+// already extracted. When they do, every class the note did not use is proven
+// nil and filed as 0 — which is how SSM's own filings look. When they do not,
+// nothing from the breakdown is filed, and the reviewer is told why.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function toNum(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const neg = /^\(.*\)$/.test(v.trim());
+    const n = Number(v.replace(/[(),\s]/g, ""));
+    return Number.isFinite(n) ? (neg ? -n : n) : null;
+  }
+  return null;
+}
+
+export interface TaggedLine { label: string; concept: string; current: number | null; previous: number | null; conceptLabel?: string }
+export interface TaggedNote { root: string; lines: TaggedLine[] }
+
+const TAG_SYSTEM = `You are reading the notes to a set of audited financial statements to break down balance-sheet totals into SSM's MBRS categories.
+
+For EACH note listed below that the report contains, list every line of the breakdown — one entry per class the note shows — with its CARRYING AMOUNT (net book value) at the END of the current year and at the END of the previous year. If the note prints only cost and accumulated depreciation per class, the carrying amount is cost minus accumulated depreciation for that class. Copy each label exactly as printed.
+
+Map each line to exactly ONE concept from that note's list — the most specific concept the line FULLY covers. A line that spans two categories (e.g. "freehold land and buildings", undivided) maps to their common parent. Never split one printed line across concepts, never merge two lines, never invent a line.
+
+Conventions SSM's accepted filings follow:
+- showroom, office building, factory, shoplot, premises → a Building concept, by land tenure if the report states it, otherwise "Buildings"
+- plant and machinery, workshop tools, tools and equipment → Plant and equipment
+- renovation, furniture, fittings, office equipment, computers → Office equipment, fixture and fittings
+- motor vehicles → Vehicles
+- capital work-in-progress → Construction in progress
+- signboards, containers, and anything that fits no named class → Other property, plant and equipment
+- inventories of a trading business (goods, merchandise, vehicles held for sale) → Finished goods; unclear → Other inventories
+
+Omit a note the report does not contain. Return ONLY JSON:
+{"notes":[{"root":"<root concept>","lines":[{"label":"as printed","concept":"<a concept from that note's list>","current":<number|null>,"previous":<number|null>}]}]}`;
+
+function tagBrief(): string {
+  return TAG_TREES.map((t) => {
+    const depth = (n: { parent: string }): number => {
+      let d = 0, p = n.parent;
+      while (p !== t.root && d < 6) { p = t.nodes.find((x) => x.c === p)?.parent ?? t.root; d++; }
+      return d;
+    };
+    return `NOTE: ${t.rootLabel}  (root "${t.root}")\n` +
+      t.nodes.map((n) => `${"  ".repeat(depth(n) + 1)}"${n.c}" — ${n.label}`).join("\n");
+  }).join("\n\n");
+}
+
+/**
+ * Decide what a tagged breakdown is allowed to file. Pure — no I/O — so the
+ * rules can be tested on their own. Per tree and per period: roll the mapped
+ * lines up the tree; if the result equals the extracted total (within one unit
+ * per line, for printed rounding), every node gets a value — its lines, or 0 —
+ * written to its named field where it has one and to `tagged` where it does
+ * not. Otherwise nothing is written and a note says why.
+ */
+export function reconcileTagging(
+  notes: TaggedNote[],
+  current: Record<string, number | null | undefined>,
+  previous: Record<string, number | null | undefined>,
+  trees: TagTree[] = TAG_TREES,
+): {
+  tagged: Record<string, { current?: number; previous?: number }>;
+  fieldWrites: { period: "current" | "previous"; field: string; value: number }[];
+  log: string[];
+} {
+  const tagged: Record<string, { current?: number; previous?: number }> = {};
+  const fieldWrites: { period: "current" | "previous"; field: string; value: number }[] = [];
+  const log: string[] = [];
+  for (const t of trees) {
+    const note = notes.find((n) => n.root === t.root);
+    if (!note?.lines?.length) continue;
+    const known = new Set(t.nodes.map((n) => n.c));
+    const lines = note.lines.filter((l) => known.has(l.concept));
+    const dropped = note.lines.length - lines.length;
+    if (dropped) log.push(`${t.rootLabel}: ${dropped} line(s) mapped to no valid category were ignored.`);
+    for (const period of ["current", "previous"] as const) {
+      const direct = new Map<string, number>();
+      let n = 0;
+      for (const l of lines) {
+        const v = l[period];
+        if (typeof v !== "number" || !Number.isFinite(v)) continue;
+        direct.set(l.concept, (direct.get(l.concept) ?? 0) + v);
+        n++;
+      }
+      if (!n) continue;
+      const totals = new Map<string, number>();
+      const total = (c: string): number => {
+        if (totals.has(c)) return totals.get(c)!;
+        const v = (direct.get(c) ?? 0) + t.nodes.filter((x) => x.parent === c).reduce((a, x) => a + total(x.c), 0);
+        totals.set(c, v);
+        return v;
+      };
+      const rolled = t.nodes.filter((x) => x.parent === t.root).reduce((a, x) => a + total(x.c), 0);
+      const target = (period === "current" ? current : previous)[t.rootField];
+      if (typeof target !== "number") {
+        log.push(`${t.rootLabel} (${period} year): breakdown read, but the total was not extracted, so it could not be verified and was not filed.`);
+        continue;
+      }
+      if (Math.abs(rolled - target) > Math.max(1, n)) {
+        log.push(`${t.rootLabel} (${period} year): the note's lines add up to ${Math.round(rolled).toLocaleString()} but the total is ${Math.round(target).toLocaleString()} — breakdown not filed; review the note.`);
+        continue;
+      }
+      // A node is proven nil only if nothing maps to it, its descendants, OR
+      // its ancestors. A line filed on a parent ("Buildings", tenure not
+      // stated) says nothing about how that amount splits beneath it — those
+      // children are unknown and stay unfiled, not zero.
+      const underLine = (c: string): boolean => {
+        let p = t.nodes.find((x) => x.c === c)?.parent;
+        while (p && p !== t.root) {
+          if (direct.has(p)) return true;
+          p = t.nodes.find((x) => x.c === p)?.parent;
+        }
+        return false;
+      };
+      for (const node of t.nodes) {
+        const v = Math.round(total(node.c) * 100) / 100;
+        if (v === 0 && underLine(node.c)) continue;
+        if (node.field) fieldWrites.push({ period, field: node.field, value: v });
+        else (tagged[node.c] ??= {})[period] = v;
+      }
+      log.push(`${t.rootLabel} (${period} year): ${n} note line(s) reconciled to the total of ${Math.round(target).toLocaleString()}.`);
+    }
+  }
+  return { tagged, fieldWrites, log };
 }
