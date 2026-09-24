@@ -148,7 +148,8 @@ def requirements():
 
     labels = reqmap.parse_labels(TAX, byid)
     pres = reqmap.parse_presentation(f"{TAX}/rep/ssm/ca-2016/fs/mpers", byid)
-    rules, mand_names = reqmap.mandatory_concepts(RULES)
+    rules, items = reqmap.mandatory_concepts(RULES)
+    req, unmatched = reqmap.match_requirements(items, pres, labels)
 
     tmpl = open(f"{PROJ}/src/lib/mbrs-template.ts", encoding="utf-8").read()
     slots, bound, literal, narrative = set(), {}, set(), set()
@@ -168,13 +169,11 @@ def requirements():
             narrative.add(q)
 
     def mandatory(q):
-        lab = (labels.get(q) or "").lower()
-        if not lab:
-            return ""
-        for nm, rid in mand_names:
-            if nm == lab or (len(nm) > 12 and nm in lab) or (len(lab) > 12 and lab in nm):
-                return rid
-        return ""
+        """"required" / "required if …" / "" — from the parsed business rules."""
+        r = req.get(q)
+        if not r or r["alternative"]:
+            return "", ""
+        return ("required if " + r["condition"][:90]) if r["conditional"] else "required", r["rule"]
 
     out = []
     for role, label in reqmap.PROFILE_ROLES.items():
@@ -186,12 +185,13 @@ def requirements():
                      ("fixed value" if q in literal else
                       ("narrative" if q in narrative else
                        ("box only, unbound" if q in slots else "NOT IN TEMPLATE")))
+            mand, rule = mandatory(q)
             out.append({"role": role, "section": f"[{role}] {label}", "q": q,
                         "label": labels.get(q, ""), "type": e["type"].replace("ItemType", ""),
-                        "period": e.get("period", ""), "mandatory": mandatory(q),
+                        "period": e.get("period", ""), "mandatory": mand, "rule": rule,
                         "status": status, "field": bound.get(q, ""),
                         "have": status.startswith(("bound", "fixed", "narrative"))})
-    return out, rules
+    return out, rules, unmatched
 
 
 # ── report ──────────────────────────────────────────────────────────────────
@@ -199,14 +199,15 @@ def requirements():
 def main(out_path=None):
     out_path = out_path or os.path.expanduser("~/Desktop/01. Demo Data/MBRS Gap Analysis/MBRS_Analysis.xlsx")
     facts, per, seen = compare()
-    reqs, rules = requirements()
+    reqs, rules, unmatched = requirements()
 
     tot_exp = sum(a for _, a, _ in per.values())
     tot_right = sum(r for _, _, r in per.values())
     outcomes = Counter(f["Outcome"] for f in facts if f["Outcome"] != "right")
     n_report = len(reqs)
     n_have = sum(1 for r in reqs if r["have"])
-    mand = [r for r in reqs if r["mandatory"]]
+    mand = [r for r in reqs if r["mandatory"] == "required"]
+    cond = [r for r in reqs if r["mandatory"].startswith("required if")]
     n_mand_have = sum(1 for r in mand if r["have"])
 
     # join: what the taxonomy says × what the filings showed
@@ -220,7 +221,7 @@ def main(out_path=None):
                          else "" if ev else "never used by a sample filing")
 
     latent = [r for r in reqs if not r["have"] and not r["used_by"]]
-    latent_mand = [r for r in latent if r["mandatory"]]
+    latent_mand = [r for r in latent if r["mandatory"] == "required"]
 
     try:
         from openpyxl import Workbook
@@ -256,8 +257,11 @@ def main(out_path=None):
     ws.append(["Measured against the FS-MPERS taxonomy — the authoritative field set."])
     ws.append(["Reportable concepts in our filing profile", n_report])
     ws.append(["…we can produce", n_have, f"{round(100*n_have/n_report,1)}%"])
-    ws.append(["Mandatory concepts (named by a business rule)", len(mand)])
-    ws.append(["…we can produce", n_mand_have, f"{round(100*n_mand_have/len(mand),1)}%"])
+    ws.append(["Required unconditionally (a business rule names it)", len(mand)])
+    ws.append(["…we can produce", n_mand_have, f"{round(100*n_mand_have/len(mand),1) if mand else 0}%"])
+    ws.append(["Required only when a condition holds (e.g. a third director signed)", len(cond)])
+    ws.append(["…we can produce", sum(1 for r in cond if r["have"])])
+    ws.append(["Rule items that matched no concept exactly — see 'Unmatched rule items'", len(unmatched)])
     ws.append([])
     ws.append(["Latent gap: in the taxonomy, no box, no sample filing used it", len(latent)])
     ws.append(["…of which mandatory", len(latent_mand)])
@@ -284,7 +288,7 @@ def main(out_path=None):
     for sec, rs in bysec.items():
         n = len(rs)
         h = sum(1 for r in rs if r["have"])
-        m = [r for r in rs if r["mandatory"]]
+        m = [r for r in rs if r["mandatory"] == "required"]
         ws2.append([sec, n, h, round(100 * h / n, 1) if n else 0, len(m),
                     sum(1 for r in m if r["have"]), sum(1 for r in rs if r["used_by"]),
                     sum(1 for r in rs if not r["have"] and not r["used_by"])])
@@ -297,16 +301,16 @@ def main(out_path=None):
 
     # 3 — every concept, joined
     ws3 = wb.create_sheet("Requirements")
-    ws3.append(["Section", "Concept", "Label", "Type", "Period", "Mandatory (rule)",
+    ws3.append(["Section", "Concept", "Label", "Type", "Period", "Requirement", "Rule",
                 "Our status", "Field", "Used by", "Evidence from filings"])
     for r in reqs:
-        ws3.append([r["section"], r["q"], r["label"], r["type"], r["period"], r["mandatory"],
+        ws3.append([r["section"], r["q"], r["label"], r["type"], r["period"], r["mandatory"], r["rule"],
                     r["status"], r["field"], r["used_by"], r["evidence"]])
     for c in ws3[1]:
         c.font = B
     for row in ws3.iter_rows(min_row=2):
-        st = row[6].value or ""
-        row[6].fill = grn if st.startswith(("bound", "fixed", "narrative")) else (amb if "box only" in st else red)
+        st = row[7].value or ""
+        row[7].fill = grn if st.startswith(("bound", "fixed", "narrative")) else (amb if "box only" in st else red)
         if row[5].value:
             row[5].fill = amb
     ws3.auto_filter.ref = ws3.dimensions
@@ -319,8 +323,12 @@ def main(out_path=None):
     ws4.append(["Priority", "Section", "Label", "Concept", "Why"])
     for r in mand:
         if not r["have"]:
-            ws4.append(["1 — mandatory, missing", r["section"], r["label"], r["q"],
-                        f"Business rule {r['mandatory']} requires it; no box in our template"])
+            ws4.append(["1 — required, missing", r["section"], r["label"], r["q"],
+                        f"Business rule {r['rule']} requires it; no box in our template"])
+    for r in cond:
+        if not r["have"]:
+            ws4.append(["1b — required when applicable", r["section"], r["label"], r["q"],
+                        f"Rule {r['rule']}: {r['mandatory']}"])
     for r in reqs:
         if not r["have"] and r["used_by"]:
             ws4.append(["2 — a real filing used it", r["section"], r["label"], r["q"],
@@ -337,7 +345,7 @@ def main(out_path=None):
         ws4.column_dimensions[col].width = w
     for row in ws4.iter_rows(min_row=2):
         p = str(row[0].value)
-        row[0].fill = red if p.startswith("1") else (amb if p.startswith("2") else grey)
+        row[0].fill = red if p.startswith("1 ") else (amb if p.startswith(("1b", "2")) else grey)
 
     # 5 — box by box
     ws5 = wb.create_sheet("Box by box")
@@ -353,7 +361,18 @@ def main(out_path=None):
     for col, w in (("D", 46), ("E", 34), ("F", 40), ("G", 40)):
         ws5.column_dimensions[col].width = w
 
-    # 6 — business rules
+    # 6 — rule items with no exact concept match: map by hand, never guessed
+    wsu = wb.create_sheet("Unmatched rule items")
+    wsu.append(["Rule", "Section", "Item as written", "Conditional", "Condition"])
+    for it in unmatched:
+        wsu.append([it["rule"], it["elr"], it["item"], "yes" if it["conditional"] else "", it["condition"][:120]])
+    for c in wsu[1]:
+        c.font = B
+    wsu.auto_filter.ref = wsu.dimensions
+    for col, w in (("A", 26), ("B", 30), ("C", 80), ("E", 80)):
+        wsu.column_dimensions[col].width = w
+
+    # 7 — business rules
     ws6 = wb.create_sheet("Business rules")
     ws6.append(["Rule ID", "Section", "Severity", "Requirement"])
     for ru in rules:
@@ -378,7 +397,9 @@ def main(out_path=None):
         print(f"      {v:>4}  {k}")
     print(f"\n2. Taxonomy coverage (FS-MPERS, our filing profile)")
     print(f"   reportable concepts {n_report:>5}   we produce {n_have:>5}  {100*n_have/n_report:5.1f}%")
-    print(f"   mandatory           {len(mand):>5}   we produce {n_mand_have:>5}  {100*n_mand_have/len(mand):5.1f}%")
+    print(f"   required            {len(mand):>5}   we produce {n_mand_have:>5}  {100*n_mand_have/len(mand) if mand else 0:5.1f}%")
+    print(f"   required-if         {len(cond):>5}   we produce {sum(1 for r in cond if r['have']):>5}")
+    print(f"   rule items with no exact concept match: {len(unmatched)}")
     print(f"   latent (no box, never seen in a sample) {len(latent):>5}   of which mandatory {len(latent_mand)}")
 
 

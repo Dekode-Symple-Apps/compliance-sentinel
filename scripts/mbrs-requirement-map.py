@@ -92,8 +92,16 @@ def parse_elements(root):
     return elems
 
 
+ALL_LABELS = defaultdict(set)  # concept -> every English label, any role
+
+
 def parse_labels(root, byid):
-    """English labels from the core and entry-point label files."""
+    """English labels from the core and entry-point label files.
+
+    Returns the standard label per concept, and records every other role
+    (total, net, and the "Reporting…" labels mTool shows on screen) in
+    ALL_LABELS — SSM's business rules are written in mTool's wording, so
+    matching them needs those roles, not just the standard label."""
     labels = {}
     files = (glob.glob(f"{root}/def/**/lab_en*.xml", recursive=True)
              + glob.glob(f"{root}/def/**/lab_*-en_*.xml", recursive=True)
@@ -111,7 +119,10 @@ def parse_labels(root, byid):
             for a in ext.iter(f"{LK}labelArc"):
                 q = loc.get(a.get(f"{XL}from"))
                 for role, txt in lab.get(a.get(f"{XL}to"), []):
-                    if role == "label" and q and q not in labels:
+                    if not q or not txt:
+                        continue
+                    ALL_LABELS[q].add(txt)
+                    if role == "label" and q not in labels:
                         labels[q] = txt
     return labels
 
@@ -177,8 +188,61 @@ def parse_dimensions(mp, byid):
     return dims
 
 
+# Which presentation roles a business rule's section ("ELR name") refers to.
+# A rule's named items are matched only against concepts in these roles, so a
+# rule about the face of the income statement cannot claim a note text block
+# that merely shares a word with it.
+ELR_ROLES = {
+    "filing information": None,  # DEI concepts — matched across the whole DTS
+    "scope of filing": {"020000"},
+    "directors report": {"120000"},
+    "statement by directors": {"120100"},
+    "director business review": {"120200"},
+    "auditors report to members": {"130000"},
+    "statement of financial position": {"200100", "200200", "210000", "210100"},
+    "statement of profit or loss": {"300100", "300200", "310000", "310100"},
+    "statement of cash flows": {"500100", "520000"},
+    "statement of changes in equity": {"610000"},
+    "statement of retained earnings": {"620000"},
+    "corporate information": {"710000"},
+    "summary of significant accounting policies": {"720000"},
+    "issued capital": {"740000"},
+    "related party transactions": {"750000"},
+}
+# MPERS lets a company present a statement of retained earnings INSTEAD of a
+# statement of changes in equity; this system files the latter, so the former's
+# rules do not bind it.
+ALTERNATIVE_STATEMENTS = {"statement of retained earnings"}
+
+
+_STOP = {"the", "a", "an"}
+
+
+def _norm(t):
+    """Normalise wording so mTool's phrasing and the taxonomy's labels compare
+    equal when they name the same thing: case, quotes, apostrophes, articles,
+    "(text block)" vs "[text block]", and a trailing plural s. Matching stays
+    exact after this — no substring or similarity scoring."""
+    t = (t or "").lower()
+    t = re.sub(r"[\u2018\u2019'`]", "", t)
+    t = re.sub(r"\(text block\)|\[text block\]", " text block ", t)
+    t = re.sub(r"[^a-z0-9 ]+", " ", t)
+    words = [w for w in t.split() if w not in _STOP]
+    words = [w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w for w in words]
+    return " ".join(words)
+
+
+_ORD = r"(?:first|second|third|fourth|fifth)"
+
+
 def mandatory_concepts(xlsx):
-    """Concept labels the FS-MPERS business rules say MUST be reported."""
+    """The FS-MPERS business rules, each parsed into the items it requires.
+
+    Returns (rules, items): every rule, and for the presence rules the list of
+    {rule, elr, item, conditional, condition} to be matched to concepts by
+    exact label. Rules that compare values ("must be greater than") are
+    validation, not presence, and name no required item.
+    """
     try:
         from openpyxl import load_workbook
     except ImportError:
@@ -186,26 +250,104 @@ def mandatory_concepts(xlsx):
     wb = load_workbook(xlsx, read_only=True, data_only=True)
     if "FS-MPERS - CA2016" not in wb.sheetnames:
         return [], []
-    rules = []
+    rules, items = [], []
     for r in wb["FS-MPERS - CA2016"].iter_rows(min_row=3, values_only=True):
         if not r or not r[2]:
             continue
-        ep, elr, rid, pre, en = (list(r) + [None] * 7)[:5]
-        sev = (list(r) + [None] * 7)[6]
-        if en:
-            rules.append({"id": str(rid), "elr": str(elr or ""), "sev": str(sev or ""), "text": str(en)})
-    # phrases named before "MUST be reported" — matched against labels later
-    names = []
-    for ru in rules:
-        for m in re.finditer(r'"([^"]{3,80})"', ru["text"]):
-            names.append((m.group(1).strip().lower(), ru["id"]))
-        head = re.split(r"\s+(?:MUST|must)\s+be\s+reported", ru["text"])[0]
-        if head and len(head) < 200 and '"' not in head:
-            for part in head.split(","):
-                p = part.strip().strip(".").lower()
-                if 3 < len(p) < 80:
-                    names.append((p, ru["id"]))
-    return rules, names
+        cells = list(r) + [None] * 8
+        elr, rid, en, sev = str(cells[1] or ""), str(cells[2]), str(cells[4] or ""), str(cells[6] or "")
+        if not en:
+            continue
+        rules.append({"id": rid, "elr": elr, "sev": sev, "text": en})
+        txt = en.replace("\u201c", '"').replace("\u201d", '"')
+        if not re.search(r"must\s+be\s+reported|mandatory\s+to\s+be\s+reported|is\s+mandatory", txt, re.I):
+            continue
+        # Group-only obligations do not bind a separate-entity filing.
+        if re.search(r'selects\s+"?group"?', txt, re.I):
+            continue
+        cond = re.match(r"^\s*(?:when|if)\b(.*?)\bthen\b(.*)$", txt, re.I | re.S)
+        # "X must be reported if Y" — the condition trails the obligation.
+        trail = re.search(r"(?:must\s+be\s+reported|mandatory\s+to\s+be\s+reported)\s+(?:if|when)\b(.*)$", txt, re.I | re.S)
+        if cond:
+            condition, body = cond.group(1).strip(), cond.group(2)
+        elif trail:
+            condition, body = trail.group(1).strip(), txt[: trail.start()] + " MUST be reported"
+        else:
+            condition, body = "", txt
+        body = re.split(r"(?:->)?\s*(?:must|is)\s+(?:be\s+reported|mandatory)", body, flags=re.I)[0]
+        body = re.sub(r"^\s*error:\s*", "", body, flags=re.I)
+        # "… for first, second and third director" names which directors the
+        # generic items apply to; lift it out before splitting the list.
+        ords = []
+        tail = re.search(rf"\bfor\s+((?:{_ORD}[\s,]*(?:and\s+)?)+)director\b", body, re.I)
+        if tail:
+            ords = re.findall(_ORD, tail.group(1), re.I)
+            body = body[: tail.start()] + body[tail.end():]
+        whole = re.sub(r'["\u201c\u201d]', "", body).strip().strip(".").strip()
+        parts = [p.strip().strip(".").strip() for p in re.split(r'["\u201c\u201d]|,', body)]
+        parts = [p for p in parts if len(p) > 3 and not re.fullmatch(rf"(?:and\s+)?(?:{_ORD}|and|for|director|\s)+", p, re.I)]
+
+        def expand(text):
+            if not ords or "director" not in text.lower():
+                return [text]
+            g = re.sub(r"\b(?:of\s+)?(?:the\s+)?(?:first\s+)?director\b", lambda m: ("of " if m.group(0).lower().startswith("of") else "") + "{ORD} director", text, count=1, flags=re.I)
+            return [g.replace("{ORD}", o.lower()) for o in dict.fromkeys(x.lower() for x in ords)]
+
+        items.append({"rule": rid, "elr": elr, "whole": expand(whole), "parts": [e for p in parts for e in expand(p)],
+                      "conditional": bool(condition), "condition": condition})
+    return rules, items
+
+
+def match_requirements(items, pres, labels):
+    """Exact (normalised) label match against every label role, scoped to each
+    rule's own section. A rule's whole phrase is tried first — "Disclosure of
+    occurrence of any substantial, material or unusual…" is one item that
+    happens to contain commas — and only if that fails is it split into a list.
+
+    Returns concept -> {rule, conditional, condition, alternative}, plus the
+    items that matched nothing, for a person to map by hand."""
+    by_role = defaultdict(dict)
+    every = {}
+    for role, seq in pres.items():
+        for q, _d, _p in seq:
+            for lab in ALL_LABELS.get(q, set()) | {labels.get(q, "")}:
+                k = _norm(lab)
+                if k:
+                    by_role[role].setdefault(k, q)
+    # Filing-information (DEI) concepts are presented outside the FS-MPERS
+    # roles, so an unscoped rule is matched against every labelled concept.
+    for q, labs in ALL_LABELS.items():
+        for lab in labs:
+            k = _norm(lab)
+            if k:
+                every.setdefault(k, q)
+    req, unmatched = {}, []
+
+    def put(q, it, elr):
+        entry = {"rule": it["rule"], "conditional": it["conditional"], "condition": it["condition"],
+                 "alternative": elr in ALTERNATIVE_STATEMENTS}
+        prev = req.get(q)
+        if not prev or (prev["conditional"] and not entry["conditional"]):
+            req[q] = entry
+
+    for it in items:
+        elr = it["elr"].strip().lower()
+        roles = ELR_ROLES.get(elr, "unknown")
+        cands = every if roles is None or roles == "unknown" else \
+            {k: v for r in roles for k, v in by_role.get(r, {}).items()}
+        hits = [cands.get(_norm(w)) for w in it["whole"]]
+        if all(hits):
+            for q in hits:
+                put(q, it, elr)
+            continue
+        for p in it["parts"]:
+            q = cands.get(_norm(p))
+            if q:
+                put(q, it, elr)
+            else:
+                unmatched.append({"rule": it["rule"], "elr": it["elr"], "item": p,
+                                  "conditional": it["conditional"], "condition": it["condition"]})
+    return req, unmatched
 
 
 def main(root, rules_xlsx, out_path="MBRS_Requirement_Map.xlsx"):
@@ -221,7 +363,8 @@ def main(root, rules_xlsx, out_path="MBRS_Requirement_Map.xlsx"):
     labels = parse_labels(root, byid)
     pres = parse_presentation(mp, byid)
     dims = parse_dimensions(mp, byid)
-    rules, mand_names = mandatory_concepts(rules_xlsx)
+    rules, items = mandatory_concepts(rules_xlsx)
+    req, unmatched = match_requirements(items, pres, labels)
 
     # our side
     proj = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -245,13 +388,10 @@ def main(root, rules_xlsx, out_path="MBRS_Requirement_Map.xlsx"):
             narrative.add(q)
 
     def is_mandatory(q):
-        lab = (labels.get(q) or "").lower()
-        if not lab:
+        r = req.get(q)
+        if not r or r["alternative"]:
             return ""
-        for name, rid in mand_names:
-            if name == lab or (len(name) > 12 and name in lab) or (len(lab) > 12 and lab in name):
-                return rid
-        return ""
+        return r["rule"] + (" (if " + r["condition"][:60] + ")" if r["conditional"] else "")
 
     rows, summary = [], []
     for role, label in PROFILE_ROLES.items():
@@ -276,7 +416,7 @@ def main(root, rules_xlsx, out_path="MBRS_Requirement_Map.xlsx"):
                 n_report += 1
             if have:
                 n_have += 1
-            if mand:
+            if mand and "(if " not in mand:
                 n_mand += 1
                 if have:
                     n_mand_have += 1
