@@ -91,6 +91,14 @@ export const ENTITY_FIELDS: FieldSpec[] = [
   { key: "financialStatementsType", label: "Separate or consolidated", group: "entity", type: "text", periodic: false, hint: "\"Separate\" for a standalone company; \"Consolidated\" if the accounts consolidate subsidiaries" },
   { key: "incomeStatementFormat", label: "Income statement presentation", group: "entity", type: "text", periodic: false, hint: "\"By function\" if it shows cost of sales / gross profit; \"By nature\" if it lists purchases, staff costs, depreciation" },
   { key: "auditStatus", label: "Audit status", group: "entity", type: "text", periodic: false, hint: "Audited or Unaudited" },
+  // Scoping declarations. These were frozen donor literals ("Subsequent
+  // preparation", "No", "Indirect", …); now read from the report, with the old
+  // literal kept only as the fallback when the report is silent.
+  { key: "fsPreparation", label: "First or subsequent financial statements", group: "entity", type: "text", periodic: false, hint: "\"First\" if these are the company's first financial statements since incorporation (no comparative year); otherwise \"Subsequent\"" },
+  { key: "comparativesRestated", label: "Comparative figures restated?", group: "entity", type: "text", periodic: false, hint: "Yes if any prior-year column is labelled restated or a prior-year adjustment is disclosed; otherwise No" },
+  { key: "cashFlowMethod", label: "Cash flow statement method", group: "entity", type: "text", periodic: false, hint: "\"Indirect\" if operating cash flow starts from profit before tax; \"Direct\" if it lists receipts from customers and payments to suppliers" },
+  { key: "equityStatementType", label: "Equity statement presented", group: "entity", type: "text", periodic: false, hint: "\"Statement of changes in equity\", or \"Statement of income and retained earnings\" if the report presents that instead" },
+  { key: "businessStatus", label: "Carrying on business during the year?", group: "entity", type: "text", periodic: false, hint: "\"Carrying on business\" unless the directors' report says the company was dormant or did not carry on business" },
   { key: "directorsOtherBenefits", label: "Directors received other benefits by contract?", group: "entity", type: "text", periodic: false, hint: "Yes or No, from the Directors' Report" },
   { key: "contingentLiabilityEnforceable", label: "Contingent liability enforceable within 12 months?", group: "entity", type: "text", periodic: false, hint: "Yes or No, from the Directors' Report" },
   { key: "materialUnusualEvents", label: "Substantial, material or unusual items/events?", group: "entity", type: "text", periodic: false, hint: "Yes or No, from the Directors' Report" },
@@ -314,7 +322,13 @@ export interface MbrsExtraction {
    *  reconciled to the total (see reconcileTagging in mbrs-extract). */
   tagged?: Record<string, { current?: number | null; previous?: number | null }>;
   /** The note lines the tagging pass read, kept as evidence for the reviewer. */
-  tagLines?: { root: string; lines: { label: string; concept: string; current: number | null; previous: number | null; conceptLabel?: string }[] }[];
+  tagLines?: { root: string; rootLabel?: string; lines: { label: string; concept: string; current: number | null; previous: number | null; conceptLabel?: string }[] }[];
+  /** The related-party note, current year: concept → counterparty category
+   *  (a CategoriesOfRelatedPartiesAxis member) → amount. Filed cell by cell,
+   *  with the all-parties total as their sum. */
+  rptGrid?: Record<string, Record<string, number>>;
+  /** The related-party lines as read, kept as evidence for the reviewer. */
+  rptLines?: { label: string; concept: string; party: string; amount: number | null; conceptLabel?: string; partyLabel?: string }[];
   /** Per-field agreement across consensus runs, keyed "current.<field>" etc.
    *  Only fields that were NOT unanimous are recorded. */
   agreement?: Record<string, { level: "unanimous" | "majority" | "disputed"; candidates: Array<number | string | null> }>;
@@ -423,6 +437,7 @@ export const DERIVED_KEYS = new Set(DERIVED.map((d) => d.key));
 /** Entity values computed in normalizeEntity rather than extracted — never
  *  asked of the model, but bound in the template. */
 export const DERIVED_ENTITY_KEYS = new Set([
+  "reportingPeriodChanged", "companyStatus",
   ...DIRECTOR_SLOTS.map((d) => `${d}Responsible`),
   "otherResponsibleName", "otherResponsibleId", "otherResponsibleIdType",
 ]);
@@ -436,7 +451,9 @@ export const DERIVED_ENTITY_KEYS = new Set([
 function unsplitEcho(values: PeriodValues): PeriodValues {
   const out = { ...values };
   const total = num(out.investmentProperty);
-  if (total !== null && total !== 0 && num(out.investmentPropertyFreehold) === total) {
+  // Not an echo when the note breakdown reconciled: that pass proves the rest
+  // nil (other = 0), and a report that says "freehold building" means it.
+  if (total !== null && total !== 0 && num(out.investmentPropertyFreehold) === total && num(out.investmentPropertyOther) === null) {
     out.investmentPropertyFreehold = null;
   }
   return out;
@@ -604,6 +621,39 @@ function normalizeEntity(entity: EntityValues): EntityValues {
   }
 
   if (out.registrationNumber) out.registrationNumber = out.registrationNumber.replace(/\D/g, "");
+
+  // Scoping declarations onto SSM's enumerations. Anything unrecognised is
+  // cleared, so the filing falls back to the default rather than emitting a
+  // value outside the enumeration.
+  const pick = (v: string | undefined, table: [RegExp, string][]): string | undefined =>
+    v ? table.find(([re]) => re.test(v))?.[1] : undefined;
+  const set = (k: string, v: string | undefined) => { if (v) out[k] = v; else delete out[k]; };
+  set("fsPreparation", pick(out.fsPreparation, [
+    [/first/i, "First time preparation of financial statements after incorporation"],
+    [/subsequent/i, "Subsequent preparation of financial statements"],
+  ]));
+  set("comparativesRestated", pick(out.comparativesRestated, [[/^\s*y/i, "Yes"], [/^\s*n/i, "No"]]));
+  set("cashFlowMethod", pick(out.cashFlowMethod, [[/indirect/i, "Indirect"], [/direct/i, "Direct"]]));
+  set("equityStatementType", pick(out.equityStatementType, [
+    [/retained/i, "Statement of Retained Earnings"], [/changes/i, "Statement of Changes In Equity"],
+  ]));
+  set("businessStatus", pick(out.businessStatus, [
+    [/not|dormant/i, "Not carrying on business activities"], [/carrying/i, "Carrying on business activities"],
+  ]));
+
+  // A comparative year means these are not the first statements, whatever
+  // the model said.
+  if (out.previousPeriodEnd) out.fsPreparation = "Subsequent preparation of financial statements";
+  // Changed reporting period: the current year is not a year long. Only asked
+  // of a subsequent set — a first period of odd length is not a change.
+  const days = (a?: string, b?: string) =>
+    a && b ? Math.round((Date.parse(b) - Date.parse(a)) / 86_400_000) + 1 : NaN;
+  const len = days(out.currentPeriodStart, out.currentPeriodEnd);
+  if (Number.isFinite(len) && out.previousPeriodEnd) out.reportingPeriodChanged = len >= 360 && len <= 371 ? "No" : "Yes";
+  // Private (Sdn. Bhd.) or public (Berhad) — from the name the report prints.
+  const nm = out.entityName ?? "";
+  if (/\b(sdn\.?|sendirian)\b/i.test(nm)) out.companyStatus = "Private company";
+  else if (/\b(bhd\.?|berhad)\s*$/i.test(nm.trim())) out.companyStatus = "Public company";
 
   return out;
 }
@@ -857,6 +907,27 @@ export function validateProfile(entity: EntityValues): ValidationIssue[] {
       severity: "error", group: "entity",
       message: "The income statement is presented BY NATURE. This template is the by-function variant (cost of sales / gross profit); mTool generates different templates for the two.",
       fields: ["incomeStatementFormat"],
+    });
+  }
+  if (entity.cashFlowMethod === "Direct") {
+    out.push({
+      severity: "error", group: "entity",
+      message: "The cash flow statement uses the DIRECT method. This template carries the indirect-method cash flow boxes (starting from profit before tax); a direct-method statement needs different boxes.",
+      fields: ["cashFlowMethod"],
+    });
+  }
+  if (entity.equityStatementType === "Statement of Retained Earnings") {
+    out.push({
+      severity: "error", group: "entity",
+      message: "The report presents a statement of income and retained earnings instead of a statement of changes in equity. SSM files that as a different statement (SORE); this template carries only the statement of changes in equity.",
+      fields: ["equityStatementType"],
+    });
+  }
+  if (entity.reportingPeriodChanged === "Yes") {
+    out.push({
+      severity: "warning", group: "entity",
+      message: "The current financial period is not twelve months long, so the filing declares a change in the reporting period. Confirm this against the directors' report.",
+      fields: ["currentPeriodStart", "currentPeriodEnd"],
     });
   }
   if (says(entity.auditStatus, "unaudited")) {

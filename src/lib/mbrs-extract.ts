@@ -17,10 +17,10 @@ import {
 } from "./pdf-pages";
 import { type TokenUsage } from "./pricing";
 import { NARRATIVE_LABELS, NARRATIVE_CORE } from "./mbrs-narratives";
-import { TAG_TREES, type TagTree } from "./mbrs-calc";
+import { TAG_TREES, RPT_GRID, type TagTree, type RptSpec } from "./mbrs-calc";
 import {
   ENTITY_FIELDS, FINANCIAL_FIELDS, NARRATIVE_CONCEPTS,
-  emptyExtraction, type MbrsExtraction,
+  emptyExtraction, normalizeExtraction, type MbrsExtraction,
   REGISTRY_ONLY_ENTITY_KEYS,
 } from "./mbrs";
 
@@ -267,9 +267,14 @@ A returned section running to many thousands of characters is a sign you have sw
 OUTPUT — JSON only, no fence:
 { "narratives": { "<concept>": "<full text>", ... } }`;
 
-export async function extractMbrsFromAfs(
+export type PartsBuilder = (instruction: string, ocrHint: string) => Array<Record<string, unknown>>;
+
+/** How a report is put in front of the model — text layer, full scan, or
+ *  both — shared by every pass, and exported so a single pass can be re-run
+ *  on a stored report without paying for the others. */
+export async function prepareAfsInput(
   file: { buffer: Buffer; mimeType: string },
-): Promise<MbrsExtractResult> {
+): Promise<{ buildParts: PartsBuilder; ocrUsed: boolean; ocrNote: string }> {
   // Prefer the text layer — cheaper, and far more reliable for exact digits
   // than reading them off a rasterised page. But the choice is not all or
   // nothing: a report can be typed throughout and still have its signature
@@ -311,7 +316,7 @@ export async function extractMbrsFromAfs(
   /** Assemble the model input for one pass, in whichever of the three modes
    *  this document needs. `ocrHint` is the wording used when the whole report
    *  is a scan; the hybrid and text modes always lead with the text layer. */
-  const buildParts = (instruction: string, ocrHint: string) =>
+  const buildParts: PartsBuilder = (instruction, ocrHint) =>
     ocrUsed
       ? [{ text: instruction }, { text: ocrHint }, pdfPart]
       : hybrid
@@ -325,6 +330,14 @@ export async function extractMbrsFromAfs(
             { text: instruction },
             { text: `\nAUDITED FINANCIAL STATEMENTS:\n\n${textLayer}` },
           ];
+
+  return { buildParts, ocrUsed, ocrNote };
+}
+
+export async function extractMbrsFromAfs(
+  file: { buffer: Buffer; mimeType: string },
+): Promise<MbrsExtractResult> {
+  const { buildParts, ocrUsed, ocrNote } = await prepareAfsInput(file);
 
   const instruction = [SYSTEM, "", fieldCatalogue(), "", narrativeBrief(true)].join("\n");
   const parts = buildParts(instruction, ocrNote);
@@ -420,45 +433,7 @@ export async function extractMbrsFromAfs(
     console.warn("MBRS notes pass failed (non-fatal):", err);
   }
 
-  // Tagging pass: breakdown notes read as printed lines and mapped into SSM's
-  // calculation tree, then trusted only if they reconcile to the totals the
-  // passes above extracted. Non-fatal — without it the named fields stand.
-  try {
-    const tres = await generateWithFallback({
-      contents: [{ role: "user", parts: buildParts(
-        [TAG_SYSTEM, "", tagBrief()].join("\n"),
-        "\nThe report is attached as a scanned PDF. Read the notes with OCR and list each breakdown line with its carrying amount.",
-      ) }],
-      config: { responseMimeType: "application/json", maxOutputTokens: 8192, temperature: 0 },
-    }, { tier: "quality" });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const tm = (tres.usageMetadata ?? {}) as any;
-    usage.inputTokens += tm.promptTokenCount ?? 0;
-    usage.outputTokens += tm.candidatesTokenCount ?? 0;
-    usage.thinkingTokens += tm.thoughtsTokenCount ?? 0;
-    usage.calls += 1;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let tp: any = {};
-    try { tp = JSON.parse(tres.text ?? "{}"); }
-    catch { const mm3 = (tres.text ?? "").match(/\{[\s\S]*\}/); if (mm3) { try { tp = JSON.parse(mm3[0]); } catch { /* keep {} */ } } }
-    const notes: TaggedNote[] = (Array.isArray(tp.notes) ? tp.notes : [])
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .filter((n: any) => n && typeof n.root === "string" && Array.isArray(n.lines))
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .map((n: any) => ({ root: n.root, lines: n.lines
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .filter((l: any) => l && typeof l.concept === "string")
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .map((l: any) => ({ label: String(l.label ?? ""), concept: l.concept, current: toNum(l.current), previous: toNum(l.previous),
-          conceptLabel: TAG_TREES.flatMap((t) => t.nodes).find((x) => x.c === l.concept)?.label ?? "" })) }));
-    const r = reconcileTagging(notes, extraction.current, extraction.previous);
-    for (const w of r.fieldWrites) extraction[w.period][w.field] = w.value;
-    if (Object.keys(r.tagged).length) extraction.tagged = r.tagged;
-    extraction.tagLines = notes;
-    extraction.extractionNotes = [...(extraction.extractionNotes ?? []), ...r.log];
-  } catch (err) {
-    console.warn("MBRS tagging pass failed (non-fatal):", err);
-  }
+  await runTaggingPass(buildParts, extraction, usage);
 
   // Third pass: the narrative disclosures, transcribed in full. Kept only when
   // it returns MORE text than the first pass — a shorter answer means this pass
@@ -668,13 +643,13 @@ function toNum(v: unknown): number | null {
 }
 
 export interface TaggedLine { label: string; concept: string; current: number | null; previous: number | null; conceptLabel?: string }
-export interface TaggedNote { root: string; lines: TaggedLine[] }
+export interface TaggedNote { root: string; rootLabel?: string; lines: TaggedLine[] }
 
-const TAG_SYSTEM = `You are reading the notes to a set of audited financial statements to break down balance-sheet totals into SSM's MBRS categories.
+const TAG_SYSTEM = `You are reading the notes to a set of audited financial statements to break down balance-sheet totals into SSM's MBRS categories, and to read the related-party note.
 
-For EACH note listed below that the report contains, list every line of the breakdown — one entry per class the note shows — with its CARRYING AMOUNT (net book value) at the END of the current year and at the END of the previous year. If the note prints only cost and accumulated depreciation per class, the carrying amount is cost minus accumulated depreciation for that class. Copy each label exactly as printed.
+PART 1 — BREAKDOWNS. For EACH note listed under BREAKDOWNS that the report contains, list every line of the breakdown — one entry per line the note shows — with its amount at the END of the current year and at the END of the previous year. For fixed assets use the CARRYING AMOUNT (net book value); if the note prints only cost and accumulated depreciation per class, the carrying amount is cost minus accumulated depreciation for that class. Copy each label exactly as printed.
 
-Map each line to exactly ONE concept from that note's list — the most specific concept the line FULLY covers. A line that spans two categories (e.g. "freehold land and buildings", undivided) maps to their common parent. Never split one printed line across concepts, never merge two lines, never invent a line.
+Map each line to exactly ONE concept from that note's list — the most specific concept the line FULLY covers. A line that spans two categories (e.g. "freehold land and buildings", undivided) maps to their common parent. Never split one printed line across concepts, never merge two lines, never invent a line. A deduction printed in the note (e.g. "less: allowance for impairment") is its own line, as a NEGATIVE amount, mapped to the concept of the line it reduces. Do not list subtotals the note prints — only the lines that make them up.
 
 Conventions SSM's accepted filings follow:
 - showroom, office building, factory, shoplot, premises → a Building concept, by land tenure if the report states it, otherwise "Buildings"
@@ -683,13 +658,32 @@ Conventions SSM's accepted filings follow:
 - motor vehicles → Vehicles
 - capital work-in-progress → Construction in progress
 - signboards, containers, and anything that fits no named class → Other property, plant and equipment
+- investment property: list each property or class the note shows at its carrying amount (or fair value, if that is the model used). Freehold land and buildings → Freehold land and building; leasehold → by lease term if stated (long term = 50 years or more remaining); a building still being built → Building under construction; tenure not stated → Other investment property. If the note is a movement schedule (opening, additions, disposals, closing), use the CLOSING amount of each class for each year.
 - inventories of a trading business (goods, merchandise, vehicles held for sale) → Finished goods; unclear → Other inventories
+- trade receivables / trade payables from or to outside parties → "Other current trade receivables" / "Other current trade payables"
+- amounts due from or to directors, or companies in which directors have an interest → the "other related parties" concept of that note; holding company → the holding company concept
+- deposits paid → Deposits; prepayments → Prepayments; sundry/other receivables, GST or SST refundable → Other current non-trade receivables
+- accruals / accrued expenses → Accruals; other payables, deposits received, sundry payables → Other current non-trade payables
+- cash in hand → Cash on hand; cash at bank → Balances with banks; fixed deposits → Fixed deposits with financial institutions
+- a loan the note says is secured by anything — a charge, a pledge, a corporate or personal guarantee (including directors' guarantees) — is SECURED; Unsecured only when the note says unsecured or names no security
+- term loans → Secured bank loans (per the rule above); hire purchase, finance lease and lease liabilities → Finance lease liabilities; bank overdraft → the bank overdraft concept of that note
+
+Each total covers EVERY line of its kind on the statement of financial position, wherever the detail sits. A balance printed as its own line on the face (e.g. "Amount owing by directors", "Amount due to a related company") belongs to the receivables or payables total and is listed as a line of that note. Lease liabilities or hire purchase payables disclosed in their own note belong to the current or non-current borrowings total and are listed there. Current items go only under the current totals, non-current only under the non-current.
+
+PART 2 — RELATED PARTIES. List every related-party transaction amount for the CURRENT year and every related-party balance outstanding at the CURRENT year end, one entry per amount. Transactions are in the related-party disclosures note. Balances are wherever the report discloses them: that note, the "included in the above are the following related party balances" paragraphs of the receivables and payables notes, and any "amount owing by/to directors" or "amount due from/to related companies" line or note. For each give the concept from RELATED-PARTY ITEMS and the counterparty category from PARTIES:
+- ParentMember — the holding or ultimate holding company
+- JointControlOrSignificantInfluenceMember — an entity with joint control or significant influence over the company
+- SubsidiariesMember, AssociatesMember, JointVenturesWhereEntityIsVenturerMember — as named
+- KeyManagementPersonnelOfEntityOrParentMember — the directors and other key management personnel themselves
+- OtherRelatedPartiesMember — everyone else: companies in which a director has an interest, related or fellow companies, directors' close family members
+Amounts owed TO the company → Amounts receivable; owed BY the company → Amounts payable. Give amounts as positive numbers. Directors' remuneration / key management compensation is NOT part of this list. If the note shows no transactions or balances, return an empty list.
 
 Omit a note the report does not contain. Return ONLY JSON:
-{"notes":[{"root":"<root concept>","lines":[{"label":"as printed","concept":"<a concept from that note's list>","current":<number|null>,"previous":<number|null>}]}]}`;
+{"notes":[{"root":"<root concept>","lines":[{"label":"as printed","concept":"<a concept from that note's list>","current":<number|null>,"previous":<number|null>}]}],
+ "relatedParties":[{"label":"as printed","concept":"<a related-party concept>","party":"<a PARTIES member>","amount":<number>}]}`;
 
 function tagBrief(): string {
-  return TAG_TREES.map((t) => {
+  return "BREAKDOWNS\n\n" + TAG_TREES.map((t) => {
     const depth = (n: { parent: string }): number => {
       let d = 0, p = n.parent;
       while (p !== t.root && d < 6) { p = t.nodes.find((x) => x.c === p)?.parent ?? t.root; d++; }
@@ -697,7 +691,9 @@ function tagBrief(): string {
     };
     return `NOTE: ${t.rootLabel}  (root "${t.root}")\n` +
       t.nodes.map((n) => `${"  ".repeat(depth(n) + 1)}"${n.c}" — ${n.label}`).join("\n");
-  }).join("\n\n");
+  }).join("\n\n") +
+    "\n\nRELATED-PARTY ITEMS\n" + RPT_GRID.concepts.map((c) => `  "${c.c}" — ${c.label}${c.instant ? " (balance at year end)" : " (transaction in the year)"}`).join("\n") +
+    "\n\nPARTIES\n" + RPT_GRID.members.map((m) => `  "${m.m}" — ${m.label}`).join("\n");
 }
 
 /**
@@ -770,11 +766,139 @@ export function reconcileTagging(
       for (const node of t.nodes) {
         const v = Math.round(total(node.c) * 100) / 100;
         if (v === 0 && underLine(node.c)) continue;
-        if (node.field) fieldWrites.push({ period, field: node.field, value: v });
-        else (tagged[node.c] ??= {})[period] = v;
+        if (node.field && t.writeFields !== false) {
+          fieldWrites.push({ period, field: node.field, value: v });
+          continue;
+        }
+        (tagged[node.c] ??= {})[period] = v;
+        const was = node.field ? (period === "current" ? current : previous)[node.field] : undefined;
+        if (typeof was === "number" && Math.abs(was - v) > 1) {
+          log.push(`${t.rootLabel} (${period} year): "${node.label}" filed as ${v.toLocaleString()} from the note's lines; the form shows ${was.toLocaleString()}.`);
+        }
       }
       log.push(`${t.rootLabel} (${period} year): ${n} note line(s) reconciled to the total of ${Math.round(target).toLocaleString()}.`);
     }
   }
   return { tagged, fieldWrites, log };
 }
+
+export interface RptLine { label: string; concept: string; party: string; amount: number | null; conceptLabel?: string; partyLabel?: string }
+
+/**
+ * The related-party note as a grid: concept × counterparty category, current
+ * year. Pure. Lines naming a concept or party outside SSM's lists are dropped
+ * and logged. Amounts are summed per cell (a note can print two lines for
+ * one party) and taken as positive — SSM files these as magnitudes. Where the
+ * all-parties total of a concept is bound to a named field, that field is
+ * set to the grid's sum so the review screen and the filing agree.
+ */
+export function applyRelatedParties(
+  lines: RptLine[],
+  current: Record<string, number | null | undefined>,
+  spec: RptSpec = RPT_GRID,
+): { grid: Record<string, Record<string, number>>; fieldWrites: { field: string; value: number }[]; log: string[] } {
+  const concepts = new Map(spec.concepts.map((c) => [c.c, c]));
+  const members = new Set(spec.members.map((m) => m.m));
+  const grid: Record<string, Record<string, number>> = {};
+  const log: string[] = [];
+  let dropped = 0;
+  for (const l of lines) {
+    if (!concepts.has(l.concept) || !members.has(l.party) || typeof l.amount !== "number" || !Number.isFinite(l.amount)) {
+      dropped++;
+      continue;
+    }
+    const row = (grid[l.concept] ??= {});
+    row[l.party] = Math.round(((row[l.party] ?? 0) + Math.abs(l.amount)) * 100) / 100;
+  }
+  if (dropped) log.push(`Related parties: ${dropped} line(s) named no valid item, party or amount and were ignored.`);
+  const fieldWrites: { field: string; value: number }[] = [];
+  for (const [c, row] of Object.entries(grid)) {
+    const f = concepts.get(c)!.totalField;
+    if (!f) continue;
+    const sum = Math.round(Object.values(row).reduce((a, b) => a + b, 0) * 100) / 100;
+    const before = current[f];
+    if (typeof before === "number" && Math.abs(before - sum) > 1) {
+      log.push(`Related parties: ${concepts.get(c)!.label} read as ${sum.toLocaleString()} across all parties (was ${before.toLocaleString()}).`);
+    }
+    fieldWrites.push({ field: f, value: sum });
+  }
+  const cells = Object.values(grid).reduce((n, r) => n + Object.keys(r).length, 0);
+  if (cells) log.push(`Related parties: ${cells} amount(s) filed by counterparty category.`);
+  return { grid, fieldWrites, log };
+}
+
+/**
+ * The tagging pass on its own: breakdown notes read as printed lines and
+ * mapped into SSM's calculation tree, trusted only if they reconcile to the
+ * totals already extracted; and the related-party note read by counterparty.
+ * Mutates `extraction` and `usage`. Non-fatal — without it the named fields
+ * stand.
+ */
+export async function runTaggingPass(
+  buildParts: PartsBuilder,
+  extraction: MbrsExtraction,
+  usage: TokenUsage,
+): Promise<void> {
+  try {
+    const tres = await generateWithFallback({
+      contents: [{ role: "user", parts: buildParts(
+        [TAG_SYSTEM, "", tagBrief()].join("\n"),
+        "\nThe report is attached as a scanned PDF. Read the notes with OCR and list each breakdown line with its carrying amount.",
+      ) }],
+      config: { responseMimeType: "application/json", maxOutputTokens: 16384, temperature: 0 },
+    }, { tier: "quality" });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tm = (tres.usageMetadata ?? {}) as any;
+    usage.inputTokens += tm.promptTokenCount ?? 0;
+    usage.outputTokens += tm.candidatesTokenCount ?? 0;
+    usage.thinkingTokens += tm.thoughtsTokenCount ?? 0;
+    usage.calls += 1;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let tp: any = {};
+    try { tp = JSON.parse(tres.text ?? "{}"); }
+    catch { const mm3 = (tres.text ?? "").match(/\{[\s\S]*\}/); if (mm3) { try { tp = JSON.parse(mm3[0]); } catch { /* keep {} */ } } }
+    const labelOf = new Map(TAG_TREES.flatMap((t) => t.nodes).map((x) => [x.c, x.label]));
+    const rootLabelOf = new Map(TAG_TREES.map((t) => [t.root, t.rootLabel]));
+    const notes: TaggedNote[] = (Array.isArray(tp.notes) ? tp.notes : [])
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .filter((n: any) => n && typeof n.root === "string" && Array.isArray(n.lines))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((n: any) => ({ root: n.root, rootLabel: rootLabelOf.get(n.root), lines: n.lines
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .filter((l: any) => l && typeof l.concept === "string")
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((l: any) => ({ label: String(l.label ?? ""), concept: l.concept, current: toNum(l.current), previous: toNum(l.previous),
+          conceptLabel: labelOf.get(l.concept) ?? "" })) }));
+    // Reconcile against the totals as the filing will carry them — several
+    // (receivables, payables) exist only once normalisation derives them.
+    const targets = normalizeExtraction(JSON.parse(JSON.stringify(extraction)));
+    const r = reconcileTagging(notes, targets.current, targets.previous);
+    for (const w of r.fieldWrites) extraction[w.period][w.field] = w.value;
+    extraction.tagged = Object.keys(r.tagged).length ? r.tagged : undefined;
+    extraction.tagLines = notes;
+
+    const rptLabel = new Map(RPT_GRID.concepts.map((c) => [c.c, c.label]));
+    const partyLabel = new Map(RPT_GRID.members.map((m) => [m.m, m.label]));
+    const rptLines: RptLine[] = (Array.isArray(tp.relatedParties) ? tp.relatedParties : [])
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .filter((l: any) => l && typeof l.concept === "string" && typeof l.party === "string")
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((l: any) => ({ label: String(l.label ?? ""), concept: l.concept, party: l.party, amount: toNum(l.amount),
+        conceptLabel: rptLabel.get(l.concept) ?? "", partyLabel: partyLabel.get(l.party) ?? "" }));
+    const g = applyRelatedParties(rptLines, extraction.current);
+    for (const w of g.fieldWrites) extraction.current[w.field] = w.value;
+    extraction.rptGrid = Object.keys(g.grid).length ? g.grid : undefined;
+    extraction.rptLines = rptLines;
+
+    extraction.extractionNotes = [
+      ...(extraction.extractionNotes ?? []).filter((n) => !TAG_LOG_RE.test(n)),
+      ...r.log, ...g.log,
+    ];
+  } catch (err) {
+    console.warn("MBRS tagging pass failed (non-fatal):", err);
+  }
+}
+
+/** Log lines the tagging pass writes — cleared when it is re-run. */
+const TAG_LOG_RE = /note line\(s\) reconciled|breakdown not filed|could not be verified|mapped to no valid category|^Related parties:/;
+

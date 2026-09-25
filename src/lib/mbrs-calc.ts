@@ -453,11 +453,12 @@ export const MBRS_CALC: [string, string, string, number][] = [
 
 /** Totals read as note lines and mapped into SSM's tree (see mbrs-extract). */
 export interface TagNode { c: string; parent: string; label: string; field: string; leaf: boolean }
-export interface TagTree { root: string; rootField: string; rootLabel: string; nodes: TagNode[] }
+export interface TagTree { root: string; rootField: string; writeFields: boolean; rootLabel: string; nodes: TagNode[] }
 export const TAG_TREES: TagTree[] = [
  {
   "root": "ifrs-smes:PropertyPlantAndEquipment",
   "rootField": "propertyPlantAndEquipment",
+  "writeFields": true,
   "rootLabel": "Property, plant and equipment",
   "nodes": [
    {
@@ -577,6 +578,7 @@ export const TAG_TREES: TagTree[] = [
  {
   "root": "ifrs-smes:InvestmentProperty",
   "rootField": "investmentProperty",
+  "writeFields": true,
   "rootLabel": "Investment property at fair value through profit or loss",
   "nodes": [
    {
@@ -619,6 +621,7 @@ export const TAG_TREES: TagTree[] = [
  {
   "root": "ifrs-smes:InventoriesTotal",
   "rootField": "inventories",
+  "writeFields": true,
   "rootLabel": "Inventories",
   "nodes": [
    {
@@ -657,8 +660,910 @@ export const TAG_TREES: TagTree[] = [
     "leaf": true
    }
   ]
+ },
+ {
+  "root": "ifrs-smes:InvestmentsInAssociates",
+  "rootField": "investmentsInAssociates",
+  "writeFields": true,
+  "rootLabel": "Investments in associates",
+  "nodes": [
+   {
+    "c": "ssmt-mpers:InvestmentsInAssociatesUnquotedSharesNetOfImpairmentLosses",
+    "parent": "ifrs-smes:InvestmentsInAssociates",
+    "label": "Unquoted shares, net of impairment losses",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:InvestmentInAssociatesQuotedSharesInMalaysia",
+    "parent": "ifrs-smes:InvestmentsInAssociates",
+    "label": "Investment in associates quoted shares in Malaysia",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:InvestmentInAssociatesQuotedSharesOutsideMalaysia",
+    "parent": "ifrs-smes:InvestmentsInAssociates",
+    "label": "Investment in associates quoted shares outside Malaysia",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:InvestmentsInAssociatesShareOfPostAcquisitionProfitsAndReserves",
+    "parent": "ifrs-smes:InvestmentsInAssociates",
+    "label": "Share of post-acquisition profits and reserves",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:InvestmentsInAssociatesOtherInvestmentsNetOfImpairmentLosses",
+    "parent": "ifrs-smes:InvestmentsInAssociates",
+    "label": "Other investments in associates, net of impairment losses",
+    "field": "",
+    "leaf": true
+   }
+  ]
+ },
+ {
+  "root": "ifrs-smes:TradeAndOtherCurrentReceivables",
+  "rootField": "totalReceivables",
+  "writeFields": false,
+  "rootLabel": "Trade and other current receivables",
+  "nodes": [
+   {
+    "c": "ssmt-mpers:CurrentTradeReceivables",
+    "parent": "ifrs-smes:TradeAndOtherCurrentReceivables",
+    "label": "Current trade receivables",
+    "field": "tradeReceivables",
+    "leaf": false
+   },
+   {
+    "c": "ssmt-mpers:CurrentTradeReceivablesDueFromContractCustomers",
+    "parent": "ssmt-mpers:CurrentTradeReceivables",
+    "label": "Current trade receivables due from contract customers",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrentTradeReceivablesDueFromHoldingCompany",
+    "parent": "ssmt-mpers:CurrentTradeReceivables",
+    "label": "Current trade receivables due from holding company",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrentTradeReceivablesDueFromSubsidiaries",
+    "parent": "ssmt-mpers:CurrentTradeReceivables",
+    "label": "Current trade receivables due from subsidiaries",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrentTradeReceivablesDueFromAssociates",
+    "parent": "ssmt-mpers:CurrentTradeReceivables",
+    "label": "Current trade receivables due from associates",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrentTradeReceivablesDueFromJointVentures",
+    "parent": "ssmt-mpers:CurrentTradeReceivables",
+    "label": "Current trade receivables due from joint ventures",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrentTradeReceivablesDueFromRelatedParties",
+    "parent": "ssmt-mpers:CurrentTradeReceivables",
+    "label": "Current trade receivables due from related parties",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentTradeReceivables",
+    "parent": "ssmt-mpers:CurrentTradeReceivables",
+    "label": "Other current trade receivables",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentReceivables",
+    "parent": "ifrs-smes:TradeAndOtherCurrentReceivables",
+    "label": "Other current receivables",
+    "field": "otherReceivablesInclRelated",
+    "leaf": false
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentReceivablesDueFromRelatedParties",
+    "parent": "ssmt-mpers:OtherCurrentReceivables",
+    "label": "Other current receivables due from related parties",
+    "field": "receivablesDueFromRelatedParties",
+    "leaf": false
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentReceivablesDueFromHoldingCompany",
+    "parent": "ssmt-mpers:OtherCurrentReceivablesDueFromRelatedParties",
+    "label": "Other current receivables due from holding company",
+    "field": "receivablesDueFromHoldingCompany",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentReceivablesDueFromSubsidiaries",
+    "parent": "ssmt-mpers:OtherCurrentReceivablesDueFromRelatedParties",
+    "label": "Other current receivables due from subsidiaries",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentReceivablesDueFromAssociates",
+    "parent": "ssmt-mpers:OtherCurrentReceivablesDueFromRelatedParties",
+    "label": "Other current receivables due from associates",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentReceivablesDueFromJointVentures",
+    "parent": "ssmt-mpers:OtherCurrentReceivablesDueFromRelatedParties",
+    "label": "Other current receivables due from joint ventures",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentReceivablesDueFromOtherRelatedParties",
+    "parent": "ssmt-mpers:OtherCurrentReceivablesDueFromRelatedParties",
+    "label": "Other receivables due from other related parties",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentPrepaymentsAndCurrentAccruedIncome",
+    "parent": "ssmt-mpers:OtherCurrentReceivables",
+    "label": "Current prepayments and current accrued income",
+    "field": "prepayments",
+    "leaf": false
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentPrepayments",
+    "parent": "ssmt-mpers:OtherCurrentPrepaymentsAndCurrentAccruedIncome",
+    "label": "Prepayments",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentAccruedIncome",
+    "parent": "ssmt-mpers:OtherCurrentPrepaymentsAndCurrentAccruedIncome",
+    "label": "Accrued income",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentNontradeReceivables",
+    "parent": "ssmt-mpers:OtherCurrentReceivables",
+    "label": "Non trade receivables",
+    "field": "otherReceivables",
+    "leaf": false
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentNontradeFinanceIncomeReceivable",
+    "parent": "ssmt-mpers:OtherCurrentNontradeReceivables",
+    "label": "Interest receivable",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentNontradeDeposits",
+    "parent": "ssmt-mpers:OtherCurrentNontradeReceivables",
+    "label": "Deposits",
+    "field": "deposits",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentNontradeDividendReceivables",
+    "parent": "ssmt-mpers:OtherCurrentNontradeReceivables",
+    "label": "Dividend receivables",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentNontradeLeaseAndHirePurchaseReceivables",
+    "parent": "ssmt-mpers:OtherCurrentNontradeReceivables",
+    "label": "Lease and hire purchase receivables",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentMiscellaneousNontradeReceivables",
+    "parent": "ssmt-mpers:OtherCurrentNontradeReceivables",
+    "label": "Other current non-trade receivables",
+    "field": "otherReceivablesExclDeposits",
+    "leaf": true
+   }
+  ]
+ },
+ {
+  "root": "ssmt:CashAndBankBalances",
+  "rootField": "cashAndCashEquivalents",
+  "writeFields": true,
+  "rootLabel": "Cash and bank balances",
+  "nodes": [
+   {
+    "c": "ifrs-smes:Cash",
+    "parent": "ssmt:CashAndBankBalances",
+    "label": "Cash",
+    "field": "",
+    "leaf": false
+   },
+   {
+    "c": "ifrs-smes:CashOnHand",
+    "parent": "ifrs-smes:Cash",
+    "label": "Cash on hand",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ifrs-smes:BalancesWithBanks",
+    "parent": "ifrs-smes:Cash",
+    "label": "Balances with banks",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ifrs-smes:CashEquivalents",
+    "parent": "ssmt:CashAndBankBalances",
+    "label": "Cash equivalents",
+    "field": "",
+    "leaf": false
+   },
+   {
+    "c": "ssmt-mpers:DepositsAndPlacementsWithLicensedBanks",
+    "parent": "ifrs-smes:CashEquivalents",
+    "label": "Deposits and placements with licensed banks",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:DepositsPlacedWithOtherCorporations",
+    "parent": "ifrs-smes:CashEquivalents",
+    "label": "Deposit placed with other corporations",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:FixedDepositsWithFinancialInstitutions",
+    "parent": "ifrs-smes:CashEquivalents",
+    "label": "Fixed deposits with financial institutions",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CashEquivalentsWithOtherFinancialInstitutions",
+    "parent": "ifrs-smes:CashEquivalents",
+    "label": "Cash equivalents with other financial institutions",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ifrs-smes:ShorttermDepositsClassifiedAsCashEquivalents",
+    "parent": "ifrs-smes:CashEquivalents",
+    "label": "Short-term deposits, classified as cash equivalents",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ifrs-smes:ShorttermInvestmentsClassifiedAsCashEquivalents",
+    "parent": "ifrs-smes:CashEquivalents",
+    "label": "Short-term investments, classified as cash equivalents",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ifrs-smes:BankingArrangementsClassifiedAsCashEquivalents",
+    "parent": "ifrs-smes:CashEquivalents",
+    "label": "Other banking arrangements, classified as cash equivalents",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ifrs-smes:OtherCashAndCashEquivalents",
+    "parent": "ssmt:CashAndBankBalances",
+    "label": "Other cash and cash equivalents",
+    "field": "",
+    "leaf": true
+   }
+  ]
+ },
+ {
+  "root": "ifrs-smes:TradeAndOtherCurrentPayables",
+  "rootField": "totalPayables",
+  "writeFields": false,
+  "rootLabel": "Trade and other current payables",
+  "nodes": [
+   {
+    "c": "ifrs-smes:TradeAndOtherCurrentPayablesToTradeSuppliers",
+    "parent": "ifrs-smes:TradeAndOtherCurrentPayables",
+    "label": "Current trade payables",
+    "field": "tradePayables",
+    "leaf": false
+   },
+   {
+    "c": "ssmt-mpers:CurrentTradePayableDueToContractCustomer",
+    "parent": "ifrs-smes:TradeAndOtherCurrentPayablesToTradeSuppliers",
+    "label": "Current trade payables due to contract suppliers",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrentTradePayablesDueToHoldingCompany",
+    "parent": "ifrs-smes:TradeAndOtherCurrentPayablesToTradeSuppliers",
+    "label": "Current trade payables due to holding company",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrentTradePayablesDueToSubsidiaries",
+    "parent": "ifrs-smes:TradeAndOtherCurrentPayablesToTradeSuppliers",
+    "label": "Current trade payables due to subsidiaries",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrentTradePayablesDueToAssociates",
+    "parent": "ifrs-smes:TradeAndOtherCurrentPayablesToTradeSuppliers",
+    "label": "Current trade payables due to associates",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrentTradePayablesDueToJointVentures",
+    "parent": "ifrs-smes:TradeAndOtherCurrentPayablesToTradeSuppliers",
+    "label": "Current trade payables due to joint ventures",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrentTradePayablesDueToRelatedCompanies",
+    "parent": "ifrs-smes:TradeAndOtherCurrentPayablesToTradeSuppliers",
+    "label": "Trade payables due to other related parties",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentTradePayables",
+    "parent": "ifrs-smes:TradeAndOtherCurrentPayablesToTradeSuppliers",
+    "label": "Other current trade payables",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentPayables",
+    "parent": "ifrs-smes:TradeAndOtherCurrentPayables",
+    "label": "Other current payables",
+    "field": "otherPayablesInclRelated",
+    "leaf": false
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentPayablesDueToRelatedParties",
+    "parent": "ssmt-mpers:OtherCurrentPayables",
+    "label": "Current payables due to related parties",
+    "field": "payablesDueToRelatedParties",
+    "leaf": false
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentPayablesDueToHoldingCompany",
+    "parent": "ssmt-mpers:OtherCurrentPayablesDueToRelatedParties",
+    "label": "Other current payables due to holding company",
+    "field": "payablesDueToHoldingCompany",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentPayablesDueToSubsidiaries",
+    "parent": "ssmt-mpers:OtherCurrentPayablesDueToRelatedParties",
+    "label": "Other current payables due to subsidiaries",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentPayablesDueToAssociates",
+    "parent": "ssmt-mpers:OtherCurrentPayablesDueToRelatedParties",
+    "label": "Other current payables due to associates",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentPayablesDueToJointVentures",
+    "parent": "ssmt-mpers:OtherCurrentPayablesDueToRelatedParties",
+    "label": "Other current payables due to joint ventures",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentPayablesDueToOtherRelatedParties",
+    "parent": "ssmt-mpers:OtherCurrentPayablesDueToRelatedParties",
+    "label": "Other current payables due to other related parties",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrentNontradePayables",
+    "parent": "ssmt-mpers:OtherCurrentPayables",
+    "label": "Current non-trade payables",
+    "field": "currentNontradePayables",
+    "leaf": false
+   },
+   {
+    "c": "ssmt-mpers:CurrentNontradeDeferredIncome",
+    "parent": "ssmt-mpers:CurrentNontradePayables",
+    "label": "Deferred income",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrentNontradeAccruals",
+    "parent": "ssmt-mpers:CurrentNontradePayables",
+    "label": "Accruals",
+    "field": "accruals",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrentNontradeRetentionPayable",
+    "parent": "ssmt-mpers:CurrentNontradePayables",
+    "label": "Retention payable",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentNontradePayables",
+    "parent": "ssmt-mpers:CurrentNontradePayables",
+    "label": "Other current non-trade payables",
+    "field": "otherNontradePayables",
+    "leaf": true
+   }
+  ]
+ },
+ {
+  "root": "ifrs-smes:ShorttermBorrowings",
+  "rootField": "currentBorrowings",
+  "writeFields": true,
+  "rootLabel": "Current borrowings",
+  "nodes": [
+   {
+    "c": "ssmt-mpers:CurrentSecuredBankLoansReceivedAndCurrentPortionOfNoncurrentSecuredBankLoansReceived",
+    "parent": "ifrs-smes:ShorttermBorrowings",
+    "label": "Secured bank loans",
+    "field": "currentBankLoans",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrentUnsecuredBankLoansReceivedAndCurrentPortionOfNoncurrentUnsecuredBankLoansReceived",
+    "parent": "ifrs-smes:ShorttermBorrowings",
+    "label": "Unsecured bank loans",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrenPortionOfSecuredConvertibleNotes",
+    "parent": "ifrs-smes:ShorttermBorrowings",
+    "label": "Secured convertible notes",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrentPortionOfUnsecuredConvertibleNotes",
+    "parent": "ifrs-smes:ShorttermBorrowings",
+    "label": "Unsecured convertible notes",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrentPortionOfNoncurrentSecuredBankOverdrafts",
+    "parent": "ifrs-smes:ShorttermBorrowings",
+    "label": "Current portion of non-current secured bank overdrafts",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrentPortionOfNoncurrentUnsecuredBankOverdrafts",
+    "parent": "ifrs-smes:ShorttermBorrowings",
+    "label": "Unsecured bank overdrafts",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentPortionOfRedeemablePreferenceShares",
+    "parent": "ifrs-smes:ShorttermBorrowings",
+    "label": "Other current portion of redeemable preference shares",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrentPortionOfFinanceLeaseLiabilities",
+    "parent": "ifrs-smes:ShorttermBorrowings",
+    "label": "Finance lease liabilities",
+    "field": "financeLeaseCurrent",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrentPortionOfLoanFromHoldingCompany",
+    "parent": "ifrs-smes:ShorttermBorrowings",
+    "label": "Loan from holding company",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentPortionOfLoanFromSubsidiaries",
+    "parent": "ifrs-smes:ShorttermBorrowings",
+    "label": "Other current portion of loan from subsidiaries",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentPortionOfLoanFromAssociates",
+    "parent": "ifrs-smes:ShorttermBorrowings",
+    "label": "Other current portion of loan from associates",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentPortionOfLoanFromJointVentures",
+    "parent": "ifrs-smes:ShorttermBorrowings",
+    "label": "Other current portion of loan from joint ventures",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrentPortionOfLoanFromOtherRelatedCompanies",
+    "parent": "ifrs-smes:ShorttermBorrowings",
+    "label": "Loan from other related companies",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrentPortionOfNoncurrentSecuredOtherBankLoanReceived",
+    "parent": "ifrs-smes:ShorttermBorrowings",
+    "label": "Other secured bank loans received",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:CurrentPortionOfNoncurrentUnsecuredOtherBankLoansReceived",
+    "parent": "ifrs-smes:ShorttermBorrowings",
+    "label": "Other unsecured bank loans received",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherCurrentPortionOfMiscellaneousBorrowings",
+    "parent": "ifrs-smes:ShorttermBorrowings",
+    "label": "Other current portion of miscellaneous borrowings",
+    "field": "",
+    "leaf": true
+   }
+  ]
+ },
+ {
+  "root": "ssmt-mpers:NoncurrentBorrowings",
+  "rootField": "noncurrentBorrowings",
+  "writeFields": true,
+  "rootLabel": "Non-current borrowings",
+  "nodes": [
+   {
+    "c": "ssmt-mpers:NoncurrentPortionOfNoncurrentSecuredBankLoansReceived",
+    "parent": "ssmt-mpers:NoncurrentBorrowings",
+    "label": "Secured bank loans",
+    "field": "noncurrentBankLoans",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:NoncurrentPortionOfNoncurrentUnsecuredBankLoansReceived",
+    "parent": "ssmt-mpers:NoncurrentBorrowings",
+    "label": "Unsecured bank loans",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:NoncurrentPortionOfSecuredConvertibleNotes",
+    "parent": "ssmt-mpers:NoncurrentBorrowings",
+    "label": "Secured convertible notes",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:NoncurrentPortionOfUnsecuredConvertibleNotes",
+    "parent": "ssmt-mpers:NoncurrentBorrowings",
+    "label": "Unsecured convertible notes",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherNoncurrentPortionOfRedeemablePreferenceShares",
+    "parent": "ssmt-mpers:NoncurrentBorrowings",
+    "label": "Other non-current portion of redeemable preference shares",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:NoncurrentPortionOfFinanceLeaseLiabilities",
+    "parent": "ssmt-mpers:NoncurrentBorrowings",
+    "label": "Finance lease liabilities",
+    "field": "financeLeaseNoncurrent",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:NoncurrentPortionOfLoanFromHoldingCompany",
+    "parent": "ssmt-mpers:NoncurrentBorrowings",
+    "label": "Loan from holding company",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherNoncurrentPortionOfLoanFromSubsidiaries",
+    "parent": "ssmt-mpers:NoncurrentBorrowings",
+    "label": "Other non-current portion of loan from subsidiaries",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherNoncurrentPortionOfLoanFromAssociates",
+    "parent": "ssmt-mpers:NoncurrentBorrowings",
+    "label": "Other non-current portion of loan from associates",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherNoncurrentPortionOfLoanFromJointVentures",
+    "parent": "ssmt-mpers:NoncurrentBorrowings",
+    "label": "Other non-current portion of loan from joint ventures",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:NoncurrentPortionOfLoanFromOtherRelatedCompanies",
+    "parent": "ssmt-mpers:NoncurrentBorrowings",
+    "label": "Loan from other related companies",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherNoncurrentSecuredBankLoans",
+    "parent": "ssmt-mpers:NoncurrentBorrowings",
+    "label": "Other non-current secured bank loans",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:OtherNoncurrentUnsecuredBankLoans",
+    "parent": "ssmt-mpers:NoncurrentBorrowings",
+    "label": "Other non-current unsecured bank loans",
+    "field": "",
+    "leaf": true
+   },
+   {
+    "c": "ssmt-mpers:NoncurrentPortionOfOtherNoncurrentBorrowings",
+    "parent": "ssmt-mpers:NoncurrentBorrowings",
+    "label": "Other non-current borrowings",
+    "field": "",
+    "leaf": true
+   }
+  ]
  }
 ];
+
+/** The related-party note's grid: concept × counterparty category. */
+export interface RptSpec { members: { m: string; label: string }[]; concepts: { c: string; label: string; instant: boolean; totalField: string }[] }
+export const RPT_GRID: RptSpec = {
+ "members": [
+  {
+   "m": "ParentMember",
+   "label": "Parent [Member]"
+  },
+  {
+   "m": "JointControlOrSignificantInfluenceMember",
+   "label": "Entities with joint control or significant influence over entity [Member]"
+  },
+  {
+   "m": "SubsidiariesMember",
+   "label": "Subsidiaries [Member]"
+  },
+  {
+   "m": "AssociatesMember",
+   "label": "Associates [Member]"
+  },
+  {
+   "m": "JointVenturesWhereEntityIsVenturerMember",
+   "label": "Joint ventures where entity is venturer [Member]"
+  },
+  {
+   "m": "KeyManagementPersonnelOfEntityOrParentMember",
+   "label": "Key management personnel of entity or parent [member]"
+  },
+  {
+   "m": "OtherRelatedPartiesMember",
+   "label": "Other related parties [member]"
+  }
+ ],
+ "concepts": [
+  {
+   "c": "ssmt-mpers:RelatedPartyTransactionsContributionToFund",
+   "label": "Related party transactions, contribution to fund",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ssmt-mpers:RelatedPartyTransactionsDisposalOfSubsidiaries",
+   "label": "Related party transactions, disposal of subsidiaries",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ssmt-mpers:DividendIncomeRelatedPartyTransactions",
+   "label": "Dividend income related party transactions",
+   "instant": false,
+   "totalField": "relatedPartyDividendIncome"
+  },
+  {
+   "c": "ssmt-mpers:InterestIncomeRelatedPartyTransactions",
+   "label": "Interest income related party transactions",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ssmt-mpers:RelatedPartyTransactionsIssueOfSharesForExchangeableBonds",
+   "label": "Related party transactions, issue of shares for exchangeable bonds",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ssmt-mpers:RelatedPartyTransactionsKeyManagementPersonnelServiceFees",
+   "label": "Related party transactions, key management personnel services",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ssmt-mpers:RelatedPartyTransactionsManagementFees",
+   "label": "Related party transactions, management fees",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ssmt-mpers:OtherExpensesRecognisedForTransactionsWithRelatedParties",
+   "label": "Other expenses",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ssmt-mpers:RelatedPartyTransactionsOtherKeyManagementPersonnel",
+   "label": "Related party transactions, other key management personnel",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ssmt-mpers:OtherRevenueRecognisedForTransactionsWithRelatedParties",
+   "label": "Other revenue",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ssmt-mpers:RelatedPartyTransactionsEducationAndStaffTrainingServices",
+   "label": "Related party transactions, education and staff training services",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ssmt-mpers:RelatedPartyTransactionsLeasingAndHirePurchaseFacilities",
+   "label": "Related party transactions, leasing and hire purchase facilities",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ifrs-smes:PurchasesOfGoodsRelatedPartyTransactions",
+   "label": "Purchases of goods, related party transactions",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ifrs-smes:PurchasesOfPropertyAndOtherAssetsRelatedPartyTransactions",
+   "label": "Purchases of property and other assets, related party transactions",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ssmt-mpers:RentalExpensesRelatedPartyTransactions",
+   "label": "Rental expenses related party transactions",
+   "instant": false,
+   "totalField": "relatedPartyRentalExpense"
+  },
+  {
+   "c": "ssmt-mpers:RelatedPartyTransactionsRentalIncome",
+   "label": "Related party transactions, rental income",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ifrs-smes:RevenueFromRenderingOfServicesRelatedPartyTransactions",
+   "label": "Revenue from rendering of services, related party transactions",
+   "instant": false,
+   "totalField": "relatedPartyRevenueServices"
+  },
+  {
+   "c": "ifrs-smes:RevenueFromSaleOfGoodsRelatedPartyTransactions",
+   "label": "Revenue from sale of goods, related party transactions",
+   "instant": false,
+   "totalField": "relatedPartyRevenueGoods"
+  },
+  {
+   "c": "ssmt-mpers:RelatedPartyTransactionsRoyaltyExpenses",
+   "label": "Related party transactions, royalty expenses",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ssmt-mpers:RelatedPartyTransactionsRoyaltyIncome",
+   "label": "Related party transactions, royalty income",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ifrs-smes:SalesOfPropertyAndOtherAssetsRelatedPartyTransactions",
+   "label": "Sales of property and other assets, related party transactions",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ifrs-smes:ServicesReceivedRelatedPartyTransactions",
+   "label": "Services received, related party transactions",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ssmt-mpers:RelatedPartyTransactionsShareOptionRecharged",
+   "label": "Related party transactions, share option recharged",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ssmt-mpers:RelatedPartyTransactionsShareBasedPaymentTransactions",
+   "label": "Related party transactions, share-based payments transactions",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ssmt-mpers:RelatedPartyTransactionsSupplementaryPaymentsAndSignatureBonus",
+   "label": "Related party transactions, supplementary payments and signature bonus",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ssmt-mpers:RelatedPartyTransactionsTransactionsWithShareholdersAndGovernments",
+   "label": "Related party transactions, transactions with shareholders and governments",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ssmt-mpers:OtherTransactionsWithRelatedParties",
+   "label": "Other related parties transactions",
+   "instant": false,
+   "totalField": ""
+  },
+  {
+   "c": "ifrs-smes:AmountsPayableRelatedPartyTransactions",
+   "label": "Amounts payable, related party transactions",
+   "instant": true,
+   "totalField": "relatedPartyPayablesTotal"
+  },
+  {
+   "c": "ifrs-smes:AmountsReceivableRelatedPartyTransactions",
+   "label": "Amounts receivable, related party transactions",
+   "instant": true,
+   "totalField": "relatedPartyReceivablesTotal"
+  },
+  {
+   "c": "ssmt-mpers:OtherBalancesWithRelatedParties",
+   "label": "Other balances with related parties",
+   "instant": true,
+   "totalField": ""
+  }
+ ]
+};
 
 /** SSM's label for each concept above, for messages a filer can read. */
 export const MBRS_CALC_LABELS: Record<string, string> = {

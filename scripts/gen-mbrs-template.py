@@ -261,6 +261,17 @@ DEI = {
     "ssmt:DateOfStatutoryDeclaration": "statutoryDeclarationDate",
     "ssmt:DateOfCirculationOfFinancialStatementsAndReportsToMembers": "circulationDate",
 }
+# Scoping declarations: bound to a field, but the donor literal is KEPT as the
+# fact's default — used when the report does not answer the question.
+DEFAULTED = {
+    "ssmt-dei:DisclosureOfFinancialStatementsPreparationForCurrentSubmission": "fsPreparation",
+    "ssmt:DisclosureOnWhetherCompanyChangedDurationOfFinancialReportingPeriod": "reportingPeriodChanged",
+    "ssmt:DisclosureOnWhetherComparativePeriodValuesAreRestated": "comparativesRestated",
+    "ssmt:MethodUsedForPreparingStatementOfCashFlows": "cashFlowMethod",
+    "ssmt:MethodUsedForRepresentingChangesInAnEntitysEquity": "equityStatementType",
+    "ssmt-dei:StatusOfCarryingOnBusinessDuringFinancialYear": "businessStatus",
+    "ssmt-dei:StatusOfCompany": "companyStatus",
+}
 # Signing directors 1–5, on both the directors' report and the statement by
 # directors. Derived from the taxonomy's concept names by pattern because the
 # names are irregular: the second SBD director's type is
@@ -399,6 +410,8 @@ def resolve(concept, ctx):
         return None
     if concept in DEI:
         return (DEI[concept], None)
+    if concept in DEFAULTED:
+        return (DEFAULTED[concept], None)
     df = director_field(concept)
     if df:
         return (df, None)
@@ -544,6 +557,8 @@ def parse_sample(path):
                 entry["field"] = r[0]
                 if r[1]:
                     entry["period"] = r[1]
+                if name in DEFAULTED:
+                    entry["v"] = tok(unesc(val), iso)
             else:
                 entry["v"] = tok(unesc(val), iso)
 
@@ -665,8 +680,22 @@ NARRATIVE_LABEL_SOURCE = {}
 
 # Totals whose note breakdown is read line by line and mapped into SSM's
 # calculation tree (role 200200), rather than asked for as named fields.
-TAG_ROOTS = ["ifrs-smes:PropertyPlantAndEquipment", "ifrs-smes:InvestmentProperty", "ifrs-smes:InventoriesTotal"]
+# A root is used only if it is bound to an extracted total (the reconciliation
+# target); roots without one are listed so binding a field switches them on.
+TAG_ROOTS = [
+    "ifrs-smes:PropertyPlantAndEquipment", "ifrs-smes:InvestmentProperty", "ifrs-smes:InventoriesTotal",
+    "ssmt-mpers:InvestmentInSubisidiaries", "ifrs-smes:InvestmentsInAssociates", "ifrs-smes:InvestmentsInJointVentures",
+    "ifrs-smes:IntangibleAssetsAndGoodwill",
+    "ifrs-smes:TradeAndOtherCurrentReceivables", "ssmt:CashAndBankBalances",
+    "ifrs-smes:TradeAndOtherCurrentPayables", "ifrs-smes:ShorttermBorrowings", "ssmt-mpers:NoncurrentBorrowings",
+]
 TAG_CTX = {"current": "asof_{CE}_SeparateMember", "previous": "asof_{PE}_SeparateMember"}
+# Trees whose named fields feed arithmetic in mbrs.ts (totals and "other"
+# residuals recomputed from their parts). Writing a breakdown into those
+# fields would be overwritten or double-counted, so the breakdown goes to the
+# filing only (x.tagged, which beats the field for the same concept and
+# period), and a difference from the form is logged for the reviewer.
+TAG_FILING_ONLY = {"ifrs-smes:TradeAndOtherCurrentReceivables", "ifrs-smes:TradeAndOtherCurrentPayables"}
 
 
 def build_tag_trees(merged, order, catalogue_path):
@@ -688,24 +717,80 @@ def build_tag_trees(merged, order, catalogue_path):
             continue
         nodes = []
 
-        def walk(q, parent):
+        def walk(q, parent, above):
             for _o, c in sorted(kids.get(q, [])):
                 bound = (merged.get((c, TAG_CTX["current"])) or {}).get("field")
+                # Donors often file one figure at two levels ("Current trade
+                # receivables" and its child "Other current trade receivables"
+                # both = trade receivables), so one field is bound to both.
+                # Only the topmost keeps the field; below it the node is a
+                # SHADOW — filed from the breakdown when one reconciles, else
+                # from the field as before (tagOverride on the fact).
+                shadow = bound if bound and bound in above else ""
                 nodes.append({"c": c, "parent": parent, "label": (labs.get(c) or {}).get("label", c.split(":")[1]),
-                              "field": bound or "", "leaf": not kids.get(c)})
+                              "field": "" if shadow else (bound or ""), "leaf": not kids.get(c)})
                 for period, ctx in TAG_CTX.items():
                     e = merged.get((c, ctx))
                     if e and e.get("field"):
+                        if shadow:
+                            e["tagOverride"] = True
                         continue
                     merged[(c, ctx)] = {"c": c, "ctx": ctx, "u": "MYR", "d": "0", "tagged": True, "period": period}
                     if (c, ctx) not in order:
                         order.append((c, ctx))
-                walk(c, c)
+                walk(c, c, above | ({bound} if bound else set()))
 
-        walk(root, root)
-        trees.append({"root": root, "rootField": root_field,
+        walk(root, root, {root_field})
+        trees.append({"root": root, "rootField": root_field, "writeFields": root not in TAG_FILING_ONLY,
                       "rootLabel": (labs.get(root) or {}).get("label", root), "nodes": nodes})
     return trees
+
+
+RPT_ROLE = "750000"
+RPT_AXIS = "ifrs-smes:CategoriesOfRelatedPartiesAxis"
+SEPARATE = ["ifrs-smes:ConsolidatedAndSeparateFinancialStatementsAxis", "ifrs-smes:SeparateMember"]
+# Left out of the grid: KMP compensation is the directors' remuneration,
+# extracted and filed elsewhere, not a counterparty line.
+RPT_SKIP = {"ifrs-smes:KeyManagementPersonnelCompensation"}
+
+
+def build_rpt_grid(merged, order, ctx_struct, catalogue_path):
+    """The related-party note as SSM files it: each transaction or balance
+    concept × counterparty category (CategoriesOfRelatedPartiesAxis), plus the
+    all-parties total with no member. Every cell gets a slot marked `rpt`;
+    the value comes from the note's lines when they were read, and otherwise
+    falls back to whatever the slot held before (field or donor literal)."""
+    cat = json.load(open(catalogue_path, encoding="utf-8"))
+    pres, el, labs = cat["pres"].get(RPT_ROLE, []), cat["elems"], cat.get("labels", {})
+    members = [c for p, c, _o in pres if p == "ifrs-smes:EntitysTotalForRelatedPartiesMember"]
+    concepts = [c for _p, c, _o in pres
+                if (el.get(c) or {}).get("type") == "monetaryItemType" and c not in RPT_SKIP]
+    spec_concepts = []
+    for c in dict.fromkeys(concepts):
+        instant = el[c].get("period") == "instant"
+        base = "asof_{CE}" if instant else "fromto_{CS}_{CE}"
+        body = {"i": "{CE-}"} if instant else {"s": "{CS-}", "e": "{CE-}"}
+        total_ctx = f"{base}_SeparateMember"
+        ctx_struct.setdefault(total_ctx, {**body, "dims": [SEPARATE]})
+        e = merged.get((c, total_ctx))
+        if e is None:
+            e = merged[(c, total_ctx)] = {"c": c, "ctx": total_ctx, "u": "MYR", "d": "0"}
+            order.append((c, total_ctx))
+        e["rpt"] = "total"
+        for m in members:
+            local = m.split(":")[1]
+            ctx = f"{base}_SeparateMember_{local}"
+            ctx_struct.setdefault(ctx, {**body, "dims": [SEPARATE, [RPT_AXIS, m]]})
+            me = merged.get((c, ctx))
+            if me is None:
+                me = merged[(c, ctx)] = {"c": c, "ctx": ctx, "u": "MYR", "d": "0"}
+                order.append((c, ctx))
+            me["rpt"] = local
+        spec_concepts.append({"c": c, "label": (labs.get(c) or {}).get("label", c.split(":")[1]),
+                              "instant": instant, "totalField": e.get("field", "")})
+    return {"members": [{"m": m.split(":")[1], "label": (labs.get(m) or {}).get("label", m.split(":")[1])}
+                        for m in members],
+            "concepts": spec_concepts}
 
 
 def main(*paths):
@@ -732,6 +817,7 @@ def main(*paths):
     donor_narratives = [k[0] for k in order if merged[k].get("narrative")]
     added = augment_from_taxonomy(merged, order, taxonomy) if taxonomy else []
     tag_trees = build_tag_trees(merged, order, taxonomy) if taxonomy else []
+    rpt_grid = build_rpt_grid(merged, order, ctx_struct, taxonomy) if taxonomy else {"members": [], "concepts": []}
     global NARRATIVE_LABEL_SOURCE
     if taxonomy:
         _labs = json.load(open(taxonomy, encoding="utf-8")).get("labels", {})
@@ -805,6 +891,12 @@ export interface TemplateFact {{
   narrative?: boolean;
   /** Filled from the reconciled note-line tagging (x.tagged[c][period]). */
   tagged?: boolean;
+  /** Field-bound, but a reconciled breakdown (x.tagged) takes precedence. */
+  tagOverride?: boolean;
+  /** Related-party grid cell: a CategoriesOfRelatedPartiesAxis member, or
+   *  "total" for the all-parties figure. Read from x.rptGrid when present,
+   *  else the fact's field or literal as before. */
+  rpt?: string;
 }}
 
 export interface TemplateContext {{
@@ -874,8 +966,11 @@ export interface TemplateContext {{
             + "];\n\n"
             "/** Totals read as note lines and mapped into SSM's tree (see mbrs-extract). */\n"
             "export interface TagNode { c: string; parent: string; label: string; field: string; leaf: boolean }\n"
-            "export interface TagTree { root: string; rootField: string; rootLabel: string; nodes: TagNode[] }\n"
+            "export interface TagTree { root: string; rootField: string; writeFields: boolean; rootLabel: string; nodes: TagNode[] }\n"
             "export const TAG_TREES: TagTree[] = " + json.dumps(tag_trees, ensure_ascii=False, indent=1) + ";\n\n"
+            "/** The related-party note's grid: concept × counterparty category. */\n"
+            "export interface RptSpec { members: { m: string; label: string }[]; concepts: { c: string; label: string; instant: boolean; totalField: string }[] }\n"
+            "export const RPT_GRID: RptSpec = " + json.dumps(rpt_grid, ensure_ascii=False, indent=1) + ";\n\n"
             "/** SSM's label for each concept above, for messages a filer can read. */\n"
             "export const MBRS_CALC_LABELS: Record<string, string> = {\n"
             + "".join(f"  {tsj(q)}: {tsj(NARRATIVE_LABEL_SOURCE.get(q, q.split(':')[-1]))},\n"
@@ -895,8 +990,8 @@ export interface TemplateContext {{
         print(f"added {len(added)} slots from the taxonomy for bound concepts no donor used")
     if unbound:
         from collections import Counter as _C
-        u = _C(unbound)
-        print(f"{len(unbound)} boxes kept but UNBOUND — map a field to each to fill it:")
+        u = _C(n for n in unbound if not any(merged[k].get("rpt") for k in merged if k[0] == n))
+        print(f"{sum(u.values())} boxes kept but UNBOUND — map a field to each to fill it:")
         for c, n in u.most_common(25):
             print(f"   {n:3}x {c}")
     print(f"wrote {SRC_DIR}/mbrs-template.ts ({len(out)} bytes)")

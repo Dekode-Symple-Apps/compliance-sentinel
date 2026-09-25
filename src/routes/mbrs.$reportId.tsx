@@ -714,12 +714,11 @@ function MbrsFilingPage() {
                   </p>
                 </div>
                 {view!.tagLines!.map((note) => {
-                  const status = (view?.extractionNotes ?? []).filter(
-                    (n) => /reconciled|not filed|could not be verified|ignored/.test(n) && n.toLowerCase().includes(rootName(note.root)),
-                  );
+                  const name = note.rootLabel ?? rootName(note.root);
+                  const status = (view?.extractionNotes ?? []).filter((n) => n.startsWith(`${name} (`) || n.startsWith(`${name}:`));
                   return (
                     <div key={note.root} className="px-4 py-3 border-b border-gray-100 last:border-b-0">
-                      <div className="text-[13px] font-semibold text-gray-800 mb-1.5">{rootName(note.root)}</div>
+                      <div className="text-[13px] font-semibold text-gray-800 mb-1.5">{name}</div>
                       <table className="w-full text-[13px]">
                         <thead>
                           <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
@@ -741,11 +740,49 @@ function MbrsFilingPage() {
                         </tbody>
                       </table>
                       {status.map((n, i) => (
-                        <p key={i} className={cn("text-[13px] mt-1.5", /not filed|could not/.test(n) ? "text-amber-800" : "text-gray-600")}>{n}</p>
+                        <p key={i} className={cn("text-[13px] mt-1.5", /not filed|could not|the form shows/.test(n) ? "text-amber-800" : "text-gray-600")}>{n.slice(name.length).replace(/^:\s*/, "")}</p>
                       ))}
                     </div>
                   );
                 })}
+              </section>
+            )}
+
+            {/* The related-party note as SSM files it: one amount per item and
+                counterparty category, the all-parties total being their sum. */}
+            {(view?.rptLines?.length ?? 0) > 0 && (
+              <section className="rounded-lg border border-gray-200 overflow-hidden bg-white">
+                <div className="px-4 py-3 border-b border-gray-200">
+                  <h2 className="text-sm font-semibold text-gray-900">Related parties read from the report</h2>
+                  <p className="text-[13px] text-gray-600 mt-0.5">
+                    Current year. Each transaction and balance, the SSM item it was filed under, and the counterparty category. SSM's total for each item is the sum across categories.
+                  </p>
+                </div>
+                <div className="px-4 py-3">
+                  <table className="w-full text-[13px]">
+                    <thead>
+                      <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
+                        <th className="font-semibold py-1 pr-3">As printed</th>
+                        <th className="font-semibold py-1 pr-3">Filed under</th>
+                        <th className="font-semibold py-1 pr-3">Party</th>
+                        <th className="font-semibold py-1 text-right">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {view!.rptLines!.map((l, i) => (
+                        <tr key={i} className="border-t border-gray-100">
+                          <td className="py-1 pr-3 text-gray-900">{l.label}</td>
+                          <td className="py-1 pr-3 text-gray-700">{l.conceptLabel || l.concept}</td>
+                          <td className="py-1 pr-3 text-gray-700">{(l.partyLabel || l.party).replace(/\s*\[member\]$/, "")}</td>
+                          <td className="py-1 text-right tabular-nums">{fmtMoney(l.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {(view?.extractionNotes ?? []).filter((n) => n.startsWith("Related parties:")).map((n, i) => (
+                    <p key={i} className={cn("text-[13px] mt-1.5", /ignored|was /.test(n) ? "text-amber-800" : "text-gray-600")}>{n.replace(/^Related parties:\s*/, "")}</p>
+                  ))}
+                </div>
               </section>
             )}
           </div>

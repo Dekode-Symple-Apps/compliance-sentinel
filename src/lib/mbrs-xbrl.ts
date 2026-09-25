@@ -96,10 +96,27 @@ function wrapNarrative(body: string): string {
   ].join("\n");
 }
 
+const TAG_FACE_CTX = new Set(["asof_{CE}_SeparateMember", "asof_{PE}_SeparateMember"]);
+
 function factValue(f: TemplateFact, x: MbrsExtraction): string | null {
   if (f.narrative) {
     const v = x.narratives?.[f.c];
     return typeof v === "string" ? wrapNarrative(v) : "";
+  }
+  if (f.rpt) {
+    const row = x.rptGrid?.[f.c];
+    if (row) {
+      const v = f.rpt === "total" ? Object.values(row).reduce((a, b) => a + b, 0) : row[f.rpt];
+      if (typeof v === "number" && Number.isFinite(v)) return String(Math.round(v * 100) / 100);
+      // The note was read and names no amount for this party: fall through to
+      // the slot's own field or literal (a donor's structural 0).
+    }
+  }
+  // A reconciled note breakdown beats a named field for the same concept and
+  // period on the face contexts it was reconciled in.
+  if (f.tagOverride || (f.field && f.period && TAG_FACE_CTX.has(f.ctx ?? ""))) {
+    const v = x.tagged?.[f.c]?.[f.period ?? "current"];
+    if (typeof v === "number" && Number.isFinite(v)) return String(v);
   }
   if (f.tagged) {
     const v = x.tagged?.[f.c]?.[f.period ?? "current"];
@@ -117,7 +134,8 @@ function factValue(f: TemplateFact, x: MbrsExtraction): string | null {
       return String(raw);
     }
     const v = x.entity?.[f.field];
-    return typeof v === "string" && v.trim() ? v.trim() : null;
+    // A defaulted declaration keeps its old literal for when the report is silent.
+    return typeof v === "string" && v.trim() ? v.trim() : (f.v ?? null);
   }
   // No field, no narrative and no literal: the box exists in the template but
   // nothing is bound to it yet. Skip it — an empty element is not a valid fact.
