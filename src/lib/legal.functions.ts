@@ -1,11 +1,14 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { generateWithFallback } from "@/lib/gemini";
 import { docxToText, looksLikeDocx, applyEditsToDocx, applySimplificationToDocx, buildRedlineDocx, type DocxEdit, type SimplifyDocxEdit } from "@/lib/docx-editor";
 import { extractPdfPages } from "@/lib/pdf-pages";
 import { LEGAL_KB_SEED, baselinePlaybookText } from "@/lib/legal.knowledge";
 import { assertRowTenant, getCallerTenant } from "@/lib/tenant.functions";
+import { requireProduct } from "@/lib/feature-middleware";
+
+// Every Legal CMS function refuses callers whose organisation has it switched off.
+const requireLegalCms = requireProduct("legal_cms");
 
 // ---------------------------------------------------------------------------
 // Legal CMS — server functions
@@ -296,7 +299,7 @@ Generate a concise executive summary (3-5 sentences) for the approving authority
 // ---------------------------------------------------------------------------
 
 export const listLegalMatters = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(
     z.object({
       status:      z.string().optional(),
@@ -322,7 +325,7 @@ export const listLegalMatters = createServerFn({ method: "GET" })
   });
 
 export const getLegalMatter = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({ id: z.string().uuid() }))
   .handler(async ({ data, context }) => {
     const sb = context.supabase as any;
@@ -361,7 +364,7 @@ export const getLegalMatter = createServerFn({ method: "GET" })
   });
 
 export const createLegalMatter = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(
     z.object({
       title:           z.string().min(3),
@@ -502,7 +505,7 @@ export const createLegalMatter = createServerFn({ method: "POST" })
 // document here is also what lets counterparty markup be attached and reviewed
 // later (see reviewCounterpartyMarkup).
 export const createTemplateRequest = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(
     z.object({
       template_id:     z.string(),
@@ -580,7 +583,7 @@ export const createTemplateRequest = createServerFn({ method: "POST" })
   });
 
 export const assignLegalMatter = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(
     z.object({
       matter_id:         z.string().uuid(),
@@ -640,7 +643,7 @@ export const assignLegalMatter = createServerFn({ method: "POST" })
 // round-trip (or a "client approved, please submit for sign-off" handback)
 // doesn't have to re-enter assignment; the reviewer already owns the matter.
 export const setAwaitingRole = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({
     matter_id:     z.string().uuid(),
     awaiting_role: z.enum(["submitter", "reviewer"]),
@@ -692,7 +695,7 @@ export const setAwaitingRole = createServerFn({ method: "POST" })
   });
 
 export const advanceLegalMatterStatus = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(
     z.object({
       matter_id:  z.string().uuid(),
@@ -785,7 +788,7 @@ export const advanceLegalMatterStatus = createServerFn({ method: "POST" })
   });
 
 export const addLegalComment = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(
     z.object({
       matter_id:    z.string().uuid(),
@@ -829,7 +832,7 @@ export const addLegalComment = createServerFn({ method: "POST" })
 // Route C → D (complex advisory); Route A → B (bespoke, deviation from standard
 // form). Runs triage if none exists and drops it into the assignment queue.
 export const escalateLegalMatter = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({
     matter_id: z.string().uuid(),
     reason: z.string().optional(),
@@ -891,7 +894,7 @@ export const escalateLegalMatter = createServerFn({ method: "POST" })
   });
 
 export const archiveLegalMatter = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({ matter_id: z.string().uuid() }))
   .handler(async ({ data, context }) => {
     const sb = context.supabase as any;
@@ -953,7 +956,7 @@ RESPONSE FORMAT — reply with ONLY valid JSON, no markdown fences:
 Rules: offer_template only when a standard template genuinely fits. propose_request only when you truly have enough (never on the first turn unless the user gave full context). If they mention a contract to review, remind them in "reply" to attach the document on the confirmation card. If they mention a monetary amount, set draft.contract_value to that number (digits only); otherwise leave it null. Material = large value / company-wide significance → is_material true and mention that it triggers executive-level approval.`;
 
 export const legalIntakeChat = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(
     z.object({
       messages: z.array(z.object({
@@ -1002,7 +1005,7 @@ export const legalIntakeChat = createServerFn({ method: "POST" })
 // ---------------------------------------------------------------------------
 
 export const attachLegalDocument = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(
     z.object({
       matter_id:  z.string().uuid(),
@@ -1102,7 +1105,7 @@ If it's a services / vendor / supply agreement, check:
 For any other kind of commercial document, check at minimum: payment terms, term and termination, indemnity, limitation of liability, IP ownership, confidentiality, data protection, force majeure, and governing law.`;
 
 export const reviewLegalDocument = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({ document_id: z.string().uuid() }))
   .handler(async ({ data, context }) => {
     const sb = context.supabase as any;
@@ -1275,7 +1278,7 @@ async function extractDocText(fileUrl: string, mimeType: string | null | undefin
 // Document Review UI) — but framed as "what did they change" rather than "what's
 // risky in our draft", with a counter-position suggestion per changed clause.
 export const reviewCounterpartyMarkup = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({ document_id: z.string().uuid() }))
   .handler(async ({ data, context }) => {
     const sb = context.supabase as any;
@@ -1419,7 +1422,7 @@ IMPORTANT: "suggestion" must read as contract prose (e.g. "Each Party's aggregat
   });
 
 export const setDocumentAccess = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({
     document_id:  z.string().uuid(),
     access_level: z.enum(["standard", "restricted"]),
@@ -1442,7 +1445,7 @@ export const setDocumentAccess = createServerFn({ method: "POST" })
 
 // Fetch a single document + its parent matter for the AI Co-Pilot review screen.
 export const getLegalDocument = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({ document_id: z.string().uuid() }))
   .handler(async ({ data, context }) => {
     const sb = context.supabase as any;
@@ -1493,7 +1496,7 @@ export const getLegalDocument = createServerFn({ method: "GET" })
 // Accept a suggested AI redline — records it into the review, logs it, and posts
 // a note ("suggests alternative clauses directly into the workflow for approval").
 export const acceptClauseSuggestion = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({
     document_id:  z.string().uuid(),
     clause_index: z.number().int().min(0),
@@ -1556,7 +1559,7 @@ export const acceptClauseSuggestion = createServerFn({ method: "POST" })
 // clause only, grounded in the clause text and why it was flagged. Persisted as
 // the clause's suggestion so "Generate amended version" applies the new wording.
 export const refineClauseSuggestion = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({
     document_id:  z.string().uuid(),
     clause_index: z.number().int().min(0),
@@ -1700,7 +1703,7 @@ function locateClauseSpan(
 // AI Co-Pilot and attaches a note. Stored on the document's ai_review so it sits
 // alongside the AI clauses; also mirrored into the matter chat for the audit log.
 export const addDocumentAnnotation = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({
     document_id: z.string().uuid(),
     quote:       z.string().min(1).max(2000),
@@ -1743,7 +1746,7 @@ export const addDocumentAnnotation = createServerFn({ method: "POST" })
   });
 
 export const deleteDocumentAnnotation = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({ document_id: z.string().uuid(), index: z.number().int().min(0) }))
   .handler(async ({ data, context }) => {
     const sb = context.supabase as any;
@@ -1764,7 +1767,7 @@ export const deleteDocumentAnnotation = createServerFn({ method: "POST" })
 // Deleting an original with derived versions re-parents them (parent set null),
 // so nothing is silently orphaned mid-cascade.
 export const deleteLegalDocument = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({ document_id: z.string().uuid() }))
   .handler(async ({ data, context }) => {
     const sb = context.supabase as any;
@@ -1843,7 +1846,7 @@ function enclosingClauseSpan(text: string, start: number, end: number): { start:
 // extracted text. The new row is version N+1, linked to the original (which
 // keeps its "Original" tag as version 1).
 export const createAmendedVersion = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({ document_id: z.string().uuid(), note: z.string().optional() }))
   .handler(async ({ data, context }) => {
     const sb = context.supabase as any;
@@ -2091,7 +2094,7 @@ export const createAmendedVersion = createServerFn({ method: "POST" })
 // AI-proposed response/solution for the legal manager, drawn from the policy
 // library + published knowledge base + historical precedents (similar matters).
 export const generateProposedResponse = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({ matter_id: z.string().uuid() }))
   .handler(async ({ data, context }) => {
     const sb = context.supabase as any;
@@ -2177,7 +2180,7 @@ Return ONLY valid JSON:
   });
 
 export const referToGeneralCounsel = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({ matter_id: z.string().uuid(), note: z.string().optional() }))
   .handler(async ({ data, context }) => {
     const sb = context.supabase as any;
@@ -2213,7 +2216,7 @@ export const referToGeneralCounsel = createServerFn({ method: "POST" })
 // Cross-functional collaboration — loop in Tax/Compliance/Risk/Finance. Their
 // notes stay isolated to this matter file.
 export const tagFunctions = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({
     matter_id: z.string().uuid(),
     functions: z.array(z.string()).min(1),
@@ -2242,7 +2245,7 @@ export const tagFunctions = createServerFn({ method: "POST" })
 
 // Publish finalized Route D takeaways into the Route C knowledge base.
 export const publishToKnowledgeBase = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({
     matter_id:   z.string().uuid(),
     title:       z.string().min(3),
@@ -2285,7 +2288,7 @@ export const publishToKnowledgeBase = createServerFn({ method: "POST" })
   });
 
 export const listKnowledgeBase = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .handler(async ({ context }) => {
     const sb = context.supabase as any;
     const { tenantId } = await getCallerTenant(context.userId);
@@ -2300,7 +2303,7 @@ export const listKnowledgeBase = createServerFn({ method: "GET" })
 // Seed the starter knowledge base (Malaysian banking + cross-industry positions).
 // Idempotent: inserts only the seed titles not already present.
 export const seedKnowledgeBase = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .handler(async ({ context }) => {
     const sb = context.supabase as any;
     const { userEmail } = actor(context);
@@ -2328,7 +2331,7 @@ export const seedKnowledgeBase = createServerFn({ method: "POST" })
 // ===========================================================================
 
 export const setMatterLifecycle = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({
     matter_id:       z.string().uuid(),
     expiry_date:     z.string().optional(),      // contract expiry / renewal date
@@ -2358,7 +2361,7 @@ export const setMatterLifecycle = createServerFn({ method: "POST" })
 // Lifecycle alerts — matters approaching expiry/renewal or past retention (for
 // the expiry tracker + destruction prompts). Windowed client-side after fetch.
 export const listLifecycleAlerts = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .handler(async ({ context }) => {
     const sb = context.supabase as any;
     const { tenantId } = await getCallerTenant(context.userId);
@@ -2375,7 +2378,7 @@ export const listLifecycleAlerts = createServerFn({ method: "GET" })
 // Post-execution AI knowledge agent — reasons over the vault (resolved/approved/
 // archived matters) + published KB to answer recurring practical queries.
 export const vaultKnowledgeSearch = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({ query: z.string().min(3) }))
   .handler(async ({ data, context }) => {
     const sb = context.supabase as any;
@@ -2430,7 +2433,7 @@ Return ONLY valid JSON: {"answer": "...", "citations": ["reference numbers cited
 // ===========================================================================
 
 export const updateExecSummary = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({ matter_id: z.string().uuid(), summary: z.string() }))
   .handler(async ({ data, context }) => {
     const sb = context.supabase as any;
@@ -2448,7 +2451,7 @@ export const updateExecSummary = createServerFn({ method: "POST" })
   });
 
 export const shareWithCounterparty = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({
     matter_id:       z.string().uuid(),
     recipient_name:  z.string(),
@@ -2501,7 +2504,7 @@ export const shareWithCounterparty = createServerFn({ method: "POST" })
 // Simulate the counterparty opening/downloading the shared package (tracked
 // interaction loop). In production this is fired by the access-controlled link.
 export const recordShareDownload = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({ share_id: z.string().uuid() }))
   .handler(async ({ data, context }) => {
     const sb = context.supabase as any;
@@ -2541,7 +2544,7 @@ function escapeHtml(s: string): string {
 // listed in the index but their body is withheld — the export must not be a
 // side-channel around the restricted-access control on individual docs.
 export const generateMatterBinder = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireLegalCms])
   .inputValidator(z.object({ matter_id: z.string().uuid() }))
   .handler(async ({ data, context }) => {
     const sb = context.supabase as any;

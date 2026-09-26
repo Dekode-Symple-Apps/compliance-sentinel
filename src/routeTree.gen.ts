@@ -16,6 +16,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ReportsIndexRouteImport } from './routes/reports.index'
 import { Route as LegalIndexRouteImport } from './routes/legal.index'
 import { Route as LayoutIndexRouteImport } from './routes/layout.index'
+import { Route as CcmsIndexRouteImport } from './routes/ccms.index'
 import { Route as Simplify2ReportIdRouteImport } from './routes/simplify2.$reportId'
 import { Route as SimplifyReportIdRouteImport } from './routes/simplify.$reportId'
 import { Route as RspoReportIdRouteImport } from './routes/rspo.$reportId'
@@ -27,9 +28,15 @@ import { Route as LegalNewRouteImport } from './routes/legal.new'
 import { Route as LegalMatterIdRouteImport } from './routes/legal.$matterId'
 import { Route as LayoutJobIdRouteImport } from './routes/layout.$jobId'
 import { Route as CreditReportIdRouteImport } from './routes/credit.$reportId'
+import { Route as CcmsVendorsRouteImport } from './routes/ccms.vendors'
+import { Route as CcmsTemplatesRouteImport } from './routes/ccms.templates'
+import { Route as CcmsNewRouteImport } from './routes/ccms.new'
+import { Route as CcmsContractsRouteImport } from './routes/ccms.contracts'
+import { Route as CcmsContractIdRouteImport } from './routes/ccms.$contractId'
 import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
 import { Route as ReportsReportIdPresentRouteImport } from './routes/reports.$reportId.present'
 import { Route as LegalReviewDocumentIdRouteImport } from './routes/legal.review.$documentId'
+import { Route as CcmsReviewDocumentIdRouteImport } from './routes/ccms.review.$documentId'
 import { Route as AuthGoogleCallbackRouteImport } from './routes/auth.google.callback'
 
 const SettingsRoute = SettingsRouteImport.update({
@@ -65,6 +72,11 @@ const LegalIndexRoute = LegalIndexRouteImport.update({
 const LayoutIndexRoute = LayoutIndexRouteImport.update({
   id: '/layout/',
   path: '/layout/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CcmsIndexRoute = CcmsIndexRouteImport.update({
+  id: '/ccms/',
+  path: '/ccms/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const Simplify2ReportIdRoute = Simplify2ReportIdRouteImport.update({
@@ -122,6 +134,31 @@ const CreditReportIdRoute = CreditReportIdRouteImport.update({
   path: '/credit/$reportId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CcmsVendorsRoute = CcmsVendorsRouteImport.update({
+  id: '/ccms/vendors',
+  path: '/ccms/vendors',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CcmsTemplatesRoute = CcmsTemplatesRouteImport.update({
+  id: '/ccms/templates',
+  path: '/ccms/templates',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CcmsNewRoute = CcmsNewRouteImport.update({
+  id: '/ccms/new',
+  path: '/ccms/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CcmsContractsRoute = CcmsContractsRouteImport.update({
+  id: '/ccms/contracts',
+  path: '/ccms/contracts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CcmsContractIdRoute = CcmsContractIdRouteImport.update({
+  id: '/ccms/$contractId',
+  path: '/ccms/$contractId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthCallbackRoute = AuthCallbackRouteImport.update({
   id: '/auth/callback',
   path: '/auth/callback',
@@ -137,6 +174,11 @@ const LegalReviewDocumentIdRoute = LegalReviewDocumentIdRouteImport.update({
   path: '/legal/review/$documentId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CcmsReviewDocumentIdRoute = CcmsReviewDocumentIdRouteImport.update({
+  id: '/ccms/review/$documentId',
+  path: '/ccms/review/$documentId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthGoogleCallbackRoute = AuthGoogleCallbackRouteImport.update({
   id: '/auth/google/callback',
   path: '/auth/google/callback',
@@ -149,6 +191,11 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/ccms/$contractId': typeof CcmsContractIdRoute
+  '/ccms/contracts': typeof CcmsContractsRoute
+  '/ccms/new': typeof CcmsNewRoute
+  '/ccms/templates': typeof CcmsTemplatesRoute
+  '/ccms/vendors': typeof CcmsVendorsRoute
   '/credit/$reportId': typeof CreditReportIdRoute
   '/layout/$jobId': typeof LayoutJobIdRoute
   '/legal/$matterId': typeof LegalMatterIdRoute
@@ -160,10 +207,12 @@ export interface FileRoutesByFullPath {
   '/rspo/$reportId': typeof RspoReportIdRoute
   '/simplify/$reportId': typeof SimplifyReportIdRoute
   '/simplify2/$reportId': typeof Simplify2ReportIdRoute
+  '/ccms/': typeof CcmsIndexRoute
   '/layout/': typeof LayoutIndexRoute
   '/legal/': typeof LegalIndexRoute
   '/reports/': typeof ReportsIndexRoute
   '/auth/google/callback': typeof AuthGoogleCallbackRoute
+  '/ccms/review/$documentId': typeof CcmsReviewDocumentIdRoute
   '/legal/review/$documentId': typeof LegalReviewDocumentIdRoute
   '/reports/$reportId/present': typeof ReportsReportIdPresentRoute
 }
@@ -173,6 +222,11 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/ccms/$contractId': typeof CcmsContractIdRoute
+  '/ccms/contracts': typeof CcmsContractsRoute
+  '/ccms/new': typeof CcmsNewRoute
+  '/ccms/templates': typeof CcmsTemplatesRoute
+  '/ccms/vendors': typeof CcmsVendorsRoute
   '/credit/$reportId': typeof CreditReportIdRoute
   '/layout/$jobId': typeof LayoutJobIdRoute
   '/legal/$matterId': typeof LegalMatterIdRoute
@@ -184,10 +238,12 @@ export interface FileRoutesByTo {
   '/rspo/$reportId': typeof RspoReportIdRoute
   '/simplify/$reportId': typeof SimplifyReportIdRoute
   '/simplify2/$reportId': typeof Simplify2ReportIdRoute
+  '/ccms': typeof CcmsIndexRoute
   '/layout': typeof LayoutIndexRoute
   '/legal': typeof LegalIndexRoute
   '/reports': typeof ReportsIndexRoute
   '/auth/google/callback': typeof AuthGoogleCallbackRoute
+  '/ccms/review/$documentId': typeof CcmsReviewDocumentIdRoute
   '/legal/review/$documentId': typeof LegalReviewDocumentIdRoute
   '/reports/$reportId/present': typeof ReportsReportIdPresentRoute
 }
@@ -198,6 +254,11 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/ccms/$contractId': typeof CcmsContractIdRoute
+  '/ccms/contracts': typeof CcmsContractsRoute
+  '/ccms/new': typeof CcmsNewRoute
+  '/ccms/templates': typeof CcmsTemplatesRoute
+  '/ccms/vendors': typeof CcmsVendorsRoute
   '/credit/$reportId': typeof CreditReportIdRoute
   '/layout/$jobId': typeof LayoutJobIdRoute
   '/legal/$matterId': typeof LegalMatterIdRoute
@@ -209,10 +270,12 @@ export interface FileRoutesById {
   '/rspo/$reportId': typeof RspoReportIdRoute
   '/simplify/$reportId': typeof SimplifyReportIdRoute
   '/simplify2/$reportId': typeof Simplify2ReportIdRoute
+  '/ccms/': typeof CcmsIndexRoute
   '/layout/': typeof LayoutIndexRoute
   '/legal/': typeof LegalIndexRoute
   '/reports/': typeof ReportsIndexRoute
   '/auth/google/callback': typeof AuthGoogleCallbackRoute
+  '/ccms/review/$documentId': typeof CcmsReviewDocumentIdRoute
   '/legal/review/$documentId': typeof LegalReviewDocumentIdRoute
   '/reports/$reportId/present': typeof ReportsReportIdPresentRoute
 }
@@ -224,6 +287,11 @@ export interface FileRouteTypes {
     | '/login'
     | '/settings'
     | '/auth/callback'
+    | '/ccms/$contractId'
+    | '/ccms/contracts'
+    | '/ccms/new'
+    | '/ccms/templates'
+    | '/ccms/vendors'
     | '/credit/$reportId'
     | '/layout/$jobId'
     | '/legal/$matterId'
@@ -235,10 +303,12 @@ export interface FileRouteTypes {
     | '/rspo/$reportId'
     | '/simplify/$reportId'
     | '/simplify2/$reportId'
+    | '/ccms/'
     | '/layout/'
     | '/legal/'
     | '/reports/'
     | '/auth/google/callback'
+    | '/ccms/review/$documentId'
     | '/legal/review/$documentId'
     | '/reports/$reportId/present'
   fileRoutesByTo: FileRoutesByTo
@@ -248,6 +318,11 @@ export interface FileRouteTypes {
     | '/login'
     | '/settings'
     | '/auth/callback'
+    | '/ccms/$contractId'
+    | '/ccms/contracts'
+    | '/ccms/new'
+    | '/ccms/templates'
+    | '/ccms/vendors'
     | '/credit/$reportId'
     | '/layout/$jobId'
     | '/legal/$matterId'
@@ -259,10 +334,12 @@ export interface FileRouteTypes {
     | '/rspo/$reportId'
     | '/simplify/$reportId'
     | '/simplify2/$reportId'
+    | '/ccms'
     | '/layout'
     | '/legal'
     | '/reports'
     | '/auth/google/callback'
+    | '/ccms/review/$documentId'
     | '/legal/review/$documentId'
     | '/reports/$reportId/present'
   id:
@@ -272,6 +349,11 @@ export interface FileRouteTypes {
     | '/login'
     | '/settings'
     | '/auth/callback'
+    | '/ccms/$contractId'
+    | '/ccms/contracts'
+    | '/ccms/new'
+    | '/ccms/templates'
+    | '/ccms/vendors'
     | '/credit/$reportId'
     | '/layout/$jobId'
     | '/legal/$matterId'
@@ -283,10 +365,12 @@ export interface FileRouteTypes {
     | '/rspo/$reportId'
     | '/simplify/$reportId'
     | '/simplify2/$reportId'
+    | '/ccms/'
     | '/layout/'
     | '/legal/'
     | '/reports/'
     | '/auth/google/callback'
+    | '/ccms/review/$documentId'
     | '/legal/review/$documentId'
     | '/reports/$reportId/present'
   fileRoutesById: FileRoutesById
@@ -297,6 +381,11 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   SettingsRoute: typeof SettingsRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
+  CcmsContractIdRoute: typeof CcmsContractIdRoute
+  CcmsContractsRoute: typeof CcmsContractsRoute
+  CcmsNewRoute: typeof CcmsNewRoute
+  CcmsTemplatesRoute: typeof CcmsTemplatesRoute
+  CcmsVendorsRoute: typeof CcmsVendorsRoute
   CreditReportIdRoute: typeof CreditReportIdRoute
   LayoutJobIdRoute: typeof LayoutJobIdRoute
   LegalMatterIdRoute: typeof LegalMatterIdRoute
@@ -308,10 +397,12 @@ export interface RootRouteChildren {
   RspoReportIdRoute: typeof RspoReportIdRoute
   SimplifyReportIdRoute: typeof SimplifyReportIdRoute
   Simplify2ReportIdRoute: typeof Simplify2ReportIdRoute
+  CcmsIndexRoute: typeof CcmsIndexRoute
   LayoutIndexRoute: typeof LayoutIndexRoute
   LegalIndexRoute: typeof LegalIndexRoute
   ReportsIndexRoute: typeof ReportsIndexRoute
   AuthGoogleCallbackRoute: typeof AuthGoogleCallbackRoute
+  CcmsReviewDocumentIdRoute: typeof CcmsReviewDocumentIdRoute
   LegalReviewDocumentIdRoute: typeof LegalReviewDocumentIdRoute
 }
 
@@ -364,6 +455,13 @@ declare module '@tanstack/react-router' {
       path: '/layout'
       fullPath: '/layout/'
       preLoaderRoute: typeof LayoutIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ccms/': {
+      id: '/ccms/'
+      path: '/ccms'
+      fullPath: '/ccms/'
+      preLoaderRoute: typeof CcmsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/simplify2/$reportId': {
@@ -443,6 +541,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CreditReportIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/ccms/vendors': {
+      id: '/ccms/vendors'
+      path: '/ccms/vendors'
+      fullPath: '/ccms/vendors'
+      preLoaderRoute: typeof CcmsVendorsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ccms/templates': {
+      id: '/ccms/templates'
+      path: '/ccms/templates'
+      fullPath: '/ccms/templates'
+      preLoaderRoute: typeof CcmsTemplatesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ccms/new': {
+      id: '/ccms/new'
+      path: '/ccms/new'
+      fullPath: '/ccms/new'
+      preLoaderRoute: typeof CcmsNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ccms/contracts': {
+      id: '/ccms/contracts'
+      path: '/ccms/contracts'
+      fullPath: '/ccms/contracts'
+      preLoaderRoute: typeof CcmsContractsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ccms/$contractId': {
+      id: '/ccms/$contractId'
+      path: '/ccms/$contractId'
+      fullPath: '/ccms/$contractId'
+      preLoaderRoute: typeof CcmsContractIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/auth/callback': {
       id: '/auth/callback'
       path: '/auth/callback'
@@ -462,6 +595,13 @@ declare module '@tanstack/react-router' {
       path: '/legal/review/$documentId'
       fullPath: '/legal/review/$documentId'
       preLoaderRoute: typeof LegalReviewDocumentIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ccms/review/$documentId': {
+      id: '/ccms/review/$documentId'
+      path: '/ccms/review/$documentId'
+      fullPath: '/ccms/review/$documentId'
+      preLoaderRoute: typeof CcmsReviewDocumentIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth/google/callback': {
@@ -492,6 +632,11 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   SettingsRoute: SettingsRoute,
   AuthCallbackRoute: AuthCallbackRoute,
+  CcmsContractIdRoute: CcmsContractIdRoute,
+  CcmsContractsRoute: CcmsContractsRoute,
+  CcmsNewRoute: CcmsNewRoute,
+  CcmsTemplatesRoute: CcmsTemplatesRoute,
+  CcmsVendorsRoute: CcmsVendorsRoute,
   CreditReportIdRoute: CreditReportIdRoute,
   LayoutJobIdRoute: LayoutJobIdRoute,
   LegalMatterIdRoute: LegalMatterIdRoute,
@@ -503,10 +648,12 @@ const rootRouteChildren: RootRouteChildren = {
   RspoReportIdRoute: RspoReportIdRoute,
   SimplifyReportIdRoute: SimplifyReportIdRoute,
   Simplify2ReportIdRoute: Simplify2ReportIdRoute,
+  CcmsIndexRoute: CcmsIndexRoute,
   LayoutIndexRoute: LayoutIndexRoute,
   LegalIndexRoute: LegalIndexRoute,
   ReportsIndexRoute: ReportsIndexRoute,
   AuthGoogleCallbackRoute: AuthGoogleCallbackRoute,
+  CcmsReviewDocumentIdRoute: CcmsReviewDocumentIdRoute,
   LegalReviewDocumentIdRoute: LegalReviewDocumentIdRoute,
 }
 export const routeTree = rootRouteImport

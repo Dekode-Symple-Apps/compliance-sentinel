@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
-import { LayoutDashboard, FolderOpen, ShieldCheck, FileSearch, Settings, Zap, Scale, UserRound, ChevronDown, PanelLeftClose, PanelLeftOpen, Layers, LogOut, ClipboardList, Library } from "lucide-react";
+import { LayoutDashboard, FolderOpen, ShieldCheck, FileSearch, Settings, Zap, Scale, UserRound, ChevronDown, PanelLeftClose, PanelLeftOpen, Layers, LogOut, ClipboardList, Library, Building2, FileText, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRole, ROLE_META, type UserRole } from "@/lib/role";
 import { useAuth, signOut, type AppRole } from "@/lib/auth";
@@ -37,7 +37,26 @@ const LEGAL_NAV: NavItem[] = [
   },
   { to: "/legal/repository", label: "Repository", icon: Library, match: (p) => p.startsWith("/legal/repository") },
 ];
+const COMMERCIAL_NAV: NavItem[] = [
+  { to: "/ccms", label: "Dashboard", icon: LayoutDashboard, match: (p) => p === "/ccms" || p === "/ccms/" },
+  {
+    to: "/ccms/contracts", label: "Contracts", icon: ClipboardList,
+    // The queue owns the request form, contract detail and document review.
+    match: (p) =>
+      p.startsWith("/ccms/contracts") || p === "/ccms/new" || p.startsWith("/ccms/review") ||
+      /^\/ccms\/(?!contracts|vendors|templates|new|review)[^/]+/.test(p),
+  },
+  { to: "/ccms/vendors", label: "Vendors", icon: Building2, match: (p) => p.startsWith("/ccms/vendors") },
+  { to: "/ccms/templates", label: "Templates", icon: FileText, match: (p) => p.startsWith("/ccms/templates") },
+];
 const SETTINGS_ITEM: NavItem = { to: "/settings", label: "Settings", icon: Settings };
+
+/** The product a path belongs to, for the page-level switch. */
+function productFor(pathname: string): { key: string; name: string } | null {
+  if (pathname.startsWith("/legal")) return { key: "legal_cms", name: "Legal CMS" };
+  if (pathname.startsWith("/ccms")) return { key: "commercial_cms", name: "Commercial CMS" };
+  return null;
+}
 
 function navActive(item: NavItem, pathname: string): boolean {
   if (item.match) return item.match(pathname);
@@ -66,14 +85,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const NAV_GROUPS = [
     { label: "DMS", items: dmsNav },
     ...(tenant.features.includes("legal_cms") ? [{ label: "Legal CMS", items: LEGAL_NAV }] : []),
+    ...(tenant.features.includes("commercial_cms") ? [{ label: "Commercial CMS", items: COMMERCIAL_NAV }] : []),
   ];
-  const currentNav = [...dmsNav, ...LEGAL_NAV, SETTINGS_ITEM].find((n) => navActive(n, loc.pathname));
+  const currentNav = [...dmsNav, ...LEGAL_NAV, ...COMMERCIAL_NAV, SETTINGS_ITEM].find((n) => navActive(n, loc.pathname));
+  // A product switched off for this organisation: its pages refuse to render,
+  // not just its menu (the server functions refuse too).
+  const product = productFor(loc.pathname);
+  const productOff = mounted && !auth.loading && !!product && !tenant.features.includes(product.key);
   // The DMS workspace switcher and the compliance/legal "viewing as" persona
   // only affect DMS-side flows (simplify/reports/layout/etc) — Legal CMS's
   // nav and routes are workspace-independent and carry their own Submitter /
   // General Counsel / Reviewer switcher in LegalHeader, so both would be dead
   // controls (and a confusing second "viewing as") inside Legal CMS.
-  const isLegalCms = loc.pathname.startsWith("/legal");
+  const isLegalCms = loc.pathname.startsWith("/legal") || loc.pathname.startsWith("/ccms");
 
   const [collapsed, setCollapsed] = useState(false);
   useEffect(() => {
@@ -205,7 +229,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <div className="flex-1 min-w-0">{children}</div>
+        <div className="flex-1 min-w-0">
+          {productOff ? (
+            <div className="max-w-lg mx-auto mt-24 rounded-lg border border-gray-200 bg-white p-6 text-center">
+              <Lock className="size-6 mx-auto text-gray-400" />
+              <h2 className="mt-3 text-base font-semibold text-gray-900">{product!.name} is switched off</h2>
+              <p className="mt-1 text-sm text-gray-600">It is not enabled for your organisation. A super admin can turn it on in Settings → Tenants.</p>
+            </div>
+          ) : children}
+        </div>
       </main>
 
       {/* Rudy — tenant-aware assistant; renders nothing when the tenant lacks

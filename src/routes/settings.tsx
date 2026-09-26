@@ -933,6 +933,7 @@ type TenantFormState = {
 // WORKSPACES names; the extra capability keys are labelled here.
 const FEATURE_LABELS: Record<string, string> = {
   legal_cms: "Legal CMS",
+  commercial_cms: "Commercial CMS",
   rudy: "Rudy.ai assistant",
   create_document: "Create documents",
 };

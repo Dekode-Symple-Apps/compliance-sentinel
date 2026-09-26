@@ -1,0 +1,293 @@
+{
+  "id": "lsh-nda-mutual",
+  "code": "LSH-CMS-T01",
+  "title": "Mutual Non-Disclosure Agreement",
+  "version": "1.0",
+  "effectiveDate": "2026-09-26",
+  "owner": "Group Legal, Lim Seong Hai Capital Berhad",
+  "contractTypes": ["nda"],
+  "status": "Draft for Legal adoption",
+  "usageNote": "Use for any exchange of confidential information with a vendor, subcontractor, consultant, joint-venture or development partner, landowner, or prospective client of the Lim Seong Hai group — including tender and pre-qualification exchanges. Complete Schedule 1 only. Any change to a clause marked LOCKED, or removal of a MANDATORY clause, is a deviation and routes the draft to Legal vetting.",
+  "assumptions": [
+    "Prepared as a starting template pending the client's own approved form; to be adopted by Group Legal before use.",
+    "Mutual (both parties disclose). A one-way version is produced by deleting the counterparty's disclosure in Schedule 1, item 4 — that deletion alone is not a deviation.",
+    "Governing law Malaysia; disputes to the Malaysian courts, with AIAC arbitration available as a pre-approved alternative in clause 19.3.",
+    "Stamp duty on an NDA is nominal; borne by the Counterparty unless Schedule 1 says otherwise."
+  ],
+  "parties": {
+    "company": "LIM SEONG HAI CAPITAL BERHAD (Registration No. [●]), a company incorporated in Malaysia with its registered address at [●] (the \"Company\"), acting for itself and on behalf of its Affiliates",
+    "counterparty": "[COUNTERPARTY NAME] (Registration No. [●]), a [company / partnership / sole proprietorship] registered in [Malaysia] with its [registered / business] address at [●] (the \"Counterparty\")"
+  },
+  "recitals": [
+    "The Company is an investment holding company whose Affiliates carry on the business of construction and construction-related services and solutions, the distribution of building materials, lighting products and mechanical and electrical products, the wholesale and retail of hardware and tools, the rental of machinery, and property development.",
+    "The Parties wish to exchange Confidential Information for the Purpose described in Schedule 1, and each Party is willing to disclose Confidential Information to the other on the terms of this Agreement.",
+    "The Company's shares are listed on Bursa Malaysia Securities Berhad, and some Confidential Information may be material, non-public information about the Company."
+  ],
+  "clauses": [
+    {
+      "id": "definitions",
+      "number": "1",
+      "title": "Definitions and interpretation",
+      "mandatory": true,
+      "locked": false,
+      "keyPosition": "Confidential Information is defined broadly and covers information disclosed in any form, including tender, pricing, design, land and project information.",
+      "paragraphs": [
+        "1.1 In this Agreement:",
+        "\"Affiliate\" means, in relation to a Party, any company that is its holding company or subsidiary, or a subsidiary of its holding company, within the meaning of section 4 of the Companies Act 2016.",
+        "\"Confidential Information\" means all information, in any form or medium (written, oral, electronic, visual or by inspection of any site, premises or sample), disclosed or made available by or on behalf of the Disclosing Party to the Receiving Party or its Representatives, whether before or after the date of this Agreement, in connection with the Purpose, including: (a) tender documents, bills of quantities, pricing, rates, margins, cost plans and bid strategy; (b) drawings, designs, specifications, method statements and technical data; (c) information on land, land acquisition, development plans, approvals and feasibility studies; (d) financial information, forecasts, business plans, customer, supplier and subcontractor lists and terms; (e) Personal Data; (f) Inside Information; (g) the existence and terms of this Agreement and of any discussions between the Parties; and (h) all notes, analyses, compilations and other materials prepared by the Receiving Party or its Representatives that contain or reflect any of the foregoing.",
+        "\"Disclosing Party\" means the Party disclosing Confidential Information, and \"Receiving Party\" means the Party receiving it.",
+        "\"Inside Information\" means information that is not generally available and that, on becoming generally available, a reasonable person would expect to have a material effect on the price or value of securities of the Company, within the meaning of Part V, Division 2 of the Capital Markets and Services Act 2007.",
+        "\"Personal Data\" has the meaning given in the Personal Data Protection Act 2010.",
+        "\"Purpose\" means the purpose described in item 2 of Schedule 1.",
+        "\"Representatives\" means a Party's Affiliates and its and their directors, officers, employees, professional advisers, financiers, insurers and, with the Disclosing Party's prior written consent, consultants and subcontractors, in each case who need to know the Confidential Information for the Purpose.",
+        "1.2 Clause headings are for convenience only. Words in the singular include the plural and vice versa. A reference to a statute includes any amendment or re-enactment of it. \"Including\" means including without limitation."
+      ]
+    },
+    {
+      "id": "obligations",
+      "number": "2",
+      "title": "Confidentiality obligations",
+      "mandatory": true,
+      "locked": false,
+      "keyPosition": "Use only for the Purpose; disclose only to Representatives who need to know; at least reasonable care; notify misuse promptly.",
+      "paragraphs": [
+        "2.1 The Receiving Party shall: (a) keep the Confidential Information strictly confidential; (b) use it solely for the Purpose; (c) not disclose it to any person other than its Representatives in accordance with clause 5; (d) protect it with at least the degree of care it applies to its own confidential information and in any event no less than reasonable care; and (e) not copy or reproduce it except as reasonably required for the Purpose.",
+        "2.2 The Receiving Party shall not use any Confidential Information to prepare or submit any tender, quotation or proposal in competition with the Disclosing Party, or to approach any landowner, client, employer, supplier or subcontractor of the Disclosing Party identified in the Confidential Information, in each case for its own benefit.",
+        "2.3 The Receiving Party shall notify the Disclosing Party in writing without delay on becoming aware of any actual or suspected unauthorised use, disclosure or loss of Confidential Information, and shall take all reasonable steps to mitigate its effects."
+      ]
+    },
+    {
+      "id": "exceptions",
+      "number": "3",
+      "title": "Exceptions",
+      "mandatory": true,
+      "locked": false,
+      "keyPosition": "Standard four exceptions only, with the burden of proof on the Receiving Party.",
+      "paragraphs": [
+        "3.1 Clause 2 does not apply to information that the Receiving Party can show by written evidence: (a) is or becomes generally available to the public other than through a breach of this Agreement; (b) was lawfully in its possession free of any obligation of confidence before disclosure by the Disclosing Party; (c) is lawfully received from a third party who is not under an obligation of confidence in respect of it; or (d) is independently developed by the Receiving Party without use of or reference to the Confidential Information.",
+        "3.2 Information is not within an exception merely because individual features of it are public or in the Receiving Party's possession, unless the combination and its principle are."
+      ]
+    },
+    {
+      "id": "compelled_disclosure",
+      "number": "4",
+      "title": "Disclosure required by law or authority",
+      "mandatory": true,
+      "locked": false,
+      "keyPosition": "Permitted only to the extent required, with prior notice where lawful, and cooperation to limit it.",
+      "paragraphs": [
+        "4.1 The Receiving Party may disclose Confidential Information to the extent required by law, by an order of a court of competent jurisdiction, or by any governmental, regulatory or supervisory authority, including Bursa Malaysia Securities Berhad, the Securities Commission Malaysia, the Malaysian Anti-Corruption Commission, the Construction Industry Development Board and the Inland Revenue Board.",
+        "4.2 Where lawful, the Receiving Party shall give the Disclosing Party prompt prior written notice of the requirement, consult with it on the timing and content of the disclosure, cooperate with any reasonable action it takes to obtain a protective order, and disclose only that part of the Confidential Information it is legally required to disclose."
+      ]
+    },
+    {
+      "id": "representatives",
+      "number": "5",
+      "title": "Representatives",
+      "mandatory": true,
+      "locked": false,
+      "keyPosition": "Receiving Party answers for its Representatives as if their acts were its own.",
+      "paragraphs": [
+        "5.1 The Receiving Party may disclose Confidential Information to its Representatives who need to know it for the Purpose, provided it first informs them of the confidential nature of the information and ensures they are bound by obligations of confidentiality no less protective than this Agreement.",
+        "5.2 The Receiving Party is responsible for any act or omission of its Representatives which, if done or omitted by the Receiving Party, would be a breach of this Agreement."
+      ]
+    },
+    {
+      "id": "inside_information",
+      "number": "6",
+      "title": "Inside information and securities dealing",
+      "mandatory": true,
+      "locked": true,
+      "keyPosition": "Listed-issuer protection: no dealing in the Company's securities while in possession of Inside Information; no tipping. Required because the Company is listed on Bursa Malaysia.",
+      "paragraphs": [
+        "6.1 The Counterparty acknowledges that Confidential Information disclosed by the Company may include Inside Information, and that it and its Representatives may be subject to the prohibitions on insider trading in sections 188 and 189 of the Capital Markets and Services Act 2007.",
+        "6.2 The Counterparty shall not, and shall procure that its Representatives do not, while in possession of Inside Information: (a) acquire or dispose of, or procure another person to acquire or dispose of, any securities of the Company or its Affiliates; or (b) communicate the Inside Information to any person who would, or would be likely to, deal in those securities.",
+        "6.3 The Counterparty shall not make any announcement or public statement concerning the Purpose or the Company without the Company's prior written consent, and acknowledges that the Company alone decides whether and when any announcement is required under the Main Market or ACE Market Listing Requirements of Bursa Malaysia Securities Berhad."
+      ]
+    },
+    {
+      "id": "personal_data",
+      "number": "7",
+      "title": "Personal data",
+      "mandatory": true,
+      "locked": false,
+      "keyPosition": "PDPA 2010 compliance, security, breach notification and no transfer outside Malaysia without consent.",
+      "paragraphs": [
+        "7.1 Each Party shall comply with the Personal Data Protection Act 2010 in respect of any Personal Data it receives under this Agreement, and shall process it only for the Purpose.",
+        "7.2 The Receiving Party shall take practical steps to protect Personal Data from loss, misuse, modification and unauthorised or accidental access or disclosure, and shall notify the Disclosing Party of any personal data breach affecting it without undue delay and in any event within seventy-two (72) hours of becoming aware of it.",
+        "7.3 The Receiving Party shall not transfer Personal Data received from the Disclosing Party to any place outside Malaysia without the Disclosing Party's prior written consent."
+      ]
+    },
+    {
+      "id": "no_licence",
+      "number": "8",
+      "title": "Ownership, no licence and no warranty",
+      "mandatory": true,
+      "locked": false,
+      "keyPosition": "Information stays the Disclosing Party's; no IP licence; provided 'as is'.",
+      "paragraphs": [
+        "8.1 All Confidential Information remains the property of the Disclosing Party. Nothing in this Agreement grants the Receiving Party any licence or right in respect of any intellectual property, drawings, designs or other rights of the Disclosing Party, other than the limited right to use the Confidential Information for the Purpose.",
+        "8.2 Confidential Information is provided \"as is\". The Disclosing Party gives no representation or warranty as to its accuracy or completeness, and shall have no liability to the Receiving Party arising from its use, except as expressly agreed in a definitive written agreement."
+      ]
+    },
+    {
+      "id": "return_destruction",
+      "number": "9",
+      "title": "Return and destruction",
+      "mandatory": true,
+      "locked": false,
+      "keyPosition": "Return or destroy within 14 days of request or termination and certify in writing; limited retention for law and automatic back-ups.",
+      "paragraphs": [
+        "9.1 Within fourteen (14) days of the Disclosing Party's written request, or of the termination or expiry of this Agreement, the Receiving Party shall return or destroy (at the Disclosing Party's option) all Confidential Information in its or its Representatives' possession, erase it from all electronic systems so far as reasonably practicable, and confirm in writing, signed by an authorised officer, that it has done so.",
+        "9.2 The Receiving Party may retain one copy to the extent required by law or by the rules of any professional or regulatory body, and copies held in automatic electronic back-up systems that are not readily accessible, provided that the retained information remains subject to this Agreement for as long as it is held."
+      ]
+    },
+    {
+      "id": "term",
+      "number": "10",
+      "title": "Term and survival",
+      "mandatory": true,
+      "locked": false,
+      "keyPosition": "Agreement term per Schedule 1 (default 2 years); obligations survive 3 years after expiry; trade secrets and Personal Data indefinitely.",
+      "paragraphs": [
+        "10.1 This Agreement commences on the date stated in Schedule 1 and continues for the term stated in Schedule 1, unless terminated earlier by either Party giving thirty (30) days' written notice to the other.",
+        "10.2 Notwithstanding termination or expiry, the obligations in this Agreement continue in respect of Confidential Information disclosed before termination or expiry for three (3) years afterwards, and indefinitely in respect of trade secrets, Personal Data and Inside Information (for so long as it remains Inside Information)."
+      ]
+    },
+    {
+      "id": "remedies",
+      "number": "11",
+      "title": "Remedies",
+      "mandatory": true,
+      "locked": false,
+      "keyPosition": "Injunctive relief available without proof of special damage; indemnity for losses from breach. No penalty or pre-fixed sum (void under s.75 Contracts Act 1950).",
+      "paragraphs": [
+        "11.1 Each Party acknowledges that damages alone may not be an adequate remedy for a breach of this Agreement, and that the Disclosing Party is entitled to seek an injunction, specific performance or other equitable relief under the Specific Relief Act 1950 for any threatened or actual breach, in addition to any other remedy available to it.",
+        "11.2 The Receiving Party shall indemnify the Disclosing Party against all losses, damages, costs and expenses (including reasonable legal fees on a solicitor-and-client basis) that the Disclosing Party suffers or incurs as a result of any breach of this Agreement by the Receiving Party or its Representatives."
+      ]
+    },
+    {
+      "id": "anti_corruption",
+      "number": "12",
+      "title": "Anti-bribery and corruption",
+      "mandatory": true,
+      "locked": true,
+      "keyPosition": "Group ABMS clause — MACC Act 2009 incl. s.17A; compliance with the Company's Anti-Bribery Management System and Code of Conduct; right to terminate immediately. Locked: may not be amended or removed.",
+      "paragraphs": [
+        "12.1 The Counterparty shall, and shall procure that its directors, officers, employees, agents and Representatives shall, comply with the Malaysian Anti-Corruption Commission Act 2009 and all other applicable anti-bribery and anti-corruption laws, and with the Company's Anti-Bribery Management System, Code of Conduct and Whistleblowing Policy as notified to it from time to time.",
+        "12.2 The Counterparty shall not, directly or indirectly, give, offer, promise, solicit or accept any gratification (as defined in the Malaysian Anti-Corruption Commission Act 2009) to or from any director, officer or employee of the Company or its Affiliates, or any public official, in connection with the Purpose or any business with the Company.",
+        "12.3 The Counterparty shall declare to the Company in writing any actual or potential conflict of interest, including any relationship between it or its directors or shareholders and any director or employee of the Company or its Affiliates, as soon as it becomes aware of it.",
+        "12.4 The Counterparty shall report any request for or offer of gratification, and any suspected breach of this clause, through the Company's whistleblowing channel at [●].",
+        "12.5 A breach of this clause 12 is a material breach. The Company may terminate this Agreement, and any other agreement between the Company or its Affiliates and the Counterparty, with immediate effect by written notice, without liability, and may disqualify the Counterparty from future tenders."
+      ]
+    },
+    {
+      "id": "non_solicitation",
+      "number": "13",
+      "title": "Non-solicitation and non-circumvention",
+      "mandatory": false,
+      "locked": false,
+      "keyPosition": "Optional. 12-month non-solicitation of key staff and non-circumvention of introduced landowners, clients and suppliers. Enforceability is limited by s.28 Contracts Act 1950 (restraint of trade) — keep narrow.",
+      "paragraphs": [
+        "13.1 For the duration of this Agreement and twelve (12) months after it ends, neither Party shall, without the other's prior written consent, directly solicit for employment any employee of the other Party with whom it had material contact in connection with the Purpose. General recruitment advertising not targeted at those employees is not a breach.",
+        "13.2 During the same period, the Counterparty shall not use Confidential Information to circumvent the Company by dealing directly with any landowner, client, employer, supplier or subcontractor introduced by or identified through the Company in connection with the Purpose."
+      ]
+    },
+    {
+      "id": "no_obligation",
+      "number": "14",
+      "title": "No obligation to proceed; no partnership",
+      "mandatory": false,
+      "locked": false,
+      "keyPosition": "No commitment to transact; each Party bears its own costs.",
+      "paragraphs": [
+        "14.1 Nothing in this Agreement obliges either Party to disclose any particular information, to continue discussions, or to enter into any further agreement. Any transaction will be subject to a separate definitive written agreement approved in accordance with each Party's internal approvals.",
+        "14.2 Nothing in this Agreement creates a partnership, joint venture, agency or employment relationship between the Parties. Each Party bears its own costs in connection with the Purpose and this Agreement."
+      ]
+    },
+    {
+      "id": "notices",
+      "number": "15",
+      "title": "Notices",
+      "mandatory": false,
+      "locked": false,
+      "keyPosition": "Written notice by hand, registered post or email to the Schedule 1 addresses.",
+      "paragraphs": [
+        "15.1 Any notice under this Agreement shall be in writing and delivered by hand, by prepaid registered post or by email to the address of the recipient stated in Schedule 1 (or any other address it notifies in writing).",
+        "15.2 A notice is deemed received: if delivered by hand, on delivery; if sent by registered post, three (3) business days after posting; and if sent by email, at the time of transmission, provided no delivery failure message is received, or if transmitted outside business hours in Kuala Lumpur, at 9.00 a.m. on the next business day."
+      ]
+    },
+    {
+      "id": "assignment",
+      "number": "16",
+      "title": "Assignment",
+      "mandatory": false,
+      "locked": false,
+      "keyPosition": "No assignment by the Counterparty without consent; the Company may assign within its group.",
+      "paragraphs": [
+        "16.1 The Counterparty shall not assign, transfer or subcontract any of its rights or obligations under this Agreement without the Company's prior written consent. The Company may assign its rights under this Agreement to any of its Affiliates by written notice."
+      ]
+    },
+    {
+      "id": "general",
+      "number": "17",
+      "title": "General",
+      "mandatory": false,
+      "locked": false,
+      "keyPosition": "Entire agreement, variation in writing, waiver, severability, counterparts and electronic signature.",
+      "paragraphs": [
+        "17.1 This Agreement is the entire agreement between the Parties about its subject matter and supersedes all earlier understandings on it.",
+        "17.2 No variation of this Agreement is effective unless it is in writing and signed by authorised signatories of both Parties.",
+        "17.3 No failure or delay in exercising any right is a waiver of it, and no single or partial exercise prevents any further exercise of it.",
+        "17.4 If any provision of this Agreement is held invalid or unenforceable, it shall be modified to the minimum extent necessary to make it enforceable, and the remaining provisions continue in full force.",
+        "17.5 This Agreement may be executed in any number of counterparts, and by electronic signature in accordance with the Electronic Commerce Act 2006, each of which is an original and which together form one instrument."
+      ]
+    },
+    {
+      "id": "stamp_duty",
+      "number": "18",
+      "title": "Costs and stamp duty",
+      "mandatory": false,
+      "locked": false,
+      "keyPosition": "Stamp duty under the Stamp Act 1949 borne by the Counterparty unless Schedule 1 says otherwise; the Company stamps within the statutory 30 days.",
+      "paragraphs": [
+        "18.1 Stamp duty payable on this Agreement under the Stamp Act 1949 shall be borne by the Counterparty unless otherwise stated in Schedule 1. The Company shall arrange for this Agreement to be stamped within the statutory period of thirty (30) days from execution."
+      ]
+    },
+    {
+      "id": "governing_law",
+      "number": "19",
+      "title": "Governing law and disputes",
+      "mandatory": true,
+      "locked": false,
+      "keyPosition": "Malaysian law; Malaysian courts, or AIAC arbitration seated in Kuala Lumpur if elected in Schedule 1. Any foreign governing law or seat is a deviation.",
+      "paragraphs": [
+        "19.1 This Agreement is governed by the laws of Malaysia.",
+        "19.2 Subject to clause 19.3, the Parties submit to the exclusive jurisdiction of the courts of Malaysia.",
+        "19.3 If item 9 of Schedule 1 elects arbitration, any dispute arising out of or in connection with this Agreement shall be finally resolved by arbitration under the AIAC Arbitration Rules by a sole arbitrator, seated in Kuala Lumpur and conducted in English, save that either Party may seek urgent injunctive relief from the courts of Malaysia at any time."
+      ]
+    }
+  ],
+  "schedule": {
+    "title": "Schedule 1 — Particulars",
+    "items": [
+      { "number": "1", "label": "Date of Agreement", "value": "[●]" },
+      { "number": "2", "label": "Purpose", "value": "[e.g. evaluation, preparation and submission of a tender / quotation for [project name and job number]; pre-qualification as a subcontractor or supplier; discussion of a proposed joint development of [land description]; supply of [goods / services]]" },
+      { "number": "3", "label": "Company entity", "value": "[Lim Seong Hai Capital Berhad / LSH BEST Builders Sdn Bhd / Astana Setia Sdn Bhd / Lim Seong Hai Lighting Sdn Bhd / Knight Auto Sdn Bhd / Lim Seong Hai Ventures Sdn Bhd / other Affiliate]" },
+      { "number": "4", "label": "Direction of disclosure", "value": "[Mutual / Company to Counterparty only / Counterparty to Company only]" },
+      { "number": "5", "label": "Term of Agreement", "value": "[Two (2) years] from the Date of Agreement" },
+      { "number": "6", "label": "Company contact and notice address", "value": "[Name, designation], [address], [email]" },
+      { "number": "7", "label": "Counterparty contact and notice address", "value": "[Name, designation], [address], [email]" },
+      { "number": "8", "label": "Stamp duty borne by", "value": "[Counterparty]" },
+      { "number": "9", "label": "Dispute resolution", "value": "[Courts of Malaysia / AIAC arbitration, Kuala Lumpur]" },
+      { "number": "10", "label": "Clause 13 (non-solicitation) applies", "value": "[Yes / No]" }
+    ]
+  },
+  "execution": {
+    "intro": "IN WITNESS WHEREOF the Parties have executed this Agreement on the date stated in Schedule 1.",
+    "blocks": [
+      { "party": "LIM SEONG HAI CAPITAL BERHAD", "lines": ["Signed by its authorised signatory", "Name:", "Designation:", "NRIC No.:", "In the presence of:", "Witness name:", "Witness NRIC No.:"] },
+      { "party": "[COUNTERPARTY NAME]", "lines": ["Signed by its authorised signatory", "Name:", "Designation:", "NRIC No.:", "In the presence of:", "Witness name:", "Witness NRIC No.:"] }
+    ]
+  }
+}
