@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { AppShell } from "@/components/app-shell";
@@ -9,11 +9,11 @@ import { Button } from "@/components/ui/button";
 import { DocViewer, type DocHighlight } from "@/components/doc-viewer";
 import { PdfViewer } from "@/components/pdf-viewer";
 import {
-  addCcmsComment, getCcmsDocument, recordCcmsReview, reviewCcmsDocument, setCcmsCommentStatus,
+  addCcmsComment, exportCcmsDocumentWithComments, getCcmsDocument, recordCcmsReview, reviewCcmsDocument, setCcmsCommentStatus,
 } from "@/lib/ccms.functions";
 import { CcmsHeader, StatusBadge, OutcomeText, CARD, useCcmsRole } from "@/components/ccms-widgets";
-import { CCMS_ROLES, CONTRACT_TYPES, templateById, type CcmsRole, type Stage } from "@/lib/ccms";
-import { ArrowLeft, Loader2, MessageSquarePlus, RefreshCw, Check, RotateCcw, Lock, Quote } from "lucide-react";
+import { AI_ROLE, CCMS_ROLES, CONTRACT_TYPES, roleLabel, templateById, type CcmsRole, type Stage } from "@/lib/ccms";
+import { ArrowLeft, Loader2, MessageSquarePlus, RefreshCw, Check, RotateCcw, Lock, Quote, Download, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/ccms/review/$documentId")({
@@ -42,6 +42,9 @@ function ReviewScreen() {
   const [anchors, setAnchors] = useState<Record<string, boolean>>({});
   const [composer, setComposer] = useState<Anchor | null>(null);
   const [running, setRunning] = useState(false);
+  const [focusThread, setFocusThread] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const exportFn = useServerFn(exportCcmsDocumentWithComments);
 
   const doc: any = data?.doc;
   const contract: any = data?.contract;
@@ -55,8 +58,12 @@ function ReviewScreen() {
     for (const f of review?.findings ?? []) if (f.excerpt) out.push({ id: `f:${f.id}`, text: f.excerpt, kind: f.severity === "red_flag" ? "critical" : f.severity === "caution" ? "medium" : "info" });
     for (const c of deviation?.clauses ?? []) if (c.excerpt && c.status !== "same") out.push({ id: `c:${c.templateClauseId}`, text: c.excerpt, kind: c.severity === "high" ? "critical" : "medium" });
     for (const i of loa?.items ?? []) if (i.excerpt) out.push({ id: `l:${i.id}`, text: i.excerpt, kind: i.status === "present" ? "info" : "medium" });
+    // Reviewers' comments on selected text are highlighted too.
+    for (const t of (data?.comments ?? []) as any[]) {
+      if (!t.parent_id && t.acting_role !== AI_ROLE && t.quote && t.status === "open" && t.document_id === doc?.id) out.push({ id: `t:${t.id}`, text: t.quote, kind: "edit" });
+    }
     return out;
-  }, [review, deviation, loa]);
+  }, [review, deviation, loa, data?.comments, doc?.id]);
 
   if (isLoading) return <AppShell><div className="p-10 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="size-4 animate-spin" /> Loading…</div></AppShell>;
   if (error || !doc) return <AppShell><div className="p-10 text-sm text-red-700">{(error as Error)?.message ?? "Not found"}</div></AppShell>;
@@ -81,7 +88,31 @@ function ReviewScreen() {
     setComposer({ anchor_type: "quote", quote: sel.slice(0, 2000) });
     setTab("comments");
   }
-  const focus = (id: string) => { setActive(id); if (anchors[id] === false) toast.message("That passage could not be located in the document."); };
+  const focus = (id: string) => {
+    setActive(id);
+    if (anchors[id] === false) toast.message("That passage could not be located in the document.");
+    // A highlight that belongs to a comment thread opens that thread.
+    if (id.startsWith("t:")) { setFocusThread(id.slice(2)); setTab("comments"); }
+  };
+  const aiThreadFor = (f: any) => threads.find((t) => t.acting_role === AI_ROLE && t.anchor_ref === `Finding: ${f.ref}`);
+  const openThread = (id: string) => { setFocusThread(id); setTab("comments"); };
+  /** Where a thread points in the document: its finding's highlight, or its own. */
+  const threadHighlight = (t: any): string | null => {
+    if (t.acting_role === AI_ROLE) { const f = (review?.findings ?? []).find((x: any) => `Finding: ${x.ref}` === t.anchor_ref); return f ? `f:${f.id}` : null; }
+    return t.quote ? `t:${t.id}` : null;
+  };
+  const isDocx = !isPdf;
+  async function download() {
+    setExporting(true);
+    try {
+      const r: any = await exportFn({ data: { document_id: doc.id, include_resolved: true } });
+      const bytes = Uint8Array.from(atob(r.base64), (ch) => ch.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }));
+      const a = document.createElement("a"); a.href = url; a.download = r.fileName; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      toast.success(`${r.comments} comment${r.comments === 1 ? "" : "s"} added${r.loose + r.unplaced ? ` — ${r.loose + r.unplaced} attached to the nearest paragraph` : ""}`);
+    } catch (e: any) { toast.error(e?.message ?? "Download failed"); } finally { setExporting(false); }
+  }
 
   return (
     <AppShell>
@@ -93,6 +124,9 @@ function ReviewScreen() {
           {review && <span className="text-sm text-gray-700">Risk <b>{review.riskScore}</b> · {review.findings?.length ?? 0} findings{tpl ? ` · ${devCount} deviation${devCount === 1 ? "" : "s"}` : " · no template"}{loa ? ` · ${loaMissing} LoA item${loaMissing === 1 ? "" : "s"} missing` : ""}</span>}
           <div className="ml-auto flex items-center gap-2">
             <Button variant="outline" size="sm" onMouseDown={(e) => e.preventDefault()} onClick={commentOnSelection} className="gap-1.5"><Quote className="size-4" /> Comment on selected text</Button>
+            {isDocx
+              ? <Button variant="outline" size="sm" onClick={download} disabled={exporting} className="gap-1.5">{exporting ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />} Download with comments</Button>
+              : <Button asChild variant="outline" size="sm" className="gap-1.5"><a href={doc.file_url} target="_blank" rel="noreferrer"><Download className="size-4" /> Download PDF</a></Button>}
             <Button variant="outline" size="sm" onClick={rerun} disabled={running} className="gap-1.5">{running ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />} {review ? "Re-run AI review" : "Run AI review"}</Button>
           </div>
         </div>
@@ -128,7 +162,15 @@ function ReviewScreen() {
                       </div>
                       <p className="mt-1.5 text-sm text-gray-900">{f.issue}</p>
                       <p className="mt-1 text-sm text-gray-600">{f.whyItMatters}</p>
-                      <CommentLink n={threads.filter((x) => x.anchor_ref === `Finding: ${f.ref}`).length} onClick={() => { setComposer({ anchor_type: "finding", anchor_ref: `Finding: ${f.ref}`, quote: f.excerpt }); setTab("comments"); }} />
+                      {(() => {
+                        const th = aiThreadFor(f);
+                        return th ? (
+                          <button onClick={(e) => { e.stopPropagation(); openThread(th.id); }} className="mt-2 inline-flex items-center gap-1 text-sm text-blue-700 hover:underline">
+                            <Bot className="size-4" /> Comment thread · <span className={th.status === "open" ? "text-amber-700 font-semibold" : "text-emerald-700"}>{th.status === "open" ? "open" : "resolved"}</span>
+                            {comments.filter((r) => r.parent_id === th.id).length > 0 && <span className="text-gray-500"> · {comments.filter((r) => r.parent_id === th.id).length} repl{comments.filter((r) => r.parent_id === th.id).length === 1 ? "y" : "ies"}</span>}
+                          </button>
+                        ) : <CommentLink n={0} onClick={() => { setComposer({ anchor_type: "finding", anchor_ref: `Finding: ${f.ref}`, quote: f.excerpt }); setTab("comments"); }} />;
+                      })()}
                     </div>
                   ))}
                 </>
@@ -179,7 +221,8 @@ function ReviewScreen() {
               )}
 
               {tab === "comments" && (
-                <Comments contractId={contract.id} documentId={doc.id} threads={threads} all={comments} composer={composer} setComposer={setComposer} onDone={refresh} />
+                <Comments contractId={contract.id} documentId={doc.id} threads={threads} all={comments} composer={composer} setComposer={setComposer} onDone={refresh}
+                  focusThread={focusThread} onLocate={(t) => { const h = threadHighlight(t); if (h) focus(h); }} />
               )}
             </div>
           </div>
@@ -197,8 +240,9 @@ function CommentLink({ n, onClick }: { n: number; onClick: () => void }) {
   );
 }
 
-function Comments({ contractId, documentId, threads, all, composer, setComposer, onDone }: {
+function Comments({ contractId, documentId, threads, all, composer, setComposer, onDone, focusThread, onLocate }: {
   contractId: string; documentId: string; threads: any[]; all: any[]; composer: Anchor | null; setComposer: (a: Anchor | null) => void; onDone: () => void;
+  focusThread: string | null; onLocate: (t: any) => void;
 }) {
   const [role] = useCcmsRole();
   const addFn = useServerFn(addCcmsComment);
@@ -207,6 +251,14 @@ function Comments({ contractId, documentId, threads, all, composer, setComposer,
   const [reply, setReply] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [show, setShow] = useState<"open" | "all">("open");
+  const [who, setWho] = useState<"everyone" | "ai" | "people">("everyone");
+  // Bring a thread opened from a finding or a highlight into view.
+  useEffect(() => {
+    if (!focusThread) return;
+    const t = threads.find((x) => x.id === focusThread);
+    if (t?.status === "resolved") setShow("all");
+    requestAnimationFrame(() => document.getElementById(`thread-${focusThread}`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  }, [focusThread]);
 
   async function post(parent?: string) {
     const text = parent ? reply[parent] : body;
@@ -223,7 +275,8 @@ function Comments({ contractId, documentId, threads, all, composer, setComposer,
     try { await statusFn({ data: { comment_id: id, status, acting_role: role } }); onDone(); } catch (e: any) { toast.error(e?.message ?? "Failed"); }
   }
 
-  const shown = threads.filter((t) => show === "all" || t.status === "open");
+  const shown = threads.filter((t) => (show === "all" || t.status === "open") &&
+    (who === "everyone" || (who === "ai") === (t.acting_role === AI_ROLE)));
   return (
     <div className="space-y-3">
       <div className={CARD + " p-3 space-y-2"}>
@@ -238,21 +291,29 @@ function Comments({ contractId, documentId, threads, all, composer, setComposer,
       </div>
       <div className="flex gap-2">
         {(["open", "all"] as const).map((s) => <button key={s} onClick={() => setShow(s)} className={cn("rounded-md border px-2.5 py-1 text-sm", show === s ? "border-gray-900 font-semibold" : "border-gray-200 text-gray-600")}>{s === "open" ? "Open" : "All"}</button>)}
+        <select value={who} onChange={(e) => setWho(e.target.value as any)} className="ml-auto rounded-md border border-gray-200 bg-white px-2 py-1 text-sm">
+          <option value="everyone">Everyone</option><option value="ai">AI Reviewer</option><option value="people">Reviewers</option>
+        </select>
       </div>
       {shown.length === 0 && <p className="text-sm text-gray-500">No {show === "open" ? "open " : ""}threads.</p>}
       {shown.map((t) => (
-        <div key={t.id} className={cn(CARD, "p-3", t.status === "resolved" && "opacity-75")}>
+        <div key={t.id} id={`thread-${t.id}`} className={cn(CARD, "p-3", t.status === "resolved" && "opacity-75", focusThread === t.id && "ring-2 ring-gray-900")}>
           <div className="flex items-center gap-2 text-sm">
-            <span className="font-semibold text-gray-900">{CCMS_ROLES[t.acting_role as CcmsRole] ?? "—"}</span>
-            <span className="text-gray-500">{t.author_name} · {format(new Date(t.created_at), "d MMM, HH:mm")}</span>
+            {t.acting_role === AI_ROLE && <Bot className="size-4 text-gray-600" />}
+            <span className="font-semibold text-gray-900">{roleLabel(t.acting_role)}</span>
+            <span className="text-gray-500">{t.acting_role === AI_ROLE ? "" : `${t.author_name} · `}{format(new Date(t.created_at), "d MMM, HH:mm")}</span>
             <span className={cn("ml-auto text-sm", t.status === "open" ? "text-amber-700 font-semibold" : "text-emerald-700")}>{t.status === "open" ? "Open" : "Resolved"}</span>
           </div>
           {t.anchor_ref && <div className="mt-1 text-sm text-gray-600">On: {t.anchor_ref}</div>}
-          {t.quote && <blockquote className="mt-1 border-l-2 border-gray-300 pl-2 text-sm text-gray-600 line-clamp-2">{t.quote}</blockquote>}
+          {t.quote && (
+            <button onClick={() => onLocate(t)} className="mt-1 block w-full text-left border-l-2 border-gray-300 pl-2 text-sm text-gray-600 hover:border-gray-900" title="Show in the document">
+              <span className="line-clamp-2">{t.quote}</span>
+            </button>
+          )}
           <p className="mt-1.5 text-sm text-gray-900 whitespace-pre-wrap">{t.body}</p>
           {all.filter((r) => r.parent_id === t.id).map((r) => (
             <div key={r.id} className="mt-2 ml-3 border-l border-gray-200 pl-3">
-              <div className="text-sm"><span className="font-semibold text-gray-900">{CCMS_ROLES[r.acting_role as CcmsRole] ?? "—"}</span> <span className="text-gray-500">{r.author_name} · {format(new Date(r.created_at), "d MMM, HH:mm")}</span></div>
+              <div className="text-sm"><span className="font-semibold text-gray-900">{roleLabel(r.acting_role)}</span> <span className="text-gray-500">{r.author_name} · {format(new Date(r.created_at), "d MMM, HH:mm")}</span></div>
               <p className="text-sm text-gray-900 whitespace-pre-wrap">{r.body}</p>
             </div>
           ))}
@@ -281,7 +342,7 @@ function OutcomeBar({ contract, role, openThreadsByRole, onDone }: { contract: a
   const route: Stage[] = contract.approval_route ?? [];
   const stages = route.filter((s) => s.kind === "review");
   const mine = stages.find((s) => s.role === role);
-  const myOpen = openThreadsByRole.filter((t) => t.acting_role === role).length;
+  const myOpen = openThreadsByRole.filter((t) => t.acting_role === role || t.acting_role === AI_ROLE).length;
 
   async function submit() {
     if (!mine) return;
@@ -306,7 +367,7 @@ function OutcomeBar({ contract, role, openThreadsByRole, onDone }: { contract: a
           </select>
           <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={outcome === "cleared" ? "Note (optional)" : "Reason / comments (required)"} className="w-72 rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
           <Button size="sm" disabled={busy} onClick={submit}>{busy ? <Loader2 className="size-4 animate-spin" /> : "Record outcome"}</Button>
-          {outcome === "cleared" && myOpen > 0 && <span className="text-sm text-amber-700">{myOpen} of your threads open</span>}
+          {outcome === "cleared" && myOpen > 0 && <span className="text-sm text-amber-700">{myOpen} thread{myOpen === 1 ? "" : "s"} open (yours and the AI Reviewer's) — resolve, or clear with comments</span>}
         </div>
       )}
       {!mine && contract.status === "in_review" && <span className="ml-auto text-sm text-gray-500">Switch "Acting as" to {stages.filter((s) => s.status === "pending").map((s) => CCMS_ROLES[s.role]).join(" or ") || "a reviewer"} to record an outcome.</span>}

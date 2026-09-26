@@ -14,7 +14,7 @@ import {
   CcmsHeader, StatusBadge, OutcomeText, SlaText, CARD, TH, TD, fmtMoney, useCcmsRole,
 } from "@/components/ccms-widgets";
 import {
-  CCMS_ROLES, CONTRACT_TYPES, FLAG_META, BLOCKING_FLAGS, DEMO_SINGLE_USER, nextApproval,
+  AI_ROLE, CCMS_ROLES, CONTRACT_TYPES, FLAG_META, BLOCKING_FLAGS, DEMO_SINGLE_USER, nextApproval, roleLabel,
   type Flag, type Stage,
 } from "@/lib/ccms";
 import { Loader2, Upload, FileText, MessageSquare, AlertTriangle, ArrowLeft } from "lucide-react";
@@ -119,7 +119,7 @@ function ContractDetail() {
                   <tbody>
                     {threads.map((x: any) => (
                       <tr key={x.id} className="border-b border-gray-100 last:border-0">
-                        <td className={TD}>{CCMS_ROLES[x.acting_role as keyof typeof CCMS_ROLES] ?? "—"}<div className="text-sm text-gray-600">{x.author_name}</div></td>
+                        <td className={TD}>{roleLabel(x.acting_role)}<div className="text-sm text-gray-600">{x.acting_role === AI_ROLE ? "on the draft" : x.author_name}</div></td>
                         <td className={TD + " text-gray-700"}>{x.anchor_ref || (x.quote ? `"${x.quote.slice(0, 60)}…"` : "General")}</td>
                         <td className={TD}>{x.body}<div className="text-sm text-gray-500">{comments.filter((r: any) => r.parent_id === x.id).length} repl{comments.filter((r: any) => r.parent_id === x.id).length === 1 ? "y" : "ies"}</div></td>
                         <td className={TD}><span className={x.status === "open" ? "text-amber-700 font-semibold text-sm" : "text-emerald-700 text-sm"}>{x.status === "open" ? "Open" : `Resolved · ${x.resolved_by_name ?? ""}`}</span></td>
@@ -258,7 +258,7 @@ function ActionPanel({ c, route, flags, openThreads, latestDraft, onDone }: { c:
       <div className="space-y-2 text-sm text-gray-700">
         <p>Waiting on: <b>{pending.map((s) => `${s.label} (${CCMS_ROLES[s.role]})`).join(", ") || "—"}</b>. Reviewers record their outcome on the review screen, where they can comment against the draft.</p>
         {latestDraft && <Button asChild size="sm"><Link to="/ccms/review/$documentId" params={{ documentId: latestDraft.id }}>Open the latest draft to review</Link></Button>}
-        {openThreads > 0 && <p className="text-amber-800">{openThreads} comment thread(s) open — "Cleared" needs a reviewer's own threads resolved.</p>}
+        {openThreads > 0 && <p className="text-amber-800">{openThreads} comment thread(s) open, including the AI Reviewer's. "Cleared" needs them resolved; otherwise record "Cleared with comments".</p>}
       </div>
     );
   } else if ((c.status === "pending_approval" || c.status === "pending_committee") && stage) {

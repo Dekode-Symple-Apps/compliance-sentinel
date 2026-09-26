@@ -3,12 +3,13 @@ import { z } from "zod";
 import { requireProduct } from "@/lib/feature-middleware";
 import { generateWithFallback, getDefaultModel } from "@/lib/gemini";
 import { docxToText, looksLikeDocx } from "@/lib/docx-editor";
+import { addAnchoredCommentsToDocx, type AnchoredComment } from "@/lib/docx-anchored-comments";
 import { extractPdfPages } from "@/lib/pdf-pages";
 import { computeCost } from "@/lib/pricing";
 import { maskDemoEmail } from "@/lib/legal.functions";
 import { assertRowTenant, getCallerTenant, requireFeature } from "@/lib/tenant.functions";
 import {
-  CONTRACT_TYPES, CCMS_ROLES, DEMO_SINGLE_USER, LOA_ITEMS, BLOCKING_FLAGS,
+  CONTRACT_TYPES, CCMS_ROLES, DEMO_SINGLE_USER, LOA_ITEMS, BLOCKING_FLAGS, AI_ROLE, roleLabel,
   buildRoute, computeFlags, nextApproval, reviewsDone, templateById, toMyr,
   type CcmsRole, type Flag, type Stage, type VendorLite,
 } from "@/lib/ccms";
@@ -352,7 +353,7 @@ function reviewPrompt(contract: any, vendor: any): string {
   "findings": [{
     "id": "f1",
     "ref": "clause number and heading",
-    "excerpt": "EXACT verbatim substring of the draft, 8-25 words, copied character for character so it can be located",
+    "excerpt": "EXACT verbatim substring of the draft, 8-25 words, copied character for character so it can be located. For something MISSING, quote the heading or opening words of the clause where it belongs (or of the nearest clause)",
     "severity": "red_flag" | "caution" | "info",
     "category": "commercial" | "legal" | "financial" | "compliance" | "operational",
     "issue": "what is wrong or missing",
@@ -364,7 +365,7 @@ function reviewPrompt(contract: any, vendor: any): string {
   }` : ""}${t?.loaCheck ? `,
   "loa": { "items": [{ "id": "<id in brackets above>", "status": "present" | "missing" | "unclear", "excerpt": "EXACT verbatim draft text or empty", "note": "short" }] }` : ""}
 }
-Cover the 5-12 most significant findings${tpl ? " and EVERY template clause in deviation.clauses" : ""}.`);
+Cover the 5-15 most significant findings${tpl ? " and EVERY template clause in deviation.clauses" : ""}. Each finding becomes a review comment that a person must close, so ${tpl ? "every template deviation that matters" : "every material issue"}${t?.loaCheck ? " and every missing or unclear Letter of Award item" : ""} must appear as its own finding; do not raise the same point twice.`);
   return parts.filter((p) => p !== undefined).join("\n");
 }
 
@@ -420,6 +421,42 @@ export async function runDraftReview(contract: any, vendor: any, fileName: strin
   return { ai_review, deviation, loa_check, res };
 }
 
+/**
+ * Every red-flag and caution finding becomes a comment thread from the AI
+ * Reviewer, anchored to its passage, so it is tracked to closure like any
+ * reviewer's comment. On a re-review of the same document, the AI's earlier
+ * threads that nobody has touched are replaced; threads a person has replied
+ * to or resolved are kept, and a finding repeating one of them is not
+ * re-opened.
+ */
+async function syncAiThreads(sb: any, contractId: string, documentId: string, findings: any[]) {
+  const { data: prior } = await sb.from("ccms_comments").select("id,status,anchor_ref,quote")
+    .eq("document_id", documentId).eq("acting_role", AI_ROLE).is("parent_id", null);
+  const ids = (prior ?? []).map((p: any) => p.id);
+  const { data: replies } = ids.length
+    ? await sb.from("ccms_comments").select("parent_id").in("parent_id", ids)
+    : { data: [] };
+  const touched = new Set((replies ?? []).map((r: any) => r.parent_id));
+  const keep = (prior ?? []).filter((p: any) => p.status === "resolved" || touched.has(p.id));
+  const drop = (prior ?? []).filter((p: any) => !keep.includes(p));
+  if (drop.length) await sb.from("ccms_comments").delete().in("id", drop.map((d: any) => d.id));
+  const rows = findings
+    .filter((f) => f.severity === "red_flag" || f.severity === "caution")
+    .map((f) => ({ f, ref: `Finding: ${f.ref}` }))
+    .filter(({ f, ref }) => !keep.some((k: any) => k.anchor_ref === ref && (k.quote ?? "") === (f.excerpt ?? "")))
+    .map(({ f, ref }) => ({
+      contract_id: contractId, document_id: documentId, anchor_type: "finding", anchor_ref: ref,
+      quote: f.excerpt || null,
+      body: `${f.severity === "red_flag" ? "Red flag" : "Caution"} — ${f.issue}${f.whyItMatters ? `\n\nWhy it matters: ${f.whyItMatters}` : ""}`,
+      author_name: "AI Reviewer", acting_role: AI_ROLE,
+    }));
+  if (rows.length) {
+    const { error } = await sb.from("ccms_comments").insert(rows);
+    if (error) console.error("[ccms] AI threads insert failed:", error.message);
+  }
+  return { added: rows.length, kept: keep.length };
+}
+
 export const reviewCcmsDocument = createServerFn({ method: "POST" })
   .middleware([requireCcms])
   .inputValidator(z.object({ document_id: z.string().uuid(), acting_role: roleSchema }))
@@ -437,6 +474,7 @@ export const reviewCcmsDocument = createServerFn({ method: "POST" })
       const { ai_review, deviation, loa_check, res } = await runDraftReview(contract, vendor, doc.file_name, text, pdfBase64);
       const tpl = templateById(contract.template_id);
       await sb.from("ccms_documents").update({ ai_review, deviation, loa_check, ai_review_status: "done" }).eq("id", doc.id);
+      const threads = await syncAiThreads(sb, contract.id, doc.id, ai_review.findings);
 
       // Flags and route follow the new review; status follows the route.
       const routing = await refreshRouting(sb, contract, tenantId);
@@ -454,7 +492,8 @@ export const reviewCcmsDocument = createServerFn({ method: "POST" })
       await logEvent(sb, { contract_id: contract.id, event_type: "ai_review", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
         detail: `AI review of v${doc.version}: ${ai_review.findings.length} finding(s), risk ${ai_review.riskScore}` +
           (tpl ? `, ${devCount} template deviation(s)` : ", no approved template") +
-          (loa_check ? `, ${loa_check.items.filter((i) => i.status !== "present").length} Letter of Award item(s) missing or unclear` : "") + "." });
+          (loa_check ? `, ${loa_check.items.filter((i) => i.status !== "present").length} Letter of Award item(s) missing or unclear` : "") +
+          `; ${threads.added} comment thread(s) opened by the AI Reviewer${threads.kept ? `, ${threads.kept} earlier thread(s) kept` : ""}.` });
       return { ok: true };
     } catch (e: any) {
       await sb.from("ccms_documents").update({ ai_review_status: "failed" }).eq("id", doc.id);
@@ -522,8 +561,11 @@ export const setCcmsCommentStatus = createServerFn({ method: "POST" })
     const { data: c } = await sb.from("ccms_comments").select("*").eq("id", data.comment_id).single();
     if (!c) throw new Error("Comment not found");
     await loadContract(sb, c.contract_id, tenantId);
-    // A thread is closed by the role that raised it, or by Legal / the Contract Manager.
-    if (c.acting_role && c.acting_role !== data.acting_role && !["legal", "contract_manager"].includes(data.acting_role)) {
+    // A thread is closed by the role that raised it, or by Legal / the Contract
+    // Manager. An AI Reviewer thread is closed by any reviewer — never by the requestor.
+    if (c.acting_role === AI_ROLE) {
+      requireRole(data.acting_role, ["legal", "finance", "contract_manager", "contract_executive"], "close an AI Reviewer thread");
+    } else if (c.acting_role && c.acting_role !== data.acting_role && !["legal", "contract_manager"].includes(data.acting_role)) {
       throw new Error(`Only ${CCMS_ROLES[c.acting_role as CcmsRole] ?? "the author"}, Legal or the Contract Manager can close this thread.`);
     }
     const patch = data.status === "resolved"
@@ -557,13 +599,18 @@ export const recordCcmsReview = createServerFn({ method: "POST" })
     const stage = route.find((s) => s.key === data.stage);
     if (!stage) throw new Error(`This request does not need ${data.stage} review.`);
     if (data.outcome !== "cleared" && !data.note?.trim()) throw new Error("Give the reason or the comments with this outcome.");
-    if (data.outcome === "cleared") {
-      const { count } = await sb.from("ccms_comments").select("id", { count: "exact", head: true })
-        .eq("contract_id", contract.id).eq("acting_role", data.stage).eq("status", "open").is("parent_id", null);
-      if ((count ?? 0) > 0) throw new Error(`${count} ${data.stage} comment thread(s) are still open. Resolve them, or record "Cleared with comments".`);
-    }
     const { data: latest } = await sb.from("ccms_documents").select("id").eq("contract_id", contract.id).eq("doc_role", "draft")
       .order("created_at", { ascending: false }).limit(1);
+    if (data.outcome === "cleared") {
+      const { count: own } = await sb.from("ccms_comments").select("id", { count: "exact", head: true })
+        .eq("contract_id", contract.id).eq("acting_role", data.stage).eq("status", "open").is("parent_id", null);
+      const { count: ai } = latest?.[0]
+        ? await sb.from("ccms_comments").select("id", { count: "exact", head: true })
+            .eq("document_id", latest[0].id).eq("acting_role", AI_ROLE).eq("status", "open").is("parent_id", null)
+        : { count: 0 };
+      const open = [own ? `${own} of your own` : "", ai ? `${ai} from the AI Reviewer on the latest draft` : ""].filter(Boolean);
+      if (open.length) throw new Error(`Comment threads are still open (${open.join(", ")}). Resolve them, or record "Cleared with comments".`);
+    }
     await sb.from("ccms_reviews").insert({ contract_id: contract.id, document_id: latest?.[0]?.id ?? null, stage: data.stage,
       outcome: data.outcome, note: data.note, reviewer_id: userId, reviewer_name: userName, acting_role: data.acting_role });
 
@@ -632,4 +679,58 @@ export const resubmitCcmsContract = createServerFn({ method: "POST" })
     await sb.from("ccms_contracts").update({ ...routing, status: "in_review", stage_started_at: now, updated_at: now }).eq("id", contract.id);
     await logEvent(sb, { contract_id: contract.id, event_type: "resubmitted", actor_id: userId, actor_name: userName, acting_role: data.acting_role, detail: `Resubmitted — ${data.note}` });
     return { ok: true };
+  });
+
+// ---------------------------------------------------------------------------
+// Download with comments — a copy of the draft with every thread as a native
+// Word comment on its passage (replies folded in, resolved ones marked done).
+// The contract wording is not changed.
+// ---------------------------------------------------------------------------
+
+/** Word writes a comment's w:date as LOCAL wall-clock time with a "Z" suffix,
+ *  and Word and Pages both read it that way — a true UTC stamp shows as
+ *  eight hours off in Malaysia. */
+const wordDate = (iso: string) =>
+  new Date(new Date(iso).getTime() + 8 * 3600_000).toISOString().replace(/\.\d+Z$/, "Z");
+
+export const exportCcmsDocumentWithComments = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({ document_id: z.string().uuid(), include_resolved: z.boolean().default(true) }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await ccms(context);
+    const { data: doc } = await sb.from("ccms_documents").select("*").eq("id", data.document_id).single();
+    if (!doc) throw new Error("Document not found");
+    const contract = await loadContract(sb, doc.contract_id, tenantId);
+    const resp = await fetch(doc.file_url);
+    if (!resp.ok) throw new Error(`Could not fetch the document (${resp.status}).`);
+    const buffer = Buffer.from(await resp.arrayBuffer());
+    if (!looksLikeDocx(doc.mime_type, doc.file_name)) {
+      throw new Error("Download with comments is available for Word (.docx) drafts. For a PDF, use the comment list on the review screen.");
+    }
+    const { data: all } = await sb.from("ccms_comments").select("*").eq("document_id", doc.id).order("created_at");
+    const threads = (all ?? []).filter((c: any) => !c.parent_id && (data.include_resolved || c.status === "open"));
+    const stamp = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kuala_Lumpur" });
+    const comments: AnchoredComment[] = threads.map((t: any) => {
+      const replies = (all ?? []).filter((r: any) => r.parent_id === t.id)
+        .map((r: any) => `— ${roleLabel(r.acting_role)} (${r.author_name ?? ""}, ${stamp(r.created_at)}): ${r.body}`);
+      const heading = t.anchor_ref ? `${t.anchor_ref}\n` : "";
+      const footer = t.status === "resolved" ? `\n[Resolved by ${t.resolved_by_name ?? "—"}${t.resolved_at ? `, ${stamp(t.resolved_at)}` : ""}]` : "";
+      return {
+        quote: t.quote ?? "",
+        fallback: (t.anchor_ref ?? "").replace(/^(Finding|Clause|Added clause):?\s*/, "").split(/[—:]/)[0].trim(),
+        text: heading + t.body + (replies.length ? `\n${replies.join("\n")}` : "") + footer,
+        author: t.acting_role === AI_ROLE ? "AI Reviewer" : `${roleLabel(t.acting_role)} — ${t.author_name ?? ""}`,
+        dateIso: wordDate(t.created_at),
+        done: t.status === "resolved",
+      };
+    });
+    const out = addAnchoredCommentsToDocx(buffer, comments);
+    await logEvent(sb, { contract_id: contract.id, event_type: "export", actor_id: userId, actor_name: userName,
+      detail: `Downloaded ${doc.file_name} v${doc.version} with ${comments.length} comment(s).` });
+    const base = doc.file_name.replace(/\.docx$/i, "");
+    return {
+      fileName: `${base} — ${contract.reference_number} review comments.docx`,
+      base64: out.buffer.toString("base64"),
+      comments: comments.length, exact: out.exact, loose: out.loose, unplaced: out.unplaced,
+    };
   });

@@ -30,6 +30,10 @@ export const CCMS_ROLES = {
   approver:           "Approver",
 } as const;
 export type CcmsRole = keyof typeof CCMS_ROLES;
+/** The author role on comment threads the AI review opens. Not a persona. */
+export const AI_ROLE = "ai_reviewer";
+export const roleLabel = (r: string | null | undefined): string =>
+  r === AI_ROLE ? "AI Reviewer" : (CCMS_ROLES as Record<string, string>)[r ?? ""] ?? "—";
 
 // ── group entities (ASSUMPTION: from public filings) ─────────────────────────
 export const LSH_ENTITIES = [

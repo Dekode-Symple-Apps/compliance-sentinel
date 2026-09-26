@@ -1082,7 +1082,7 @@ function buildHighlightedParaWithComment(text: string, commentId: number | null)
 
 /** Build one <w:comment> XML entry. The first `<w:p>` inside the comment is
  *  tagged with `w14:paraId` so commentsExtended.xml can anchor against it. */
-function buildCommentEntry(
+export function buildCommentEntry(
   id: number,
   content: string,
   author: string,
@@ -1160,7 +1160,7 @@ function existingComments(zip: PizZip): { entries: string; exEntries: string; ma
  *  modern Word reads to actually link the comment to its in-document text range —
  *  without it, comments show in the pane but the anchor highlight is broken.
  *  Existing comments in the source are preserved (merged in front of ours). */
-function attachComments(zip: PizZip, commentEntries: string[], paraIds: string[]): void {
+export function attachComments(zip: PizZip, commentEntries: string[], paraIds: string[], done?: boolean[]): void {
   if (commentEntries.length === 0) return;
   const prior = existingComments(zip);
 
@@ -1178,7 +1178,7 @@ function attachComments(zip: PizZip, commentEntries: string[], paraIds: string[]
   //    the paraId on the comment's first paragraph. This is what makes the link
   //    between the comment and the text range visible in Word 2013+.
   const exEntries = paraIds
-    .map((pid) => `<w15:commentEx w15:paraId="${pid}" w15:done="0"/>`)
+    .map((pid, i) => `<w15:commentEx w15:paraId="${pid}" w15:done="${done?.[i] ? 1 : 0}"/>`)
     .join("");
   const commentsExtendedXml =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
