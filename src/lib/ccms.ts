@@ -256,3 +256,67 @@ export function workingDaysSince(from: string | null | undefined, now = new Date
   while (d < now) { d.setDate(d.getDate() + 1); if (d <= now && d.getDay() % 6 !== 0) n++; }
   return n;
 }
+
+// ── generating a draft from a template ───────────────────────────────────────
+// A business user raises the request and answers a few questions; the draft is
+// the approved template with those answers in the parties block and Schedule 1
+// — nothing else in the wording changes, so a generated draft is standard by
+// construction and needs no deviation review until the counterparty marks it up.
+
+/** Group entity particulars for the parties block (ASSUMPTION: registration
+ *  numbers are left for the requester — never guessed). */
+export const ENTITY_DETAILS: Record<string, { regNo: string; address: string }> = {
+  "Lim Seong Hai Capital Berhad": { regNo: "", address: "Wisma Lim Seong Hai, Kuala Lumpur" },
+};
+
+export interface TemplateField {
+  key: string; label: string; kind: "text" | "textarea" | "date" | "select";
+  options?: string[]; required?: boolean; hint?: string; group: "Agreement" | "The Company" | "Counterparty";
+}
+export const NDA_FIELDS: TemplateField[] = [
+  { key: "date", label: "Date of Agreement", kind: "date", required: true, group: "Agreement" },
+  { key: "purpose", label: "Purpose of the disclosure", kind: "textarea", required: true, group: "Agreement", hint: "What the information is exchanged for — e.g. tender for a named project, pre-qualification, a proposed joint development" },
+  { key: "direction", label: "Who discloses", kind: "select", options: ["Mutual", "Company to Counterparty only", "Counterparty to Company only"], required: true, group: "Agreement" },
+  { key: "term", label: "Term", kind: "select", options: ["Two (2) years", "One (1) year", "Three (3) years"], required: true, group: "Agreement" },
+  { key: "disputes", label: "Disputes", kind: "select", options: ["Courts of Malaysia", "AIAC arbitration, Kuala Lumpur"], required: true, group: "Agreement" },
+  { key: "stamp_duty", label: "Stamp duty borne by", kind: "select", options: ["Counterparty", "Company", "Both Parties equally"], required: true, group: "Agreement" },
+  { key: "non_solicit", label: "Clause 13 (non-solicitation) applies", kind: "select", options: ["No", "Yes"], required: true, group: "Agreement" },
+  { key: "company_reg", label: "Company registration no.", kind: "text", required: true, group: "The Company" },
+  { key: "company_address", label: "Company registered address", kind: "text", required: true, group: "The Company" },
+  { key: "company_contact", label: "Company contact and notice address", kind: "textarea", required: true, group: "The Company", hint: "Name, designation, address, email" },
+  { key: "whistleblowing", label: "Whistleblowing channel (clause 12.4)", kind: "text", required: true, group: "The Company", hint: "Email or web address of the Company's whistleblowing channel" },
+  { key: "cp_name", label: "Counterparty name", kind: "text", required: true, group: "Counterparty" },
+  { key: "cp_reg", label: "Counterparty registration no.", kind: "text", required: true, group: "Counterparty" },
+  { key: "cp_form", label: "Counterparty is a", kind: "select", options: ["company", "partnership", "sole proprietorship", "limited liability partnership"], required: true, group: "Counterparty" },
+  { key: "cp_country", label: "Registered in", kind: "text", required: true, group: "Counterparty" },
+  { key: "cp_address", label: "Counterparty registered address", kind: "text", required: true, group: "Counterparty" },
+  { key: "cp_contact", label: "Counterparty contact and notice address", kind: "textarea", required: true, group: "Counterparty", hint: "Name, designation, address, email" },
+];
+
+const BLANK = "[●]";
+const or = (v?: string) => (v ?? "").trim() || BLANK;
+const longDate = (iso?: string) => {
+  if (!iso) return BLANK;
+  const d = new Date(iso + "T00:00:00");
+  return Number.isNaN(d.getTime()) ? BLANK : d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+};
+
+/** Answers → placeholder values, plus the required answers still missing
+ *  (left as [●] in the draft, so an incomplete draft is visibly incomplete). */
+export function fillNda(entity: string, f: Record<string, string>): { values: Record<string, string>; missing: string[] } {
+  const missing = NDA_FIELDS.filter((x) => x.required && !(f[x.key] ?? "").trim()).map((x) => x.label);
+  const company = entity.toUpperCase();
+  const cp = or(f.cp_name).toUpperCase();
+  return {
+    missing,
+    values: {
+      company_party: `${company} (Registration No. ${or(f.company_reg)}), a company incorporated in Malaysia with its registered address at ${or(f.company_address)} (the "Company"), acting for itself and on behalf of its Affiliates`,
+      cp_party: `${cp} (Registration No. ${or(f.cp_reg)}), a ${or(f.cp_form)} registered in ${or(f.cp_country)} with its registered address at ${or(f.cp_address)} (the "Counterparty")`,
+      company_upper: company,
+      cp_upper: cp,
+      whistleblowing: or(f.whistleblowing),
+      s1: longDate(f.date), s2: or(f.purpose), s3: entity, s4: or(f.direction), s5: `${or(f.term)} from the Date of Agreement`,
+      s6: or(f.company_contact), s7: or(f.cp_contact), s8: or(f.stamp_duty), s9: or(f.disputes), s10: or(f.non_solicit),
+    },
+  };
+}

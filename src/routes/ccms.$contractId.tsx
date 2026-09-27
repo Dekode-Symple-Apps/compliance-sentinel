@@ -8,7 +8,7 @@ import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import {
-  attachCcmsDocument, decideCcmsApproval, getCcmsContract, resubmitCcmsContract, reviewCcmsDocument,
+  attachCcmsDocument, decideCcmsApproval, getCcmsContract, recordCcmsSentToCounterparty, resubmitCcmsContract, reviewCcmsDocument,
 } from "@/lib/ccms.functions";
 import {
   CcmsHeader, StatusBadge, OutcomeText, SlaText, CARD, TH, TD, fmtMoney, useCcmsRole,
@@ -67,7 +67,7 @@ function ContractDetail() {
               </table>
             </section>
 
-            <ActionPanel c={c} route={route} flags={flags} openThreads={openThreads.length} latestDraft={latestDraft} onDone={refresh} />
+            <ActionPanel c={c} route={route} flags={flags} openThreads={openThreads.length} latestDraft={latestDraft} documents={documents} events={events} onDone={refresh} />
 
             {/* Route */}
             <section className={CARD}>
@@ -92,17 +92,27 @@ function ContractDetail() {
 
             {/* Documents */}
             <section className={CARD}>
-              <Head title="Documents" sub="Every upload is a new version. The AI flags issues — it never rewrites the draft." right={<UploadButton contractId={c.id} onDone={refresh} label={documents.length ? "Upload new version" : "Upload draft"} />} />
+              <Head title="Documents" sub="Every upload is a new version. The AI flags issues — it never rewrites the draft." right={
+                <div className="flex gap-2">
+                  {documents.length > 0 && <UploadButton contractId={c.id} onDone={refresh} docRole="counterparty" label="Upload counterparty markup" />}
+                  <UploadButton contractId={c.id} onDone={refresh} docRole="draft" label={documents.length ? "Upload revised draft" : "Upload draft"} />
+                </div>} />
               {documents.length === 0 ? <p className="p-4 text-sm text-gray-500">No draft yet. Upload the draft contract to start the review.</p> : (
                 <table className="w-full">
                   <thead><tr className="border-b border-gray-200"><th className={TH}>Document</th><th className={TH}>Uploaded</th><th className={TH}>AI review</th><th className={TH}></th></tr></thead>
                   <tbody>
                     {documents.map((d: any) => (
                       <tr key={d.id} className="border-b border-gray-100 last:border-0">
-                        <td className={TD}><div className="font-medium flex items-center gap-1.5"><FileText className="size-4 text-gray-500" />{d.file_name}</div><div className="text-sm text-gray-600">{d.doc_role} v{d.version}</div></td>
+                        <td className={TD}><div className="font-medium flex items-center gap-1.5"><FileText className="size-4 text-gray-500" />{d.file_name}</div><div className="text-sm text-gray-600">{d.doc_role === "counterparty" ? "Counterparty markup" : "Our draft"} v{d.version}{d.generated ? " · generated from the approved template" : ""}</div></td>
                         <td className={TD + " text-gray-700"}>{d.uploaded_by_name ?? "—"}<div className="text-sm text-gray-600">{format(new Date(d.created_at), "d MMM yyyy, HH:mm")}</div></td>
                         <td className={TD}>{d.ai_review_status === "done" ? <span>Risk {d.riskScore ?? "—"} · <span className={d.verdict === "red_flag" ? "text-red-700" : d.verdict === "caution" ? "text-amber-700" : "text-emerald-700"}>{String(d.verdict ?? "").replace("_", " ")}</span></span> : <span className="text-gray-600">{d.ai_review_status}</span>}</td>
-                        <td className={TD + " text-right"}><Button asChild size="sm" variant="outline"><Link to="/ccms/review/$documentId" params={{ documentId: d.id }}>Open review</Link></Button></td>
+                        <td className={TD + " text-right"}>
+                          <div className="flex justify-end gap-2">
+                            <Button asChild size="sm" variant="outline"><a href={d.file_url} target="_blank" rel="noreferrer" download>Download</a></Button>
+                            {d.doc_role === "draft" && <SendButton contractId={c.id} doc={d} sent={events.filter((e: any) => e.event_type === "sent" && e.meta?.document_id === d.id)} onDone={refresh} />}
+                            <Button asChild size="sm" variant="outline"><Link to="/ccms/review/$documentId" params={{ documentId: d.id }}>Open review</Link></Button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -206,7 +216,7 @@ function Head({ title, sub, right }: { title: string; sub?: string; right?: Reac
   );
 }
 
-function UploadButton({ contractId, onDone, label }: { contractId: string; onDone: () => void; label: string }) {
+function UploadButton({ contractId, onDone, label, docRole }: { contractId: string; onDone: () => void; label: string; docRole: "draft" | "counterparty" }) {
   const [role] = useCcmsRole();
   const attachFn = useServerFn(attachCcmsDocument);
   const reviewFn = useServerFn(reviewCcmsDocument);
@@ -218,7 +228,7 @@ function UploadButton({ contractId, onDone, label }: { contractId: string; onDon
       const up = await supabase.storage.from("policies").upload(path, file, { upsert: false, contentType: file.type || "application/octet-stream" });
       if (up.error) throw new Error(up.error.message);
       const url = supabase.storage.from("policies").getPublicUrl(path).data.publicUrl;
-      const doc = await attachFn({ data: { contract_id: contractId, file_name: file.name, file_url: url, mime_type: file.type || null, size_bytes: file.size, doc_role: "draft", acting_role: role } });
+      const doc = await attachFn({ data: { contract_id: contractId, file_name: file.name, file_url: url, mime_type: file.type || null, size_bytes: file.size, doc_role: docRole, acting_role: role } });
       onDone();
       setBusy("AI reviewing…");
       await reviewFn({ data: { document_id: doc.id, acting_role: role } });
@@ -235,7 +245,7 @@ function UploadButton({ contractId, onDone, label }: { contractId: string; onDon
 }
 
 /** What the current persona can do right now, and why not when they can't. */
-function ActionPanel({ c, route, flags, openThreads, latestDraft, onDone }: { c: any; route: Stage[]; flags: Flag[]; openThreads: number; latestDraft: any; onDone: () => void }) {
+function ActionPanel({ c, route, flags, openThreads, latestDraft, documents, events, onDone }: { c: any; route: Stage[]; flags: Flag[]; openThreads: number; latestDraft: any; documents: any[]; events: any[]; onDone: () => void }) {
   const [role] = useCcmsRole();
   const decideFn = useServerFn(decideCcmsApproval);
   const resubmitFn = useServerFn(resubmitCcmsContract);
@@ -254,8 +264,17 @@ function ActionPanel({ c, route, flags, openThreads, latestDraft, onDone }: { c:
     body = <p className="text-sm text-gray-700">Waiting for the draft. The Contract Executive uploads it under Documents (service level 2 working days); the AI review then sets the route.</p>;
   } else if (c.status === "in_review") {
     const pending = route.filter((s) => s.kind === "review" && s.status === "pending");
+    const latest = documents[0];
+    const sent = latest && events.some((e: any) => e.event_type === "sent" && e.meta?.document_id === latest.id);
     body = (
       <div className="space-y-2 text-sm text-gray-700">
+        {latest?.generated && latest.doc_role === "draft" && (
+          <p className="rounded-md border border-emerald-200 p-2.5 text-gray-800">
+            {sent
+              ? <>Draft v{latest.version} has gone to the counterparty. When their marked-up version comes back, use <b>Upload counterparty markup</b> — the AI compares it with the approved template and opens a comment thread for each change.</>
+              : <>Draft v{latest.version} was generated from the approved template and is ready for the counterparty: <b>Download</b> it, send it, then <b>Mark as sent</b>.</>}
+          </p>
+        )}
         <p>Waiting on: <b>{pending.map((s) => `${s.label} (${CCMS_ROLES[s.role]})`).join(", ") || "—"}</b>. Reviewers record their outcome on the review screen, where they can comment against the draft.</p>
         {latestDraft && <Button asChild size="sm"><Link to="/ccms/review/$documentId" params={{ documentId: latestDraft.id }}>Open the latest draft to review</Link></Button>}
         {openThreads > 0 && <p className="text-amber-800">{openThreads} comment thread(s) open, including the AI Reviewer's. "Cleared" needs them resolved; otherwise record "Cleared with comments".</p>}
@@ -304,5 +323,27 @@ function ActionPanel({ c, route, flags, openThreads, latestDraft, onDone }: { c:
       <h2 className="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-1.5"><MessageSquare className="size-4 text-gray-500" /> Next step</h2>
       {body}
     </section>
+  );
+}
+
+/** Record that a draft went to the counterparty. Sending itself happens outside
+ *  the platform for now (download, then email); this keeps the trail. */
+function SendButton({ contractId, doc, sent, onDone }: { contractId: string; doc: any; sent: any[]; onDone: () => void }) {
+  const [role] = useCcmsRole();
+  const sendFn = useServerFn(recordCcmsSentToCounterparty);
+  const [open, setOpen] = useState(false);
+  const [to, setTo] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (sent.length && !open) return <span className="self-center text-sm text-emerald-700" title={sent.map((e) => e.detail).join("\n")}>Sent {format(new Date(sent[sent.length - 1].created_at), "d MMM")}</span>;
+  if (!open) return <Button size="sm" variant="outline" onClick={() => setOpen(true)}>Mark as sent</Button>;
+  return (
+    <span className="flex items-center gap-1">
+      <input autoFocus value={to} onChange={(e) => setTo(e.target.value)} placeholder="Sent to (name, email)" className="w-52 rounded-md border border-gray-300 px-2 py-1 text-sm" />
+      <Button size="sm" disabled={busy || to.trim().length < 3} onClick={async () => {
+        setBusy(true);
+        try { await sendFn({ data: { contract_id: contractId, document_id: doc.id, recipient: to.trim(), acting_role: role } }); toast.success("Recorded as sent"); setOpen(false); onDone(); }
+        catch (e: any) { toast.error(e?.message ?? "Failed"); } finally { setBusy(false); }
+      }}>Save</Button>
+    </span>
   );
 }

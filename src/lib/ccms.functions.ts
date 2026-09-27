@@ -2,7 +2,9 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireProduct } from "@/lib/feature-middleware";
 import { generateWithFallback, getDefaultModel } from "@/lib/gemini";
-import { docxToText, looksLikeDocx } from "@/lib/docx-editor";
+import { docxToText, escapeXml, looksLikeDocx } from "@/lib/docx-editor";
+import PizZip from "pizzip";
+import { FILLABLE_DOCX_BASE64 as NDA_FILLABLE } from "@/lib/ccms-templates/lsh-nda-mutual.fill";
 import { addAnchoredCommentsToDocx, type AnchoredComment } from "@/lib/docx-anchored-comments";
 import { extractPdfPages } from "@/lib/pdf-pages";
 import { computeCost } from "@/lib/pricing";
@@ -10,7 +12,7 @@ import { maskDemoEmail } from "@/lib/legal.functions";
 import { assertRowTenant, getCallerTenant, requireFeature } from "@/lib/tenant.functions";
 import {
   CONTRACT_TYPES, CCMS_ROLES, DEMO_SINGLE_USER, LOA_ITEMS, BLOCKING_FLAGS, AI_ROLE, roleLabel,
-  buildRoute, computeFlags, nextApproval, reviewsDone, templateById, toMyr,
+  buildRoute, computeFlags, nextApproval, reviewsDone, templateById, toMyr, fillNda,
   type CcmsRole, type Flag, type Stage, type VendorLite,
 } from "@/lib/ccms";
 
@@ -25,6 +27,8 @@ import {
 // ---------------------------------------------------------------------------
 
 const requireCcms = requireProduct("commercial_cms");
+/** Fill-in versions of the approved templates, by template id. */
+const FILLABLE: Record<string, string> = { "lsh-nda-mutual": NDA_FILLABLE };
 const roleSchema = z.enum(Object.keys(CCMS_ROLES) as [CcmsRole, ...CcmsRole[]]);
 
 async function ccms(context: any) {
@@ -196,7 +200,7 @@ export const getCcmsContract = createServerFn({ method: "GET" })
     const contract = await loadContract(sb, data.id, tenantId);
     const [vendor, docs, comments, reviews, events] = await Promise.all([
       loadVendor(sb, contract.vendor_id, tenantId),
-      sb.from("ccms_documents").select("id,contract_id,file_name,file_url,mime_type,size_bytes,doc_role,version,ai_review_status,uploaded_by_name,created_at,ai_review->verdict,ai_review->riskScore,ai_review->summary")
+      sb.from("ccms_documents").select("id,contract_id,file_name,file_url,mime_type,size_bytes,doc_role,version,ai_review_status,uploaded_by_name,created_at,ai_review->verdict,ai_review->riskScore,ai_review->summary,ai_review->generated")
         .eq("contract_id", data.id).order("created_at", { ascending: false }),
       sb.from("ccms_comments").select("*").eq("contract_id", data.id).order("created_at"),
       sb.from("ccms_reviews").select("*").eq("contract_id", data.id).order("created_at"),
@@ -733,4 +737,106 @@ export const exportCcmsDocumentWithComments = createServerFn({ method: "POST" })
       base64: out.buffer.toString("base64"),
       comments: comments.length, exact: out.exact, loose: out.loose, unplaced: out.unplaced,
     };
+  });
+
+// ---------------------------------------------------------------------------
+// Generate the draft from the approved template (CMS-01 step 4).
+// The answers go into the parties block and Schedule 1 only; the wording is
+// the approved template's, so the draft is standard by construction — its
+// deviation report is written here, not asked of the AI.
+// ---------------------------------------------------------------------------
+
+export const generateCcmsDraft = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({
+    contract_id: z.string().uuid(),
+    fields: z.record(z.string(), z.string().max(4000)),
+    acting_role: roleSchema,
+  }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await ccms(context);
+    requireRole(data.acting_role, ["requestor", "contract_executive", "legal"], "generate a draft");
+    const contract = await loadContract(sb, data.contract_id, tenantId);
+    const tpl = templateById(contract.template_id);
+    const fillable = tpl ? FILLABLE[tpl.id] : undefined;
+    if (!tpl || !fillable) throw new Error("There is no approved template to generate this contract type from.");
+    if (["approved", "rejected", "closed"].includes(contract.status)) throw new Error(`The request is ${contract.status}.`);
+
+    const { values, missing } = fillNda(contract.entity, data.fields);
+    const zip = new PizZip(Buffer.from(fillable, "base64"));
+    let xml = zip.file("word/document.xml")!.asText();
+    for (const [k, v] of Object.entries(values)) xml = xml.split(`{{${k}}}`).join(escapeXml(v));
+    if (/\{\{[a-z0-9_]+\}\}/.test(xml)) throw new Error("The template has a placeholder the request did not fill.");
+    zip.file("word/document.xml", xml);
+    const buffer = zip.generate({ type: "nodebuffer", compression: "DEFLATE" }) as Buffer;
+
+    const { count } = await sb.from("ccms_documents").select("id", { count: "exact", head: true })
+      .eq("contract_id", contract.id).eq("doc_role", "draft");
+    const version = (count ?? 0) + 1;
+    const cp = (data.fields.cp_name || contract.counterparty_name || "Counterparty").replace(/[^\w &.-]+/g, "").trim();
+    const fileName = `${contract.reference_number} ${tpl.title} - ${cp} - v${version}.docx`;
+    const path = `ccms/${contract.id}/${Date.now()}-generated-v${version}.docx`;
+    const up = await sb.storage.from("policies").upload(path, buffer, {
+      upsert: false, contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+    if (up.error) throw new Error(`Could not store the generated draft: ${up.error.message}`);
+    const fileUrl = sb.storage.from("policies").getPublicUrl(path).data.publicUrl;
+
+    const deviation = {
+      templateId: tpl.id, templateCode: tpl.code, templateVersion: tpl.version, generated: true,
+      clauses: tpl.clauses.map((c) => ({
+        templateClauseId: c.id, number: c.number, title: c.title, mandatory: c.mandatory, locked: c.locked,
+        status: "same", draftRef: c.number, excerpt: "", change: "", severity: "low",
+      })),
+      added: [],
+    };
+    const ai_review = {
+      verdict: missing.length ? "caution" : "compliant", riskScore: 0, generated: true,
+      summary: `Generated from the approved template ${tpl.code} v${tpl.version}. The wording is the template's; only the parties and Schedule 1 were completed from the request.` +
+        (missing.length ? ` Still to complete (left as [●] in the draft): ${missing.join(", ")}.` : " Ready to send to the counterparty."),
+      findings: missing.map((m, i) => ({ id: `m${i + 1}`, ref: "Schedule 1 / parties", excerpt: "", severity: "caution", category: "commercial",
+        issue: `${m} not provided — left as [●].`, whyItMatters: "The agreement cannot be signed with a blank particular." })),
+      fields: data.fields, reviewedAt: new Date().toISOString(),
+    };
+    const { data: doc, error } = await sb.from("ccms_documents").insert({
+      contract_id: contract.id, file_name: fileName, file_url: fileUrl, size_bytes: buffer.length,
+      mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      doc_role: "draft", version, ai_review, deviation, ai_review_status: "done",
+      uploaded_by: userId, uploaded_by_name: userName,
+    }).select().single();
+    if (error) throw new Error(error.message);
+
+    const routing = await refreshRouting(sb, contract, tenantId);
+    const now = new Date().toISOString();
+    await sb.from("ccms_contracts").update({
+      ...routing,
+      status: contract.status === "submitted" ? statusFor(routing.approval_route, true) : contract.status,
+      stage_started_at: contract.status === "submitted" ? now : contract.stage_started_at, updated_at: now,
+    }).eq("id", contract.id);
+    await logEvent(sb, { contract_id: contract.id, event_type: "generated", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
+      detail: `Draft v${version} generated from ${tpl.code} v${tpl.version}${missing.length ? ` — ${missing.length} particular(s) still blank` : ""}.` });
+    return { document: doc, missing };
+  });
+
+/** Record that a draft went to the counterparty. The platform does not send
+ *  email yet — the user sends the downloaded file; this keeps the trail. */
+export const recordCcmsSentToCounterparty = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({
+    contract_id: z.string().uuid(),
+    document_id: z.string().uuid(),
+    recipient: z.string().min(3).max(300),
+    note: z.string().max(2000).optional().nullable(),
+    acting_role: roleSchema,
+  }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await ccms(context);
+    requireRole(data.acting_role, ["requestor", "contract_executive", "legal"], "send a draft to the counterparty");
+    const contract = await loadContract(sb, data.contract_id, tenantId);
+    const { data: doc } = await sb.from("ccms_documents").select("id,version,file_name,contract_id").eq("id", data.document_id).single();
+    if (!doc || doc.contract_id !== contract.id) throw new Error("Document not found");
+    await logEvent(sb, { contract_id: contract.id, event_type: "sent", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
+      meta: { document_id: doc.id, recipient: data.recipient },
+      detail: `Draft v${doc.version} sent to the counterparty (${data.recipient})${data.note ? ` — ${data.note}` : ""}.` });
+    return { ok: true };
   });

@@ -1,17 +1,17 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import {
-  attachCcmsDocument, createCcmsContract, listCcmsVendors, reviewCcmsDocument,
+  attachCcmsDocument, createCcmsContract, generateCcmsDraft, listCcmsVendors, reviewCcmsDocument,
 } from "@/lib/ccms.functions";
 import { CcmsHeader, FlagChips, CARD, useCcmsRole, fmtMoney } from "@/components/ccms-widgets";
 import {
-  CONTRACT_TYPES, LSH_ENTITIES, FX_TO_MYR, buildRoute, computeFlags, templateById, toMyr,
+  CONTRACT_TYPES, LSH_ENTITIES, FX_TO_MYR, ENTITY_DETAILS, NDA_FIELDS, buildRoute, computeFlags, fillNda, templateById, toMyr,
 } from "@/lib/ccms";
 import { Loader2, Upload, ArrowRight } from "lucide-react";
 
@@ -31,6 +31,7 @@ function NewRequest() {
   const createFn = useServerFn(createCcmsContract);
   const attachFn = useServerFn(attachCcmsDocument);
   const reviewFn = useServerFn(reviewCcmsDocument);
+  const generateFn = useServerFn(generateCcmsDraft);
   const { data: vendors = [] } = useQuery({ queryKey: ["ccms-vendors"], queryFn: () => vendorsFn() });
 
   const [side, setSide] = useState<"vendor" | "client">("vendor");
@@ -41,16 +42,35 @@ function NewRequest() {
   });
   const set = (k: string, v: any) => setF((p: any) => ({ ...p, [k]: v }));
   const [file, setFile] = useState<File | null>(null);
+  // Generate the draft from the approved template, or upload the counterparty's own paper.
+  const [draftMode, setDraftMode] = useState<"generate" | "upload">("generate");
+  const [tf, setTf] = useState<Record<string, string>>({
+    date: new Date().toISOString().slice(0, 10), direction: "Mutual", term: "Two (2) years",
+    disputes: "Courts of Malaysia", stamp_duty: "Counterparty", non_solicit: "No", cp_form: "company", cp_country: "Malaysia",
+  });
+  const setT = (k: string, v: string) => setTf((p) => ({ ...p, [k]: v }));
   const [phase, setPhase] = useState<string | null>(null);
 
   const t = CONTRACT_TYPES[f.contract_type];
   const vendor = vendors.find((v: any) => v.id === f.vendor_id) ?? null;
+  // Carry what the request already knows into the template's particulars —
+  // the vendor record, the entity, the scope — without overwriting an edit.
+  useEffect(() => {
+    if (!vendor) return;
+    setTf((p) => ({ ...p, cp_name: vendor.name, cp_reg: vendor.registration_no ?? "",
+      cp_contact: p.cp_contact || [vendor.contact_name, vendor.contact_email].filter(Boolean).join(", ") }));
+  }, [vendor?.id]);
+  useEffect(() => {
+    const d = ENTITY_DETAILS[f.entity];
+    setTf((p) => ({ ...p, company_reg: d?.regNo ?? "", company_address: d?.address ?? "" }));
+  }, [f.entity]);
   const valueNum = f.value === "" ? null : Number(f.value);
   const valueMyr = toMyr(valueNum, f.currency);
   // What the platform will do with this request, before it is sent.
   const preview = useMemo(() => {
     const flags = computeFlags({ contract_type: f.contract_type, value_myr: valueMyr, personal_data_cross_border: f.personal_data_cross_border,
       review: t?.templateId ? null : { nonStandard: true } }, side === "vendor" ? vendor : null);
+    // (A draft generated from the template is standard, so no deviation flag.)
     return { flags, route: buildRoute({ contract_type: f.contract_type, value_myr: valueMyr }, flags) };
   }, [f.contract_type, valueMyr, f.personal_data_cross_border, vendor, side, t?.templateId]);
 
@@ -68,7 +88,14 @@ function NewRequest() {
     qc.invalidateQueries({ queryKey: ["ccms-contracts"] });
     // The request exists from here: a failed upload is reported, never retried
     // by sending the user back to the form (that would duplicate the request).
-    if (file) {
+    if (tpl && draftMode === "generate") {
+      try {
+        setPhase("Generating the draft from the approved template…");
+        const r: any = await generateFn({ data: { contract_id: contract.id, acting_role: role,
+          fields: { ...tf, purpose: tf.purpose || f.scope_summary } } });
+        if (r.missing?.length) toast.message(`Draft generated with ${r.missing.length} particular(s) still blank.`);
+      } catch (e: any) { toast.error(`Request ${contract.reference_number} created, but generating the draft failed: ${e?.message ?? e}`); }
+    } else if (file) {
       try {
         setPhase(`Uploading ${file.name}…`);
         const path = `ccms/${contract.id}/${Date.now()}-${file.name}`;
@@ -171,13 +198,57 @@ function NewRequest() {
                 Personal data will be transferred outside Malaysia under this contract
               </label>
             </div>
-            <div>
-              <label className={LABEL}>Draft contract (optional now — can be added later)</label>
-              <label className="flex items-center gap-2 rounded-md border border-dashed border-gray-300 px-3 py-3 text-sm text-gray-700 cursor-pointer hover:border-gray-500">
-                <Upload className="size-4" /> {file ? file.name : "Choose a .docx or .pdf"}
-                <input type="file" accept=".docx,.pdf" className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-              </label>
-            </div>
+            {tpl && (
+              <div className="flex gap-2">
+                {(["generate", "upload"] as const).map((m) => (
+                  <button key={m} onClick={() => setDraftMode(m)}
+                    className={"rounded-md border px-3 py-1.5 text-sm " + (draftMode === m ? "border-gray-900 font-semibold" : "border-gray-200 text-gray-600")}>
+                    {m === "generate" ? `Generate from ${tpl.code} (approved template)` : "Upload the counterparty's own draft"}
+                  </button>
+                ))}
+              </div>
+            )}
+            {tpl && draftMode === "generate" ? (
+              <div className="rounded-md border border-gray-200 p-4 space-y-4">
+                <p className="text-sm text-gray-700">The draft is the approved template word for word, with these particulars in the parties block and Schedule 1. Anything left blank shows as [●] in the draft.</p>
+                {(["Agreement", "The Company", "Counterparty"] as const).map((g) => (
+                  <div key={g}>
+                    <div className="text-sm font-semibold text-gray-900 mb-2">{g}</div>
+                    <div className="grid grid-cols-2 gap-3">
+                      {NDA_FIELDS.filter((x) => x.group === g).map((x) => (
+                        <div key={x.key} className={x.kind === "textarea" ? "col-span-2" : ""}>
+                          <label className={LABEL}>{x.label}{x.required && <span className="text-red-700"> *</span>}</label>
+                          {x.kind === "select" ? (
+                            <select className={INPUT} value={tf[x.key] ?? ""} onChange={(e) => setT(x.key, e.target.value)}>
+                              {x.options!.map((o) => <option key={o}>{o}</option>)}
+                            </select>
+                          ) : x.kind === "textarea" ? (
+                            <textarea className={INPUT + " min-h-16"} value={tf[x.key] ?? (x.key === "purpose" ? f.scope_summary : "")} onChange={(e) => setT(x.key, e.target.value)} />
+                          ) : (
+                            <input className={INPUT} type={x.kind === "date" ? "date" : "text"} value={tf[x.key] ?? ""} onChange={(e) => setT(x.key, e.target.value)} />
+                          )}
+                          {x.hint && <p className="mt-0.5 text-xs text-gray-500">{x.hint}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {(() => {
+                  const miss = fillNda(f.entity, { ...tf, purpose: tf.purpose || f.scope_summary }).missing;
+                  return miss.length
+                    ? <p className="text-sm text-amber-700">Still blank: {miss.join(", ")}. You can generate now and complete these later.</p>
+                    : <p className="text-sm text-emerald-700">All particulars filled — the draft will be ready to send.</p>;
+                })()}
+              </div>
+            ) : (
+              <div>
+                <label className={LABEL}>Draft contract (optional now — can be added later)</label>
+                <label className="flex items-center gap-2 rounded-md border border-dashed border-gray-300 px-3 py-3 text-sm text-gray-700 cursor-pointer hover:border-gray-500">
+                  <Upload className="size-4" /> {file ? file.name : "Choose a .docx or .pdf"}
+                  <input type="file" accept=".docx,.pdf" className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+                </label>
+              </div>
+            )}
             <div className="flex items-center gap-3 pt-2">
               <Button onClick={submit} disabled={!!phase} className="gap-1.5">
                 {phase ? <Loader2 className="size-4 animate-spin" /> : <ArrowRight className="size-4" />} {phase ?? "Submit request"}
