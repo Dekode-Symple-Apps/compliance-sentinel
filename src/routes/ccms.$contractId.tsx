@@ -43,7 +43,8 @@ function ContractDetail() {
   const route: Stage[] = c.approval_route ?? [];
   const threads = comments.filter((x: any) => !x.parent_id);
   const openThreads = threads.filter((x: any) => x.status === "open");
-  const latestDraft = documents.find((d: any) => d.doc_role === "draft");
+  // The document under review: the newest of our drafts and the counterparty's markups.
+  const latestDraft = documents.find((d: any) => d.doc_role === "draft" || d.doc_role === "counterparty");
 
   return (
     <AppShell>
@@ -281,7 +282,7 @@ function ActionPanel({ c, route, flags, openThreads, latestDraft, documents, eve
           </p>
         )}
         <p>Waiting on: <b>{pending.map((s) => `${s.label} (${CCMS_ROLES[s.role]})`).join(", ") || "—"}</b>. Reviewers record their outcome on the review screen, where they can comment against the draft.</p>
-        {latestDraft && <Button asChild size="sm"><Link to="/ccms/review/$documentId" params={{ documentId: latestDraft.id }}>Open the latest draft to review</Link></Button>}
+        {latestDraft && <Button asChild size="sm"><Link to="/ccms/review/$documentId" params={{ documentId: latestDraft.id }}>Open the latest version to review</Link></Button>}
         {openThreads > 0 && <p className="text-amber-800">{openThreads} comment thread(s) open, including the AI Reviewer's. "Cleared" needs them resolved; otherwise record "Cleared with comments".</p>}
       </div>
     );

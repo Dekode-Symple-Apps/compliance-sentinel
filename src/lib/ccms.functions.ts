@@ -603,7 +603,10 @@ export const recordCcmsReview = createServerFn({ method: "POST" })
     const stage = route.find((s) => s.key === data.stage);
     if (!stage) throw new Error(`This request does not need ${data.stage} review.`);
     if (data.outcome !== "cleared" && !data.note?.trim()) throw new Error("Give the reason or the comments with this outcome.");
-    const { data: latest } = await sb.from("ccms_documents").select("id").eq("contract_id", contract.id).eq("doc_role", "draft")
+    // The document under review is the newest draft OR counterparty markup —
+    // the same one routing reads. Checking drafts only let "Cleared" through
+    // while the AI's threads on a returned markup were still open.
+    const { data: latest } = await sb.from("ccms_documents").select("id").eq("contract_id", contract.id).in("doc_role", ["draft", "counterparty"])
       .order("created_at", { ascending: false }).limit(1);
     if (data.outcome === "cleared") {
       const { count: own } = await sb.from("ccms_comments").select("id", { count: "exact", head: true })
