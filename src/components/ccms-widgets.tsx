@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Briefcase, UserCog } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
-  CCMS_ROLES, FLAG_META, STATUS_META, OUTCOME_LABEL, workingDaysSince, nextApproval,
+  CCMS_ROLES, ROLE_GROUPS, FLAG_META, STATUS_META, OUTCOME_LABEL, workingDaysSince, nextApproval,
   type CcmsRole, type Flag, type Stage,
 } from "@/lib/ccms";
 
@@ -40,7 +40,11 @@ export function ActingAs() {
       <UserCog className="size-4 text-gray-500" />
       <span className="text-gray-600">Acting as</span>
       <select value={role} onChange={(e) => setRole(e.target.value as CcmsRole)} className="font-semibold bg-transparent focus:outline-none cursor-pointer">
-        {ROLES.map((r) => <option key={r} value={r}>{CCMS_ROLES[r]}</option>)}
+        {ROLE_GROUPS.map((g) => (
+          <optgroup key={g.label} label={g.label}>
+            {g.roles.map((r) => <option key={r} value={r}>{CCMS_ROLES[r]}</option>)}
+          </optgroup>
+        ))}
       </select>
     </label>
   );
@@ -126,3 +130,45 @@ export function waitingOn(c: any): { label: string; overdue: boolean } | null {
   return null;
 }
 
+
+/** A row of stages — done, current, to do, skipped — and the one next step. */
+export function StageBar({ stages, next }: { stages: { key: string; label: string; state: string; detail?: string }[]; next: { text: string; role: string } | null }) {
+  const [role] = useCcmsRole();
+  return (
+    <section className={CARD + " p-4 space-y-3"}>
+      <ol className="flex flex-wrap items-start gap-y-3">
+        {stages.map((s, i) => (
+          <li key={s.key} className="flex items-start">
+            <div className="flex flex-col items-center w-[108px] text-center">
+              <span className={cn("size-7 rounded-full border-2 grid place-items-center text-xs",
+                s.state === "done" ? "border-emerald-600 bg-emerald-600 text-white" : s.state === "current" ? "border-blue-700 text-blue-700" : "border-gray-300 text-gray-300")}>
+                {s.state === "done" ? "✓" : s.state === "skipped" ? "–" : "●"}
+              </span>
+              <span className={cn("mt-1.5 text-xs leading-tight", s.state === "current" ? "font-semibold text-blue-800" : s.state === "done" ? "text-gray-900" : "text-gray-500")}>{s.label}</span>
+              {s.detail && <span className="mt-0.5 text-[11px] leading-tight text-gray-500">{s.detail}</span>}
+            </div>
+            {i < stages.length - 1 && <span className={cn("mt-3.5 h-0.5 w-4 -mx-1", s.state === "done" ? "bg-emerald-600" : "bg-gray-200")} />}
+          </li>
+        ))}
+      </ol>
+      {next && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-blue-200 px-3 py-2 text-sm">
+          <span className="font-semibold text-blue-800">Next:</span>
+          <span className="text-gray-900">{next.text}</span>
+          <span className={cn("ml-auto rounded-full border px-2 py-0.5 text-xs", role === next.role ? "border-blue-300 text-blue-800" : "border-gray-300 text-gray-600")}>
+            {next.role === "vendor" ? "Vendor" : (CCMS_ROLES as Record<string, string>)[next.role] ?? next.role}{role === next.role ? " · you" : ""}
+          </span>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** Upload a file to storage from the browser; returns its public URL. */
+export async function uploadToStorage(prefix: string, file: File): Promise<string> {
+  const { supabase } = await import("@/integrations/supabase/client");
+  const path = `${prefix}/${Date.now()}-${file.name.replace(/[^\w.\- ]+/g, "_")}`;
+  const up = await supabase.storage.from("policies").upload(path, file, { upsert: false, contentType: file.type || "application/octet-stream" });
+  if (up.error) throw new Error(up.error.message);
+  return supabase.storage.from("policies").getPublicUrl(path).data.publicUrl;
+}

@@ -17,7 +17,10 @@ import appCss from "../styles.css?url";
 
 // Paths that an unauthenticated user is allowed to sit on (the login screen and
 // the OAuth return URLs). Everything else triggers a redirect to /login.
-const PUBLIC_PATHS = new Set(["/login", "/auth/callback", "/auth/google/callback"]);
+const PUBLIC_PATH_SET = new Set(["/login", "/auth/callback", "/auth/google/callback"]);
+// The vendor portal is for invited vendors, who have no account: its pages are
+// public and every server call checks the invitation token instead.
+const PUBLIC_PATHS = { has: (p: string) => PUBLIC_PATH_SET.has(p) || p.startsWith("/vendor-portal/") };
 
 function NotFoundComponent() {
   return (

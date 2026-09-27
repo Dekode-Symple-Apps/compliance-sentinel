@@ -12,7 +12,7 @@ import { assertRowTenant, getCallerTenant, requireFeature } from "@/lib/tenant.f
 import {
   CONTRACT_TYPES, CCMS_ROLES, DEMO_SINGLE_USER, LOA_ITEMS, BLOCKING_FLAGS, AI_ROLE, roleLabel,
   buildRoute, computeFlags, nextApproval, reviewsDone, templateById, toMyr, fillNda, displayName,
-  COMPARISON_AREAS, defaultSecurities, SECURITY_TYPES, type Security, type KeyTerms,
+  COMPARISON_AREAS, defaultSecurities, SECURITY_TYPES, APPROVAL_BANDS, type Security, type KeyTerms,
   type CcmsRole, type Flag, type Stage, type VendorLite,
 } from "@/lib/ccms";
 
@@ -255,6 +255,7 @@ export const createCcmsContract = createServerFn({ method: "POST" })
     const vendor = t.side === "vendor" ? await loadVendor(sb, data.vendor_id, tenantId) : null;
     if (t.side === "vendor" && !vendor) throw new Error("Vendor not found.");
     if (vendor?.status === "blacklisted") throw new Error(`${vendor.name} is blacklisted and cannot be named on a contract request.`);
+    if (vendor?.compliance_hold) throw new Error(`${vendor.name} is on compliance hold (${vendor.hold_reason ?? "credentials lapsed"}) — no new awards until it is cleared.`);
 
     const value_myr = toMyr(data.value ?? null, data.currency);
     const base = { ...data, value_myr };
@@ -317,7 +318,7 @@ export const attachCcmsDocument = createServerFn({ method: "POST" })
 // Review and flag — the AI reads the draft; it never rewrites it.
 // ---------------------------------------------------------------------------
 
-async function documentText(doc: any): Promise<{ text: string; pdfBase64?: string }> {
+export async function documentText(doc: any): Promise<{ text: string; pdfBase64?: string }> {
   const resp = await fetch(doc.file_url);
   if (!resp.ok) throw new Error(`Could not fetch the document (${resp.status}).`);
   const buffer = Buffer.from(await resp.arrayBuffer());
@@ -511,7 +512,7 @@ export const reviewCcmsDocument = createServerFn({ method: "POST" })
     }
   });
 
-function parseJson(raw: string): any {
+export function parseJson(raw: string): any {
   const m = raw.match(/\{[\s\S]*\}/);
   try { return JSON.parse(m ? m[0] : raw); } catch { return null; }
 }
@@ -1155,4 +1156,142 @@ export const saveCcmsRepository = createServerFn({ method: "POST" })
     await logEvent(sb, { contract_id: contract.id, event_type: "repository", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
       detail: `Saved to the repository. Expires ${data.terms.end_date}; alert from 30 days before.` });
     return { ok: true };
+  });
+
+// ===========================================================================
+// CMS-03: change requests, renewal and closure.
+// ===========================================================================
+
+async function actorCtx(context: any) { return ccms(context); }
+
+export const raiseCcmsChange = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({
+    contract_id: z.string().uuid(), kind: z.enum(["scope", "rate", "quantity", "time"]), description: z.string().min(5).max(2000),
+    value_impact: z.number(), deviates_template: z.boolean(), acting_role: roleSchema,
+  }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await actorCtx(context);
+    requireRole(data.acting_role, ["contract_executive"], "raise a change request");
+    const c = await loadContract(sb, data.contract_id, tenantId);
+    if (!["active", "stamped", "signed"].includes(c.status)) throw new Error("Changes are raised on a signed contract.");
+    const newTotal = (c.value_myr ?? c.value ?? 0) + data.value_impact;
+    const band = APPROVAL_BANDS.find((b) => newTotal <= b.upToMyr)!;
+    const change = { id: `CR-${String((c.changes ?? []).length + 1).padStart(2, "0")}`, kind: data.kind, description: data.description, value_impact: data.value_impact,
+      new_total: newTotal, band: band.label, legal: data.deviates_template ? "pending" : "not_required", approval: "pending", signed: null,
+      raised_by: userName, raised_by_id: userId, raised_at: new Date().toISOString() };
+    await sb.from("ccms_contracts").update({ changes: [...(c.changes ?? []), change], updated_at: new Date().toISOString() }).eq("id", c.id);
+    await logEvent(sb, { contract_id: c.id, event_type: "change", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
+      detail: `${change.id} raised (${data.kind}): ${data.value_impact >= 0 ? "+" : ""}RM${data.value_impact.toLocaleString()} → RM${newTotal.toLocaleString()}; approval by ${band.label}${data.deviates_template ? "; Legal vetting required" : ""}.` });
+    return change;
+  });
+
+export const decideCcmsChange = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({ contract_id: z.string().uuid(), change_id: z.string(), stage: z.enum(["legal", "approval", "signed"]), outcome: z.enum(["cleared", "approved", "rejected", "signed"]), note: z.string().max(1000).optional().nullable(), acting_role: roleSchema }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await actorCtx(context);
+    const c = await loadContract(sb, data.contract_id, tenantId);
+    const ch = (c.changes ?? []).find((x: any) => x.id === data.change_id);
+    if (!ch) throw new Error("Change not found");
+    const now = new Date().toISOString();
+    if (data.stage === "legal") {
+      requireRole(data.acting_role, ["legal"], "vet the amendment");
+      if (ch.legal !== "pending") throw new Error("Legal vetting is not pending on this change.");
+      ch.legal = data.outcome === "rejected" ? "rejected" : "cleared";
+      if (ch.legal === "rejected") ch.approval = "rejected";
+    } else if (data.stage === "approval") {
+      requireRole(data.acting_role, ["approver"], `approve at the ${ch.band} level`);
+      if (ch.legal === "pending") throw new Error("Legal vetting first.");
+      if (data.outcome === "rejected" && !data.note?.trim()) throw new Error("Give the reason.");
+      const vendor = await loadVendor(sb, c.vendor_id, tenantId);
+      if (data.outcome === "approved" && vendor?.compliance_hold) throw new Error(`${vendor.name} is on compliance hold.`);
+      ch.approval = data.outcome === "approved" ? "approved" : "rejected";
+      ch.approved_by = userName; ch.approved_at = now;
+      if (ch.raised_by_id === userId) ch.self_note = "Self-approval — demo mode only.";
+    } else {
+      requireRole(data.acting_role, ["contract_executive"], "record the signed appendix");
+      if (ch.approval !== "approved") throw new Error("The change must be approved first.");
+      ch.signed = now;
+    }
+    const changes = (c.changes as any[]).map((x) => (x.id === ch.id ? ch : x));
+    const patch: any = { changes, updated_at: now };
+    // A signed appendix changes the contract: new value, repository updated.
+    if (data.stage === "signed") {
+      patch.value = (c.value ?? 0) + ch.value_impact;
+      patch.value_myr = (c.value_myr ?? c.value ?? 0) + ch.value_impact;
+      if (c.repository) patch.repository = { ...c.repository, value: (c.repository.value ?? c.value ?? 0) + ch.value_impact, obligations: [...(c.repository.obligations ?? []), `${ch.id}: ${ch.description}`.slice(0, 200)] };
+    }
+    await sb.from("ccms_contracts").update(patch).eq("id", c.id);
+    await logEvent(sb, { contract_id: c.id, event_type: "change", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
+      detail: `${ch.id}: ${data.stage === "signed" ? `appendix signed — contract value now RM${patch.value.toLocaleString()}` : `${data.stage} ${data.outcome}`}${data.note ? ` — ${data.note}` : ""}.` });
+    return ch;
+  });
+
+/** Before the notice deadline: renew, renegotiate or let it end. Renewal
+ *  re-checks the vendor — a vendor on hold, or with lapsed due diligence,
+ *  cannot be renewed (CMS-03 steps 6, 11–13). */
+export const decideCcmsRenewal = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({ contract_id: z.string().uuid(), decision: z.enum(["renew", "renegotiate", "terminate"]), new_end: z.string().optional().nullable(), note: z.string().max(1000).optional().nullable(), acting_role: roleSchema }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await actorCtx(context);
+    requireRole(data.acting_role, ["approver", "contract_manager"], "decide the renewal");
+    const c = await loadContract(sb, data.contract_id, tenantId);
+    if (c.status !== "active") throw new Error("Only an active contract is renewed.");
+    if (data.decision === "renew") {
+      if (!data.new_end || (c.expiry_date && data.new_end <= c.expiry_date)) throw new Error("Give a new expiry date after the current one.");
+      const v = await loadVendor(sb, c.vendor_id, tenantId);
+      if (v) {
+        const why = [v.compliance_hold && `on compliance hold (${v.hold_reason ?? ""})`, !["approved", "conditional"].includes(v.status) && `status ${v.status}`,
+          v.dd_valid_until && new Date(v.dd_valid_until) < new Date() && `due diligence expired ${v.dd_valid_until}`].filter(Boolean);
+        if (why.length) throw new Error(`${v.name} cannot be renewed: ${why.join("; ")}. Clear it first.`);
+      }
+    }
+    const renewal = { decision: data.decision, new_end: data.new_end ?? null, note: data.note ?? null, by: userName, at: new Date().toISOString() };
+    const patch: any = { renewal, updated_at: new Date().toISOString() };
+    if (data.decision === "renew") {
+      patch.expiry_date = data.new_end;
+      if (c.repository) patch.repository = { ...c.repository, end_date: data.new_end };
+    }
+    await sb.from("ccms_contracts").update(patch).eq("id", c.id);
+    await logEvent(sb, { contract_id: c.id, event_type: "renewal", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
+      detail: data.decision === "renew" ? `Renewed to ${data.new_end}; vendor re-validated.` : data.decision === "renegotiate" ? `To renegotiate${data.note ? ` — ${data.note}` : ""}.` : `Not renewed — to be closed at expiry.${data.note ? ` ${data.note}` : ""}` });
+    return renewal;
+  });
+
+/** Closure: payments, retention (half at CPC, half at CMGD with the final
+ *  account), bonds returned, defects closed, obligations met. Blocked while
+ *  any is open unless overridden with a reason. Then 7 years' retention. */
+export const closeCcmsContract = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({
+    contract_id: z.string().uuid(),
+    checklist: z.object({
+      payments: z.boolean(), retention_cpc: z.string().max(100).optional().nullable(), retention_cmgd: z.string().max(100).optional().nullable(),
+      bonds_returned: z.boolean(), defects_closed: z.boolean(), obligations_met: z.boolean(),
+    }),
+    override_reason: z.string().max(1000).optional().nullable(), legal_hold: z.boolean().default(false), acting_role: roleSchema,
+  }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await actorCtx(context);
+    requireRole(data.acting_role, ["contract_manager"], "close a contract");
+    const c = await loadContract(sb, data.contract_id, tenantId);
+    if (c.status !== "active") throw new Error("Only an active contract is closed.");
+    const works = ["letter_of_award", "work_order", "subcontract", "client_loa", "client_contract"].includes(c.contract_type);
+    const k = data.checklist;
+    const open = [
+      !k.payments && "final payments", works && !k.retention_cpc && "first half of retention (CPC reference)", works && !k.retention_cmgd && "second half of retention (CMGD and final account reference)",
+      !k.bonds_returned && "bonds returned", !k.defects_closed && "defects closed", !k.obligations_met && "obligations met",
+      (c.changes ?? []).some((x: any) => x.approval === "pending" || (x.approval === "approved" && !x.signed)) && "open change requests",
+    ].filter(Boolean) as string[];
+    if (open.length && !data.override_reason?.trim()) throw new Error(`Still open: ${open.join(", ")}. Close them, or override with a reason.`);
+    const now = new Date();
+    const retain = new Date(now); retain.setFullYear(retain.getFullYear() + 7);
+    const closure = { checklist: k, open_at_close: open, override_reason: open.length ? data.override_reason : null, legal_hold: data.legal_hold,
+      closed_at: now.toISOString(), by: userName, retain_until: retain.toISOString().slice(0, 10) };
+    await sb.from("ccms_contracts").update({ closure, status: "closed", updated_at: now.toISOString() }).eq("id", c.id);
+    await logEvent(sb, { contract_id: c.id, event_type: "closed", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
+      detail: `Closed${open.length ? ` with override (${open.join(", ")}): ${data.override_reason}` : ""}. Retained to ${closure.retain_until}${data.legal_hold ? " — legal hold" : ""}.${c.vendor_id && works ? " Subcontractor evaluation due." : ""}` });
+    return closure;
   });

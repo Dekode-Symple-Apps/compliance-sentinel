@@ -13,10 +13,18 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as KnowledgeBaseRouteImport } from './routes/knowledge-base'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as VmsIndexRouteImport } from './routes/vms.index'
 import { Route as ReportsIndexRouteImport } from './routes/reports.index'
 import { Route as LegalIndexRouteImport } from './routes/legal.index'
 import { Route as LayoutIndexRouteImport } from './routes/layout.index'
 import { Route as CcmsIndexRouteImport } from './routes/ccms.index'
+import { Route as AmsIndexRouteImport } from './routes/ams.index'
+import { Route as VmsVendorsRouteImport } from './routes/vms.vendors'
+import { Route as VmsRequestsRouteImport } from './routes/vms.requests'
+import { Route as VmsNewRouteImport } from './routes/vms.new'
+import { Route as VmsMonitoringRouteImport } from './routes/vms.monitoring'
+import { Route as VmsRequestIdRouteImport } from './routes/vms.$requestId'
+import { Route as VendorPortalTokenRouteImport } from './routes/vendor-portal.$token'
 import { Route as Simplify2ReportIdRouteImport } from './routes/simplify2.$reportId'
 import { Route as SimplifyReportIdRouteImport } from './routes/simplify.$reportId'
 import { Route as RspoReportIdRouteImport } from './routes/rspo.$reportId'
@@ -35,6 +43,10 @@ import { Route as CcmsNewRouteImport } from './routes/ccms.new'
 import { Route as CcmsContractsRouteImport } from './routes/ccms.contracts'
 import { Route as CcmsContractIdRouteImport } from './routes/ccms.$contractId'
 import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
+import { Route as AmsNewRouteImport } from './routes/ams.new'
+import { Route as AmsDriversRouteImport } from './routes/ams.drivers'
+import { Route as AmsAssetsRouteImport } from './routes/ams.assets'
+import { Route as AmsAssetIdRouteImport } from './routes/ams.$assetId'
 import { Route as ReportsReportIdPresentRouteImport } from './routes/reports.$reportId.present'
 import { Route as LegalReviewDocumentIdRouteImport } from './routes/legal.review.$documentId'
 import { Route as CcmsReviewDocumentIdRouteImport } from './routes/ccms.review.$documentId'
@@ -60,6 +72,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const VmsIndexRoute = VmsIndexRouteImport.update({
+  id: '/vms/',
+  path: '/vms/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ReportsIndexRoute = ReportsIndexRouteImport.update({
   id: '/reports/',
   path: '/reports/',
@@ -78,6 +95,41 @@ const LayoutIndexRoute = LayoutIndexRouteImport.update({
 const CcmsIndexRoute = CcmsIndexRouteImport.update({
   id: '/ccms/',
   path: '/ccms/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AmsIndexRoute = AmsIndexRouteImport.update({
+  id: '/ams/',
+  path: '/ams/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VmsVendorsRoute = VmsVendorsRouteImport.update({
+  id: '/vms/vendors',
+  path: '/vms/vendors',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VmsRequestsRoute = VmsRequestsRouteImport.update({
+  id: '/vms/requests',
+  path: '/vms/requests',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VmsNewRoute = VmsNewRouteImport.update({
+  id: '/vms/new',
+  path: '/vms/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VmsMonitoringRoute = VmsMonitoringRouteImport.update({
+  id: '/vms/monitoring',
+  path: '/vms/monitoring',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VmsRequestIdRoute = VmsRequestIdRouteImport.update({
+  id: '/vms/$requestId',
+  path: '/vms/$requestId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VendorPortalTokenRoute = VendorPortalTokenRouteImport.update({
+  id: '/vendor-portal/$token',
+  path: '/vendor-portal/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
 const Simplify2ReportIdRoute = Simplify2ReportIdRouteImport.update({
@@ -170,6 +222,26 @@ const AuthCallbackRoute = AuthCallbackRouteImport.update({
   path: '/auth/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AmsNewRoute = AmsNewRouteImport.update({
+  id: '/ams/new',
+  path: '/ams/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AmsDriversRoute = AmsDriversRouteImport.update({
+  id: '/ams/drivers',
+  path: '/ams/drivers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AmsAssetsRoute = AmsAssetsRouteImport.update({
+  id: '/ams/assets',
+  path: '/ams/assets',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AmsAssetIdRoute = AmsAssetIdRouteImport.update({
+  id: '/ams/$assetId',
+  path: '/ams/$assetId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ReportsReportIdPresentRoute = ReportsReportIdPresentRouteImport.update({
   id: '/present',
   path: '/present',
@@ -196,6 +268,10 @@ export interface FileRoutesByFullPath {
   '/knowledge-base': typeof KnowledgeBaseRoute
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
+  '/ams/$assetId': typeof AmsAssetIdRoute
+  '/ams/assets': typeof AmsAssetsRoute
+  '/ams/drivers': typeof AmsDriversRoute
+  '/ams/new': typeof AmsNewRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/ccms/$contractId': typeof CcmsContractIdRoute
   '/ccms/contracts': typeof CcmsContractsRoute
@@ -214,10 +290,18 @@ export interface FileRoutesByFullPath {
   '/rspo/$reportId': typeof RspoReportIdRoute
   '/simplify/$reportId': typeof SimplifyReportIdRoute
   '/simplify2/$reportId': typeof Simplify2ReportIdRoute
+  '/vendor-portal/$token': typeof VendorPortalTokenRoute
+  '/vms/$requestId': typeof VmsRequestIdRoute
+  '/vms/monitoring': typeof VmsMonitoringRoute
+  '/vms/new': typeof VmsNewRoute
+  '/vms/requests': typeof VmsRequestsRoute
+  '/vms/vendors': typeof VmsVendorsRoute
+  '/ams/': typeof AmsIndexRoute
   '/ccms/': typeof CcmsIndexRoute
   '/layout/': typeof LayoutIndexRoute
   '/legal/': typeof LegalIndexRoute
   '/reports/': typeof ReportsIndexRoute
+  '/vms/': typeof VmsIndexRoute
   '/auth/google/callback': typeof AuthGoogleCallbackRoute
   '/ccms/review/$documentId': typeof CcmsReviewDocumentIdRoute
   '/legal/review/$documentId': typeof LegalReviewDocumentIdRoute
@@ -228,6 +312,10 @@ export interface FileRoutesByTo {
   '/knowledge-base': typeof KnowledgeBaseRoute
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
+  '/ams/$assetId': typeof AmsAssetIdRoute
+  '/ams/assets': typeof AmsAssetsRoute
+  '/ams/drivers': typeof AmsDriversRoute
+  '/ams/new': typeof AmsNewRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/ccms/$contractId': typeof CcmsContractIdRoute
   '/ccms/contracts': typeof CcmsContractsRoute
@@ -246,10 +334,18 @@ export interface FileRoutesByTo {
   '/rspo/$reportId': typeof RspoReportIdRoute
   '/simplify/$reportId': typeof SimplifyReportIdRoute
   '/simplify2/$reportId': typeof Simplify2ReportIdRoute
+  '/vendor-portal/$token': typeof VendorPortalTokenRoute
+  '/vms/$requestId': typeof VmsRequestIdRoute
+  '/vms/monitoring': typeof VmsMonitoringRoute
+  '/vms/new': typeof VmsNewRoute
+  '/vms/requests': typeof VmsRequestsRoute
+  '/vms/vendors': typeof VmsVendorsRoute
+  '/ams': typeof AmsIndexRoute
   '/ccms': typeof CcmsIndexRoute
   '/layout': typeof LayoutIndexRoute
   '/legal': typeof LegalIndexRoute
   '/reports': typeof ReportsIndexRoute
+  '/vms': typeof VmsIndexRoute
   '/auth/google/callback': typeof AuthGoogleCallbackRoute
   '/ccms/review/$documentId': typeof CcmsReviewDocumentIdRoute
   '/legal/review/$documentId': typeof LegalReviewDocumentIdRoute
@@ -261,6 +357,10 @@ export interface FileRoutesById {
   '/knowledge-base': typeof KnowledgeBaseRoute
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
+  '/ams/$assetId': typeof AmsAssetIdRoute
+  '/ams/assets': typeof AmsAssetsRoute
+  '/ams/drivers': typeof AmsDriversRoute
+  '/ams/new': typeof AmsNewRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/ccms/$contractId': typeof CcmsContractIdRoute
   '/ccms/contracts': typeof CcmsContractsRoute
@@ -279,10 +379,18 @@ export interface FileRoutesById {
   '/rspo/$reportId': typeof RspoReportIdRoute
   '/simplify/$reportId': typeof SimplifyReportIdRoute
   '/simplify2/$reportId': typeof Simplify2ReportIdRoute
+  '/vendor-portal/$token': typeof VendorPortalTokenRoute
+  '/vms/$requestId': typeof VmsRequestIdRoute
+  '/vms/monitoring': typeof VmsMonitoringRoute
+  '/vms/new': typeof VmsNewRoute
+  '/vms/requests': typeof VmsRequestsRoute
+  '/vms/vendors': typeof VmsVendorsRoute
+  '/ams/': typeof AmsIndexRoute
   '/ccms/': typeof CcmsIndexRoute
   '/layout/': typeof LayoutIndexRoute
   '/legal/': typeof LegalIndexRoute
   '/reports/': typeof ReportsIndexRoute
+  '/vms/': typeof VmsIndexRoute
   '/auth/google/callback': typeof AuthGoogleCallbackRoute
   '/ccms/review/$documentId': typeof CcmsReviewDocumentIdRoute
   '/legal/review/$documentId': typeof LegalReviewDocumentIdRoute
@@ -295,6 +403,10 @@ export interface FileRouteTypes {
     | '/knowledge-base'
     | '/login'
     | '/settings'
+    | '/ams/$assetId'
+    | '/ams/assets'
+    | '/ams/drivers'
+    | '/ams/new'
     | '/auth/callback'
     | '/ccms/$contractId'
     | '/ccms/contracts'
@@ -313,10 +425,18 @@ export interface FileRouteTypes {
     | '/rspo/$reportId'
     | '/simplify/$reportId'
     | '/simplify2/$reportId'
+    | '/vendor-portal/$token'
+    | '/vms/$requestId'
+    | '/vms/monitoring'
+    | '/vms/new'
+    | '/vms/requests'
+    | '/vms/vendors'
+    | '/ams/'
     | '/ccms/'
     | '/layout/'
     | '/legal/'
     | '/reports/'
+    | '/vms/'
     | '/auth/google/callback'
     | '/ccms/review/$documentId'
     | '/legal/review/$documentId'
@@ -327,6 +447,10 @@ export interface FileRouteTypes {
     | '/knowledge-base'
     | '/login'
     | '/settings'
+    | '/ams/$assetId'
+    | '/ams/assets'
+    | '/ams/drivers'
+    | '/ams/new'
     | '/auth/callback'
     | '/ccms/$contractId'
     | '/ccms/contracts'
@@ -345,10 +469,18 @@ export interface FileRouteTypes {
     | '/rspo/$reportId'
     | '/simplify/$reportId'
     | '/simplify2/$reportId'
+    | '/vendor-portal/$token'
+    | '/vms/$requestId'
+    | '/vms/monitoring'
+    | '/vms/new'
+    | '/vms/requests'
+    | '/vms/vendors'
+    | '/ams'
     | '/ccms'
     | '/layout'
     | '/legal'
     | '/reports'
+    | '/vms'
     | '/auth/google/callback'
     | '/ccms/review/$documentId'
     | '/legal/review/$documentId'
@@ -359,6 +491,10 @@ export interface FileRouteTypes {
     | '/knowledge-base'
     | '/login'
     | '/settings'
+    | '/ams/$assetId'
+    | '/ams/assets'
+    | '/ams/drivers'
+    | '/ams/new'
     | '/auth/callback'
     | '/ccms/$contractId'
     | '/ccms/contracts'
@@ -377,10 +513,18 @@ export interface FileRouteTypes {
     | '/rspo/$reportId'
     | '/simplify/$reportId'
     | '/simplify2/$reportId'
+    | '/vendor-portal/$token'
+    | '/vms/$requestId'
+    | '/vms/monitoring'
+    | '/vms/new'
+    | '/vms/requests'
+    | '/vms/vendors'
+    | '/ams/'
     | '/ccms/'
     | '/layout/'
     | '/legal/'
     | '/reports/'
+    | '/vms/'
     | '/auth/google/callback'
     | '/ccms/review/$documentId'
     | '/legal/review/$documentId'
@@ -392,6 +536,10 @@ export interface RootRouteChildren {
   KnowledgeBaseRoute: typeof KnowledgeBaseRoute
   LoginRoute: typeof LoginRoute
   SettingsRoute: typeof SettingsRoute
+  AmsAssetIdRoute: typeof AmsAssetIdRoute
+  AmsAssetsRoute: typeof AmsAssetsRoute
+  AmsDriversRoute: typeof AmsDriversRoute
+  AmsNewRoute: typeof AmsNewRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
   CcmsContractIdRoute: typeof CcmsContractIdRoute
   CcmsContractsRoute: typeof CcmsContractsRoute
@@ -410,10 +558,18 @@ export interface RootRouteChildren {
   RspoReportIdRoute: typeof RspoReportIdRoute
   SimplifyReportIdRoute: typeof SimplifyReportIdRoute
   Simplify2ReportIdRoute: typeof Simplify2ReportIdRoute
+  VendorPortalTokenRoute: typeof VendorPortalTokenRoute
+  VmsRequestIdRoute: typeof VmsRequestIdRoute
+  VmsMonitoringRoute: typeof VmsMonitoringRoute
+  VmsNewRoute: typeof VmsNewRoute
+  VmsRequestsRoute: typeof VmsRequestsRoute
+  VmsVendorsRoute: typeof VmsVendorsRoute
+  AmsIndexRoute: typeof AmsIndexRoute
   CcmsIndexRoute: typeof CcmsIndexRoute
   LayoutIndexRoute: typeof LayoutIndexRoute
   LegalIndexRoute: typeof LegalIndexRoute
   ReportsIndexRoute: typeof ReportsIndexRoute
+  VmsIndexRoute: typeof VmsIndexRoute
   AuthGoogleCallbackRoute: typeof AuthGoogleCallbackRoute
   CcmsReviewDocumentIdRoute: typeof CcmsReviewDocumentIdRoute
   LegalReviewDocumentIdRoute: typeof LegalReviewDocumentIdRoute
@@ -449,6 +605,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/vms/': {
+      id: '/vms/'
+      path: '/vms'
+      fullPath: '/vms/'
+      preLoaderRoute: typeof VmsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/reports/': {
       id: '/reports/'
       path: '/reports'
@@ -475,6 +638,55 @@ declare module '@tanstack/react-router' {
       path: '/ccms'
       fullPath: '/ccms/'
       preLoaderRoute: typeof CcmsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ams/': {
+      id: '/ams/'
+      path: '/ams'
+      fullPath: '/ams/'
+      preLoaderRoute: typeof AmsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/vms/vendors': {
+      id: '/vms/vendors'
+      path: '/vms/vendors'
+      fullPath: '/vms/vendors'
+      preLoaderRoute: typeof VmsVendorsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/vms/requests': {
+      id: '/vms/requests'
+      path: '/vms/requests'
+      fullPath: '/vms/requests'
+      preLoaderRoute: typeof VmsRequestsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/vms/new': {
+      id: '/vms/new'
+      path: '/vms/new'
+      fullPath: '/vms/new'
+      preLoaderRoute: typeof VmsNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/vms/monitoring': {
+      id: '/vms/monitoring'
+      path: '/vms/monitoring'
+      fullPath: '/vms/monitoring'
+      preLoaderRoute: typeof VmsMonitoringRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/vms/$requestId': {
+      id: '/vms/$requestId'
+      path: '/vms/$requestId'
+      fullPath: '/vms/$requestId'
+      preLoaderRoute: typeof VmsRequestIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/vendor-portal/$token': {
+      id: '/vendor-portal/$token'
+      path: '/vendor-portal/$token'
+      fullPath: '/vendor-portal/$token'
+      preLoaderRoute: typeof VendorPortalTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/simplify2/$reportId': {
@@ -603,6 +815,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/ams/new': {
+      id: '/ams/new'
+      path: '/ams/new'
+      fullPath: '/ams/new'
+      preLoaderRoute: typeof AmsNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ams/drivers': {
+      id: '/ams/drivers'
+      path: '/ams/drivers'
+      fullPath: '/ams/drivers'
+      preLoaderRoute: typeof AmsDriversRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ams/assets': {
+      id: '/ams/assets'
+      path: '/ams/assets'
+      fullPath: '/ams/assets'
+      preLoaderRoute: typeof AmsAssetsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ams/$assetId': {
+      id: '/ams/$assetId'
+      path: '/ams/$assetId'
+      fullPath: '/ams/$assetId'
+      preLoaderRoute: typeof AmsAssetIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/reports/$reportId/present': {
       id: '/reports/$reportId/present'
       path: '/present'
@@ -651,6 +891,10 @@ const rootRouteChildren: RootRouteChildren = {
   KnowledgeBaseRoute: KnowledgeBaseRoute,
   LoginRoute: LoginRoute,
   SettingsRoute: SettingsRoute,
+  AmsAssetIdRoute: AmsAssetIdRoute,
+  AmsAssetsRoute: AmsAssetsRoute,
+  AmsDriversRoute: AmsDriversRoute,
+  AmsNewRoute: AmsNewRoute,
   AuthCallbackRoute: AuthCallbackRoute,
   CcmsContractIdRoute: CcmsContractIdRoute,
   CcmsContractsRoute: CcmsContractsRoute,
@@ -669,10 +913,18 @@ const rootRouteChildren: RootRouteChildren = {
   RspoReportIdRoute: RspoReportIdRoute,
   SimplifyReportIdRoute: SimplifyReportIdRoute,
   Simplify2ReportIdRoute: Simplify2ReportIdRoute,
+  VendorPortalTokenRoute: VendorPortalTokenRoute,
+  VmsRequestIdRoute: VmsRequestIdRoute,
+  VmsMonitoringRoute: VmsMonitoringRoute,
+  VmsNewRoute: VmsNewRoute,
+  VmsRequestsRoute: VmsRequestsRoute,
+  VmsVendorsRoute: VmsVendorsRoute,
+  AmsIndexRoute: AmsIndexRoute,
   CcmsIndexRoute: CcmsIndexRoute,
   LayoutIndexRoute: LayoutIndexRoute,
   LegalIndexRoute: LegalIndexRoute,
   ReportsIndexRoute: ReportsIndexRoute,
+  VmsIndexRoute: VmsIndexRoute,
   AuthGoogleCallbackRoute: AuthGoogleCallbackRoute,
   CcmsReviewDocumentIdRoute: CcmsReviewDocumentIdRoute,
   LegalReviewDocumentIdRoute: LegalReviewDocumentIdRoute,

@@ -28,7 +28,21 @@ export const CCMS_ROLES = {
   contract_manager:   "Contract Manager",
   committee:          "Audit & Risk Mgmt Committee",
   approver:           "Approver",
+  purchasing_executive: "Purchasing Executive",
+  purchasing_manager: "Purchasing Manager",
+  compliance:         "Compliance",
+  accounts:           "Accounts",
+  head_contracts:     "Head of Contracts & Procurement",
+  operations_manager: "Operations Manager",
+  head_of_department: "Head of Department",
+  safety_health:      "Safety and Health",
 } as const;
+/** The personas grouped by module, for the "Acting as" switcher. */
+export const ROLE_GROUPS: { label: string; roles: (keyof typeof CCMS_ROLES)[] }[] = [
+  { label: "Contracts", roles: ["requestor", "contract_executive", "legal", "finance", "contract_manager", "committee", "approver"] },
+  { label: "Vendors", roles: ["purchasing_executive", "purchasing_manager", "compliance", "accounts", "head_contracts"] },
+  { label: "Assets", roles: ["operations_manager", "head_of_department", "safety_health"] },
+];
 export type CcmsRole = keyof typeof CCMS_ROLES;
 /** The author role on comment threads the AI review opens. Not a persona. */
 export const AI_ROLE = "ai_reviewer";
@@ -123,7 +137,7 @@ export const SLA_DAYS = { legal: 5, finance: 3, approval: 3, contract_executive:
 // ── flags ────────────────────────────────────────────────────────────────────
 export type FlagKey =
   | "related_party" | "it_service" | "high_risk_vendor" | "deviation" | "non_standard"
-  | "cross_border_data" | "dd_expired" | "vendor_not_approved" | "loa_items_missing" | "work_order_cap";
+  | "cross_border_data" | "dd_expired" | "vendor_not_approved" | "loa_items_missing" | "work_order_cap" | "vendor_on_hold";
 export const FLAG_META: Record<FlagKey, { label: string; severity: "high" | "medium"; effect: string }> = {
   related_party:       { label: "Related-party transaction", severity: "high",   effect: "Audit & Risk Management Committee, then the non-interested Board" },
   it_service:          { label: "IT service agreement",      severity: "medium", effect: "Legal vetting, then the Board" },
@@ -135,15 +149,16 @@ export const FLAG_META: Record<FlagKey, { label: string; severity: "high" | "med
   vendor_not_approved: { label: "Vendor not approved",       severity: "high",   effect: "Cannot be approved until the vendor is approved" },
   loa_items_missing:   { label: "Letter of Award items missing", severity: "high", effect: "Legal vetting; the missing items must be added" },
   work_order_cap:      { label: "Work Order over RM500,000",  severity: "high",   effect: "Must be issued as a Letter of Award or contract instead" },
+  vendor_on_hold:      { label: "Vendor on compliance hold", severity: "high",   effect: "No new award or renewal until the vendor's credentials are current" },
 };
 /** Flags that stop approval outright, rather than adding a reviewer. */
-export const BLOCKING_FLAGS: FlagKey[] = ["dd_expired", "vendor_not_approved", "work_order_cap"];
+export const BLOCKING_FLAGS: FlagKey[] = ["dd_expired", "vendor_not_approved", "work_order_cap", "vendor_on_hold"];
 
 export interface Flag { key: FlagKey; source: "platform" | "ai"; detail: string }
 
 export interface VendorLite {
   name: string; status: string; dd_valid_until: string | null; risk_rating: string | null;
-  related_party: boolean; related_party_note?: string | null;
+  related_party: boolean; related_party_note?: string | null; compliance_hold?: boolean; hold_reason?: string | null;
 }
 export interface FlagInput {
   contract_type: string; value_myr: number | null; personal_data_cross_border: boolean;
@@ -160,7 +175,8 @@ export function computeFlags(c: FlagInput, vendor: VendorLite | null, today = ne
   if (t?.itService) out.push({ key: "it_service", source: "platform", detail: "Contract type is an IT service agreement." });
   if (vendor?.risk_rating === "high") out.push({ key: "high_risk_vendor", source: "platform", detail: `${vendor.name} is rated high risk.` });
   if (c.personal_data_cross_border) out.push({ key: "cross_border_data", source: "platform", detail: "Requestor declared that personal data will be transferred outside Malaysia." });
-  if (vendor && vendor.status !== "approved") out.push({ key: "vendor_not_approved", source: "platform", detail: `${vendor.name} is ${vendor.status.replace("_", " ")}.` });
+  if (vendor && !["approved", "conditional"].includes(vendor.status)) out.push({ key: "vendor_not_approved", source: "platform", detail: `${vendor.name} is ${vendor.status.replace("_", " ")}.` });
+  if (vendor?.compliance_hold) out.push({ key: "vendor_on_hold", source: "platform", detail: vendor.hold_reason || `${vendor.name} is on compliance hold.` });
   if (vendor?.dd_valid_until && new Date(vendor.dd_valid_until) < today) out.push({ key: "dd_expired", source: "platform", detail: `Due diligence expired on ${vendor.dd_valid_until}.` });
   if (t?.capMyr && (c.value_myr ?? 0) > t.capMyr) out.push({ key: "work_order_cap", source: "platform", detail: `Value exceeds the RM${t.capMyr.toLocaleString()} Work Order cap.` });
   if (c.review?.deviation) out.push({ key: "deviation", source: "ai", detail: "The draft departs from the approved template — see the deviation report." });
@@ -461,6 +477,7 @@ export function contractMilestones(c: any, docs: any[], events: any[], compariso
   push("stamped", "Stamped", stamped, !stamped && signed ? `day ${daysBetween(c.signed_date, new Date())} of 30` : undefined, c.stamping?.stamped_date);
   push("securities", "Bonds & insurance", secOk, secs.length ? (secOk ? "payment-ready" : "incomplete") : undefined);
   push("repository", "In repository", inRepo, c.expiry_date ? `expires ${c.expiry_date}` : undefined);
+  push("closed", "Closed", c.status === "closed", c.closure?.retain_until ? `kept to ${c.closure.retain_until}` : undefined);
 
   let currentSet = false;
   const stages: Milestone[] = (list as any[]).map((m) => {
@@ -484,6 +501,10 @@ export function contractMilestones(c: any, docs: any[], events: any[], compariso
     stamped: { text: "Record stamping — within 30 days of signing", role: "contract_executive" },
     securities: { text: "Record the bond, insurance and levy (with amounts and expiry dates)", role: "finance" },
     repository: { text: "Confirm the key terms the AI read from the signed copy and save to the repository", role: "contract_executive" },
+    closed: { text: "Before expiry: renew, renegotiate or let it end — then close it out (payments, retention, bonds, defects)", role: "contract_manager" },
   };
   return { stages, next: c.status === "rejected" ? null : cur ? next[cur] ?? null : null };
 }
+
+export const fmtMoneyPlain = (v: number | null | undefined) =>
+  typeof v === "number" ? `RM${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : "—";

@@ -50,12 +50,25 @@ const COMMERCIAL_NAV: NavItem[] = [
   { to: "/ccms/repository", label: "Repository", icon: Library, match: (p) => p.startsWith("/ccms/repository") },
   { to: "/ccms/templates", label: "Templates", icon: FileText, match: (p) => p.startsWith("/ccms/templates") },
 ];
+const VMS_NAV: NavItem[] = [
+  { to: "/vms", label: "Dashboard", icon: LayoutDashboard, match: (p) => p === "/vms" || p === "/vms/" },
+  { to: "/vms/requests", label: "Requests", icon: ClipboardList, match: (p) => p.startsWith("/vms/requests") || p === "/vms/new" || /^\/vms\/(?!requests|vendors|monitoring|new)[^/]+/.test(p) },
+  { to: "/vms/vendors", label: "Vendors", icon: Building2, match: (p) => p.startsWith("/vms/vendors") },
+  { to: "/vms/monitoring", label: "Monitoring", icon: ShieldCheck, match: (p) => p.startsWith("/vms/monitoring") },
+];
+const AMS_NAV: NavItem[] = [
+  { to: "/ams", label: "Dashboard", icon: LayoutDashboard, match: (p) => p === "/ams" || p === "/ams/" },
+  { to: "/ams/assets", label: "Assets", icon: Layers, match: (p) => p.startsWith("/ams/assets") || p === "/ams/new" || /^\/ams\/(?!assets|drivers|new)[^/]+/.test(p) },
+  { to: "/ams/drivers", label: "Drivers", icon: UserRound, match: (p) => p.startsWith("/ams/drivers") },
+];
 const SETTINGS_ITEM: NavItem = { to: "/settings", label: "Settings", icon: Settings };
 
 /** The product a path belongs to, for the page-level switch. */
 function productFor(pathname: string): { key: string; name: string } | null {
   if (pathname.startsWith("/legal")) return { key: "legal_cms", name: "Legal CMS" };
   if (pathname.startsWith("/ccms")) return { key: "commercial_cms", name: "Commercial CMS" };
+  if (pathname.startsWith("/vms")) return { key: "vendor_management", name: "Vendor Management" };
+  if (pathname.startsWith("/ams")) return { key: "asset_monitoring", name: "Asset Monitoring" };
   return null;
 }
 
@@ -86,9 +99,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const NAV_GROUPS = [
     { label: "DMS", items: dmsNav },
     ...(tenant.features.includes("legal_cms") ? [{ label: "Legal CMS", items: LEGAL_NAV }] : []),
-    ...(tenant.features.includes("commercial_cms") ? [{ label: "Commercial CMS", items: COMMERCIAL_NAV }] : []),
+    // With Vendor Management on, vendors live there; the contracts group drops its interim list.
+    ...(tenant.features.includes("commercial_cms") ? [{ label: "Commercial CMS", items: tenant.features.includes("vendor_management") ? COMMERCIAL_NAV.filter((n) => n.to !== "/ccms/vendors") : COMMERCIAL_NAV }] : []),
+    ...(tenant.features.includes("vendor_management") ? [{ label: "Vendor Management", items: VMS_NAV }] : []),
+    ...(tenant.features.includes("asset_monitoring") ? [{ label: "Asset Monitoring", items: AMS_NAV }] : []),
   ];
-  const currentNav = [...dmsNav, ...LEGAL_NAV, ...COMMERCIAL_NAV, SETTINGS_ITEM].find((n) => navActive(n, loc.pathname));
+  const currentNav = [...dmsNav, ...LEGAL_NAV, ...COMMERCIAL_NAV, ...VMS_NAV, ...AMS_NAV, SETTINGS_ITEM].find((n) => navActive(n, loc.pathname));
   // A product switched off for this organisation: its pages refuse to render,
   // not just its menu (the server functions refuse too).
   const product = productFor(loc.pathname);
@@ -98,7 +114,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // nav and routes are workspace-independent and carry their own Submitter /
   // General Counsel / Reviewer switcher in LegalHeader, so both would be dead
   // controls (and a confusing second "viewing as") inside Legal CMS.
-  const isLegalCms = loc.pathname.startsWith("/legal") || loc.pathname.startsWith("/ccms");
+  const isLegalCms = ["/legal", "/ccms", "/vms", "/ams"].some((p) => loc.pathname.startsWith(p));
 
   const [collapsed, setCollapsed] = useState(false);
   useEffect(() => {

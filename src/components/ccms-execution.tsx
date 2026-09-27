@@ -6,8 +6,8 @@ import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import {
-  attachCcmsDocument, extractCcmsKeyTerms, recordCcmsConfirmation, recordCcmsSigned, recordCcmsStamping,
-  saveCcmsRepository, saveCcmsSecurities,
+  attachCcmsDocument, closeCcmsContract, decideCcmsChange, decideCcmsRenewal, extractCcmsKeyTerms, raiseCcmsChange,
+  recordCcmsConfirmation, recordCcmsSigned, recordCcmsStamping, saveCcmsRepository, saveCcmsSecurities,
 } from "@/lib/ccms.functions";
 import {
   CCMS_ROLES, COMPARISON_AREAS, DECISION_LABEL, SECURITY_TYPES, contractAlerts, contractMilestones, daysBetween,
@@ -325,6 +325,134 @@ function RepositoryStep({ c, onDone }: { c: any; onDone: () => void }) {
       )}
       {saved && c.repository && (
         <p className="pl-7 text-sm text-gray-700">{fmtMoney(c.repository.value, c.repository.currency)} · {c.repository.start_date ?? "—"} to {c.repository.end_date} · {c.repository.notice_period || "no notice period stated"}</p>
+      )}
+    </div>
+  );
+}
+
+// ── CMS-03: changes, renewal, closure ────────────────────────────────────────
+
+export function LifecyclePanel({ c, onDone }: { c: any; onDone: () => void }) {
+  if (!["signed", "stamped", "active", "closed"].includes(c.status)) return null;
+  return (
+    <section className={CARD}>
+      <div className="px-4 py-3 border-b border-gray-200">
+        <h2 className="text-sm font-semibold text-gray-900">Changes, renewal and closure</h2>
+      </div>
+      <div className="divide-y divide-gray-100">
+        <ChangesStep c={c} onDone={onDone} />
+        {c.status === "active" && <RenewalStep c={c} onDone={onDone} />}
+        {(c.status === "active" || c.status === "closed") && <ClosureStep c={c} onDone={onDone} />}
+      </div>
+    </section>
+  );
+}
+
+function ChangesStep({ c, onDone }: { c: any; onDone: () => void }) {
+  const [role] = useCcmsRole();
+  const raiseFn = useServerFn(raiseCcmsChange);
+  const decideFn = useServerFn(decideCcmsChange);
+  const [busy, setBusy] = useState(false);
+  const [f, setF] = useState({ kind: "scope", description: "", value_impact: "", deviates: false });
+  const changes: any[] = c.changes ?? [];
+  const act = (id: string, stage: "legal" | "approval" | "signed", outcome: "cleared" | "approved" | "rejected" | "signed") =>
+    run(decideFn({ data: { contract_id: c.id, change_id: id, stage, outcome, acting_role: role, note: outcome === "rejected" ? "Rejected" : null } }), "Recorded", onDone, setBusy);
+  return (
+    <div className="px-4 py-3 space-y-2 text-sm">
+      <div className="font-semibold text-gray-900">Change requests</div>
+      {changes.length === 0 && <p className="text-gray-500">None.</p>}
+      {changes.map((x) => (
+        <div key={x.id} className="rounded-md border border-gray-200 p-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold">{x.id}</span><span className="text-gray-600">{x.kind}</span>
+            <span className="text-gray-900">{x.value_impact >= 0 ? "+" : ""}{fmtMoney(x.value_impact)} → {fmtMoney(x.new_total)}</span>
+            <span className="text-gray-500">· {x.band}</span>
+            <span className={cn("ml-auto text-xs font-semibold", x.signed ? "text-emerald-700" : x.approval === "rejected" ? "text-red-700" : "text-amber-700")}>
+              {x.signed ? "Appendix signed" : x.approval === "rejected" ? "Rejected" : x.legal === "pending" ? "Legal vetting" : x.approval === "pending" ? `Awaiting ${x.band}` : "Approved — sign appendix"}
+            </span>
+          </div>
+          <p className="mt-1 text-gray-800">{x.description}</p>
+          {!x.signed && x.approval !== "rejected" && (
+            <div className="mt-1.5 flex gap-2">
+              {x.legal === "pending" && role === "legal" && <><Button size="sm" disabled={busy} onClick={() => act(x.id, "legal", "cleared")}>Legal: clear</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => act(x.id, "legal", "rejected")}>Reject</Button></>}
+              {x.legal !== "pending" && x.approval === "pending" && role === "approver" && <><Button size="sm" disabled={busy} onClick={() => act(x.id, "approval", "approved")}>Approve</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => act(x.id, "approval", "rejected")}>Reject</Button></>}
+              {x.approval === "approved" && role === "contract_executive" && <Button size="sm" disabled={busy} onClick={() => act(x.id, "signed", "signed")}>Record signed appendix</Button>}
+            </div>
+          )}
+        </div>
+      ))}
+      {role === "contract_executive" && c.status !== "closed" && (
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <select className={INPUT} value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}>
+            <option value="scope">Scope</option><option value="rate">Rate</option><option value="quantity">Quantity</option><option value="time">Time</option>
+          </select>
+          <input className={INPUT + " flex-1 min-w-60"} placeholder="What changes, and why" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
+          <input className={INPUT + " w-32"} placeholder="Value ± RM" value={f.value_impact} onChange={(e) => setF({ ...f, value_impact: e.target.value })} />
+          <label className="flex items-center gap-1 text-gray-700"><input type="checkbox" checked={f.deviates} onChange={(e) => setF({ ...f, deviates: e.target.checked })} /> departs from the template</label>
+          <Button size="sm" disabled={busy || f.description.trim().length < 5} onClick={() => run(raiseFn({ data: { contract_id: c.id, kind: f.kind as any, description: f.description, value_impact: Number(f.value_impact || 0), deviates_template: f.deviates, acting_role: role } }), "Change raised", () => { setF({ kind: "scope", description: "", value_impact: "", deviates: false }); onDone(); }, setBusy)}>Raise change</Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RenewalStep({ c, onDone }: { c: any; onDone: () => void }) {
+  const [role] = useCcmsRole();
+  const renewFn = useServerFn(decideCcmsRenewal);
+  const [busy, setBusy] = useState(false);
+  const [newEnd, setNewEnd] = useState("");
+  const [note, setNote] = useState("");
+  const can = role === "approver" || role === "contract_manager";
+  const d = c.expiry_date ? daysBetween(new Date(), c.expiry_date) : null;
+  return (
+    <div className="px-4 py-3 space-y-2 text-sm">
+      <div className="flex items-center gap-2">
+        <span className="font-semibold text-gray-900">Renewal</span>
+        {d != null && <span className={cn(d <= 30 ? "text-red-700 font-semibold" : "text-gray-600")}>{d < 0 ? `expired ${-d} days ago` : `${d} days to expiry`}</span>}
+        {c.renewal && <span className="ml-auto text-gray-600">{c.renewal.decision} · {displayName(c.renewal.by)}{c.renewal.new_end ? ` · to ${c.renewal.new_end}` : ""}</span>}
+      </div>
+      {can ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <input type="date" className={INPUT} value={newEnd} onChange={(e) => setNewEnd(e.target.value)} title="New expiry, if renewing" />
+          <input className={INPUT + " flex-1 min-w-60"} placeholder="Note" value={note} onChange={(e) => setNote(e.target.value)} />
+          <Button size="sm" disabled={busy} onClick={() => run(renewFn({ data: { contract_id: c.id, decision: "renew", new_end: newEnd || null, note, acting_role: role } }), "Renewed", onDone, setBusy)}>Renew</Button>
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => run(renewFn({ data: { contract_id: c.id, decision: "renegotiate", note, acting_role: role } }), "Recorded", onDone, setBusy)}>Renegotiate</Button>
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => run(renewFn({ data: { contract_id: c.id, decision: "terminate", note, acting_role: role } }), "Recorded", onDone, setBusy)}>Let it end</Button>
+        </div>
+      ) : <p className="text-gray-500">Switch "Acting as" to Approver or Contract Manager to decide. Renewal re-checks the vendor first.</p>}
+    </div>
+  );
+}
+
+function ClosureStep({ c, onDone }: { c: any; onDone: () => void }) {
+  const [role] = useCcmsRole();
+  const closeFn = useServerFn(closeCcmsContract);
+  const [busy, setBusy] = useState(false);
+  const [k, setK] = useState({ payments: false, retention_cpc: "", retention_cmgd: "", bonds_returned: false, defects_closed: false, obligations_met: false });
+  const [override, setOverride] = useState("");
+  const [hold, setHold] = useState(false);
+  if (c.status === "closed") {
+    return <div className="px-4 py-3 text-sm"><span className="font-semibold text-gray-900">Closed</span> <span className="text-gray-600">{c.closure?.closed_at?.slice(0, 10)} · {displayName(c.closure?.by)} · kept to {c.closure?.retain_until}{c.closure?.legal_hold ? " · legal hold" : ""}{c.closure?.override_reason ? ` · override: ${c.closure.override_reason}` : ""}</span></div>;
+  }
+  const box = (key: "payments" | "bonds_returned" | "defects_closed" | "obligations_met", label: string) => (
+    <label className="flex items-center gap-1.5"><input type="checkbox" checked={k[key]} onChange={(e) => setK({ ...k, [key]: e.target.checked })} /> {label}</label>
+  );
+  return (
+    <div className="px-4 py-3 space-y-2 text-sm">
+      <div className="font-semibold text-gray-900">Close out</div>
+      {role !== "contract_manager" ? <p className="text-gray-500">Switch "Acting as" to Contract Manager to close.</p> : (
+        <>
+          <div className="flex flex-wrap gap-4">{box("payments", "Final payments made")}{box("bonds_returned", "Bonds returned")}{box("defects_closed", "Defects closed")}{box("obligations_met", "Obligations met")}</div>
+          <div className="flex flex-wrap gap-2">
+            <input className={INPUT + " w-72"} placeholder="Retention 1st half — CPC reference" value={k.retention_cpc} onChange={(e) => setK({ ...k, retention_cpc: e.target.value })} />
+            <input className={INPUT + " w-80"} placeholder="Retention 2nd half — CMGD + final account ref." value={k.retention_cmgd} onChange={(e) => setK({ ...k, retention_cmgd: e.target.value })} />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input className={INPUT + " flex-1 min-w-60"} placeholder="Override reason (only if something is still open)" value={override} onChange={(e) => setOverride(e.target.value)} />
+            <label className="flex items-center gap-1.5"><input type="checkbox" checked={hold} onChange={(e) => setHold(e.target.checked)} /> Legal hold</label>
+            <Button size="sm" disabled={busy} onClick={() => run(closeFn({ data: { contract_id: c.id, checklist: k, override_reason: override || null, legal_hold: hold, acting_role: role } }), "Contract closed", onDone, setBusy)}>Close contract</Button>
+          </div>
+        </>
       )}
     </div>
   );

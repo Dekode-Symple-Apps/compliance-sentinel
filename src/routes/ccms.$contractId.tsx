@@ -8,7 +8,7 @@ import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { TemplateFieldsForm } from "@/components/ccms-template-form";
-import { CommentBody, ConfirmationPanel, ExecutionPanel, Milestones } from "@/components/ccms-execution";
+import { CommentBody, ConfirmationPanel, ExecutionPanel, LifecyclePanel, Milestones } from "@/components/ccms-execution";
 import { supabase } from "@/integrations/supabase/client";
 import {
   attachCcmsDocument, decideCcmsApproval, generateCcmsDraft, getCcmsContract, recordCcmsSentToCounterparty, resubmitCcmsContract, reviewCcmsDocument,
@@ -76,6 +76,7 @@ function ContractDetail() {
             <ActionPanel c={c} route={route} flags={flags} openThreads={openThreads.length} latestDraft={latestDraft} documents={documents} events={events} onDone={refresh} />
             {c.side === "client" && <ConfirmationPanel c={c} documents={documents} onDone={refresh} />}
             <ExecutionPanel c={c} documents={documents} onDone={refresh} />
+            <LifecyclePanel c={c} onDone={refresh} />
 
             {/* Route */}
             <section className={CARD}>

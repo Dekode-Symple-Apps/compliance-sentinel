@@ -934,6 +934,8 @@ type TenantFormState = {
 const FEATURE_LABELS: Record<string, string> = {
   legal_cms: "Legal CMS",
   commercial_cms: "Commercial CMS",
+  vendor_management: "Vendor Management",
+  asset_monitoring: "Asset Monitoring",
   rudy: "Rudy.ai assistant",
   create_document: "Create documents",
 };
