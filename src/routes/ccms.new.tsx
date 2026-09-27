@@ -10,8 +10,9 @@ import {
   attachCcmsDocument, createCcmsContract, generateCcmsDraft, listCcmsVendors, reviewCcmsDocument,
 } from "@/lib/ccms.functions";
 import { CcmsHeader, FlagChips, CARD, useCcmsRole, fmtMoney } from "@/components/ccms-widgets";
+import { TemplateFieldsForm } from "@/components/ccms-template-form";
 import {
-  CONTRACT_TYPES, LSH_ENTITIES, FX_TO_MYR, ENTITY_DETAILS, NDA_FIELDS, buildRoute, computeFlags, fillNda, templateById, toMyr,
+  CONTRACT_TYPES, LSH_ENTITIES, FX_TO_MYR, ENTITY_DETAILS, buildRoute, computeFlags, fillNda, templateById, toMyr,
 } from "@/lib/ccms";
 import { Loader2, Upload, ArrowRight } from "lucide-react";
 
@@ -211,32 +212,11 @@ function NewRequest() {
             {tpl && draftMode === "generate" ? (
               <div className="rounded-md border border-gray-200 p-4 space-y-4">
                 <p className="text-sm text-gray-700">The draft is the approved template word for word, with these particulars in the parties block and Schedule 1. Anything left blank shows as [●] in the draft.</p>
-                {(["Agreement", "The Company", "Counterparty"] as const).map((g) => (
-                  <div key={g}>
-                    <div className="text-sm font-semibold text-gray-900 mb-2">{g}</div>
-                    <div className="grid grid-cols-2 gap-3">
-                      {NDA_FIELDS.filter((x) => x.group === g).map((x) => (
-                        <div key={x.key} className={x.kind === "textarea" ? "col-span-2" : ""}>
-                          <label className={LABEL}>{x.label}{x.required && <span className="text-red-700"> *</span>}</label>
-                          {x.kind === "select" ? (
-                            <select className={INPUT} value={tf[x.key] ?? ""} onChange={(e) => setT(x.key, e.target.value)}>
-                              {x.options!.map((o) => <option key={o}>{o}</option>)}
-                            </select>
-                          ) : x.kind === "textarea" ? (
-                            <textarea className={INPUT + " min-h-16"} value={tf[x.key] ?? (x.key === "purpose" ? f.scope_summary : "")} onChange={(e) => setT(x.key, e.target.value)} />
-                          ) : (
-                            <input className={INPUT} type={x.kind === "date" ? "date" : "text"} value={tf[x.key] ?? ""} onChange={(e) => setT(x.key, e.target.value)} />
-                          )}
-                          {x.hint && <p className="mt-0.5 text-xs text-gray-500">{x.hint}</p>}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+                <TemplateFieldsForm values={tf} onChange={setT} fallbackPurpose={f.scope_summary} />
                 {(() => {
                   const miss = fillNda(f.entity, { ...tf, purpose: tf.purpose || f.scope_summary }).missing;
                   return miss.length
-                    ? <p className="text-sm text-amber-700">Still blank: {miss.join(", ")}. You can generate now and complete these later.</p>
+                    ? <p className="text-sm text-amber-700">Still blank — {miss.join("; ")} — shown as [●] in the draft. You can generate now and regenerate from the contract page once you have them.</p>
                     : <p className="text-sm text-emerald-700">All particulars filled — the draft will be ready to send.</p>;
                 })()}
               </div>

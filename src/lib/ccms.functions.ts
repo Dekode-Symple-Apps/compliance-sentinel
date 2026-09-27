@@ -200,7 +200,7 @@ export const getCcmsContract = createServerFn({ method: "GET" })
     const contract = await loadContract(sb, data.id, tenantId);
     const [vendor, docs, comments, reviews, events] = await Promise.all([
       loadVendor(sb, contract.vendor_id, tenantId),
-      sb.from("ccms_documents").select("id,contract_id,file_name,file_url,mime_type,size_bytes,doc_role,version,ai_review_status,uploaded_by_name,created_at,ai_review->verdict,ai_review->riskScore,ai_review->summary,ai_review->generated")
+      sb.from("ccms_documents").select("id,contract_id,file_name,file_url,mime_type,size_bytes,doc_role,version,ai_review_status,uploaded_by_name,created_at,ai_review->verdict,ai_review->riskScore,ai_review->summary,ai_review->generated,ai_review->fields")
         .eq("contract_id", data.id).order("created_at", { ascending: false }),
       sb.from("ccms_comments").select("*").eq("contract_id", data.id).order("created_at"),
       sb.from("ccms_reviews").select("*").eq("contract_id", data.id).order("created_at"),

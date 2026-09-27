@@ -6,15 +6,17 @@ import { toast } from "sonner";
 import { format } from "date-fns";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { TemplateFieldsForm } from "@/components/ccms-template-form";
 import { supabase } from "@/integrations/supabase/client";
 import {
-  attachCcmsDocument, decideCcmsApproval, getCcmsContract, recordCcmsSentToCounterparty, resubmitCcmsContract, reviewCcmsDocument,
+  attachCcmsDocument, decideCcmsApproval, generateCcmsDraft, getCcmsContract, recordCcmsSentToCounterparty, resubmitCcmsContract, reviewCcmsDocument,
 } from "@/lib/ccms.functions";
 import {
   CcmsHeader, StatusBadge, OutcomeText, SlaText, CARD, TH, TD, fmtMoney, useCcmsRole,
 } from "@/components/ccms-widgets";
 import {
-  AI_ROLE, CCMS_ROLES, CONTRACT_TYPES, FLAG_META, BLOCKING_FLAGS, DEMO_SINGLE_USER, nextApproval, roleLabel,
+  AI_ROLE, CCMS_ROLES, CONTRACT_TYPES, FLAG_META, BLOCKING_FLAGS, DEMO_SINGLE_USER, nextApproval, roleLabel, templateById, fillNda, ENTITY_DETAILS,
   type Flag, type Stage,
 } from "@/lib/ccms";
 import { Loader2, Upload, FileText, MessageSquare, AlertTriangle, ArrowLeft } from "lucide-react";
@@ -94,6 +96,9 @@ function ContractDetail() {
             <section className={CARD}>
               <Head title="Documents" sub="Every upload is a new version. The AI flags issues — it never rewrites the draft." right={
                 <div className="flex gap-2">
+                  {templateById(c.template_id) && !["approved", "rejected", "closed"].includes(c.status) && (
+                    <RegenerateButton contract={c} previous={documents.find((d: any) => d.generated)?.fields ?? null} onDone={refresh} />
+                  )}
                   {documents.length > 0 && <UploadButton contractId={c.id} onDone={refresh} docRole="counterparty" label="Upload counterparty markup" />}
                   <UploadButton contractId={c.id} onDone={refresh} docRole="draft" label={documents.length ? "Upload revised draft" : "Upload draft"} />
                 </div>} />
@@ -345,5 +350,46 @@ function SendButton({ contractId, doc, sent, onDone }: { contractId: string; doc
         catch (e: any) { toast.error(e?.message ?? "Failed"); } finally { setBusy(false); }
       }}>Save</Button>
     </span>
+  );
+}
+
+/** A new version from the approved template — to complete particulars left
+ *  blank, or correct one — starting from the answers the last one used. */
+function RegenerateButton({ contract, previous, onDone }: { contract: any; previous: Record<string, string> | null; onDone: () => void }) {
+  const [role] = useCcmsRole();
+  const genFn = useServerFn(generateCcmsDraft);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const d = ENTITY_DETAILS[contract.entity];
+  const [tf, setTf] = useState<Record<string, string>>(() => previous ?? {
+    date: new Date().toISOString().slice(0, 10), direction: "Mutual", term: "Two (2) years", disputes: "Courts of Malaysia",
+    stamp_duty: "Counterparty", non_solicit: "No", cp_form: "company", cp_country: "Malaysia", cp_name: contract.counterparty_name ?? "",
+    company_reg: d?.regNo ?? "", company_address: d?.address ?? "", purpose: contract.scope_summary ?? "",
+  });
+  const miss = fillNda(contract.entity, tf).missing;
+  return (
+    <>
+      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>{previous ? "Regenerate from template" : "Generate from template"}</Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-3xl bg-white max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{previous ? "New version from the approved template" : "Generate the draft from the approved template"}</DialogTitle>
+            <DialogDescription>The wording stays the approved template's; these particulars go into the parties block and Schedule 1. The draft becomes the next version.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <TemplateFieldsForm values={tf} onChange={(k, v) => setTf((p) => ({ ...p, [k]: v }))} fallbackPurpose={contract.scope_summary ?? ""} />
+            {miss.length > 0 && <p className="text-sm text-amber-700">Still blank — {miss.join("; ")} — shown as [●].</p>}
+            <div className="flex gap-2">
+              <Button disabled={busy} onClick={async () => {
+                setBusy(true);
+                try { const r: any = await genFn({ data: { contract_id: contract.id, fields: tf, acting_role: role } }); toast.success(`Draft v${r.document.version} generated`); setOpen(false); onDone(); }
+                catch (e: any) { toast.error(e?.message ?? "Failed"); } finally { setBusy(false); }
+              }}>{busy ? <Loader2 className="size-4 animate-spin" /> : "Generate"}</Button>
+              <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
