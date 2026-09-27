@@ -8,11 +8,11 @@ import { FILLABLE_DOCX_BASE64 as NDA_FILLABLE } from "@/lib/ccms-templates/lsh-n
 import { addAnchoredCommentsToDocx, type AnchoredComment } from "@/lib/docx-anchored-comments";
 import { extractPdfPages } from "@/lib/pdf-pages";
 import { computeCost } from "@/lib/pricing";
-import { maskDemoEmail } from "@/lib/legal.functions";
 import { assertRowTenant, getCallerTenant, requireFeature } from "@/lib/tenant.functions";
 import {
   CONTRACT_TYPES, CCMS_ROLES, DEMO_SINGLE_USER, LOA_ITEMS, BLOCKING_FLAGS, AI_ROLE, roleLabel,
-  buildRoute, computeFlags, nextApproval, reviewsDone, templateById, toMyr, fillNda,
+  buildRoute, computeFlags, nextApproval, reviewsDone, templateById, toMyr, fillNda, displayName,
+  COMPARISON_AREAS, defaultSecurities, SECURITY_TYPES, type Security, type KeyTerms,
   type CcmsRole, type Flag, type Stage, type VendorLite,
 } from "@/lib/ccms";
 
@@ -32,14 +32,17 @@ const FILLABLE: Record<string, string> = { "lsh-nda-mutual": NDA_FILLABLE };
 const roleSchema = z.enum(Object.keys(CCMS_ROLES) as [CcmsRole, ...CcmsRole[]]);
 
 async function ccms(context: any) {
-  const { tenantId, features } = await getCallerTenant(context.userId);
+  const { tenantId, features } = context?.tenant ?? await getCallerTenant(context.userId);
   requireFeature(features, "commercial_cms");
-  const rawEmail = (context?.claims?.email as string | undefined) ?? null;
+  // People are shown by name only — never an email address, whose domain
+  // names the organisation.
+  const meta = context?.claims?.user_metadata ?? {};
+  const email = (context?.claims?.email as string | undefined) ?? "";
   return {
     sb: context.supabase as any,
     tenantId,
     userId: (context?.userId as string | undefined) ?? null,
-    userName: rawEmail ? maskDemoEmail(rawEmail) : "Unknown user",
+    userName: String(meta.full_name || meta.name || displayName(email) || "Unknown user"),
   };
 }
 
@@ -200,7 +203,7 @@ export const getCcmsContract = createServerFn({ method: "GET" })
     const contract = await loadContract(sb, data.id, tenantId);
     const [vendor, docs, comments, reviews, events] = await Promise.all([
       loadVendor(sb, contract.vendor_id, tenantId),
-      sb.from("ccms_documents").select("id,contract_id,file_name,file_url,mime_type,size_bytes,doc_role,version,ai_review_status,uploaded_by_name,created_at,ai_review->verdict,ai_review->riskScore,ai_review->summary,ai_review->generated,ai_review->fields")
+      sb.from("ccms_documents").select("id,contract_id,file_name,file_url,mime_type,size_bytes,doc_role,version,ai_review_status,uploaded_by_name,created_at,ai_review->verdict,ai_review->riskScore,ai_review->summary,ai_review->generated,ai_review->fields,ai_review->findings,comparison")
         .eq("contract_id", data.id).order("created_at", { ascending: false }),
       sb.from("ccms_comments").select("*").eq("contract_id", data.id).order("created_at"),
       sb.from("ccms_reviews").select("*").eq("contract_id", data.id).order("created_at"),
@@ -266,8 +269,7 @@ export const createCcmsContract = createServerFn({ method: "POST" })
       template_id: t.templateId ?? null,
       flags, approval_route: route,
       status: "submitted",
-      requestor_id: userId, requestor_name: userName,
-      requestor_email: (context?.claims?.email as string | undefined) ?? null,
+      requestor_id: userId, requestor_name: userName, requestor_email: null,
       tenant_id: tenantId,
     }).select().single();
     if (error) throw new Error(error.message);
@@ -286,15 +288,18 @@ export const attachCcmsDocument = createServerFn({ method: "POST" })
     file_url: z.string().url(),
     mime_type: z.string().optional().nullable(),
     size_bytes: z.number().optional().nullable(),
-    doc_role: z.enum(["draft", "counterparty", "supporting", "executed"]).default("draft"),
+    doc_role: z.enum(["draft", "counterparty", "supporting", "executed", "tender"]).default("draft"),
     acting_role: roleSchema,
   }))
   .handler(async ({ data, context }) => {
     const { sb, tenantId, userId, userName } = await ccms(context);
     requireRole(data.acting_role, ["requestor", "contract_executive", "legal"], "upload contract documents");
     const contract = await loadContract(sb, data.contract_id, tenantId);
-    if (["approved", "rejected", "closed"].includes(contract.status) && data.doc_role === "draft") {
+    if (!["submitted", "in_review", "returned", "pending_committee", "pending_approval"].includes(contract.status) && ["draft", "counterparty"].includes(data.doc_role)) {
       throw new Error(`The request is ${contract.status}; a new draft cannot be added.`);
+    }
+    if (data.doc_role === "executed" && !["approved", "signed", "stamped", "active"].includes(contract.status)) {
+      throw new Error("The signed copy is uploaded after approval.");
     }
     const { count } = await sb.from("ccms_documents").select("id", { count: "exact", head: true })
       .eq("contract_id", data.contract_id).eq("doc_role", data.doc_role);
@@ -335,7 +340,7 @@ function reviewPrompt(contract: any, vendor: any): string {
     `Scope as requested: ${contract.scope_summary}`,
     vendor ? `Vendor record: status ${vendor.status}, risk ${vendor.risk_rating}${vendor.related_party ? ", RELATED PARTY" : ""}.` : "",
     "",
-    "YOUR JOB IS TO FLAG, NOT TO DRAFT. Never propose replacement wording. For each issue say what is wrong and why it matters to the Company, so a reviewer can comment on it.",
+    "YOUR JOB IS TO FLAG, NOT TO DRAFT. Never propose replacement wording. Write like a busy lawyer's margin note: short, plain, no preamble, no repetition of the clause text. Explain only when the reason is not obvious.",
     "Apply Malaysian law: Contracts Act 1950 (s.75 penalties; s.28 restraint of trade), Construction Industry Payment and Adjudication Act 2012 (conditional payment void, s.35), PDPA 2010, MACC Act 2009 s.17A, Stamp Act 1949, Companies Act 2016, CIDB Act 1994.",
     "Also check the draft matches the request: counterparty, value, dates and scope. A mismatch is a finding.",
   ];
@@ -353,21 +358,21 @@ function reviewPrompt(contract: any, vendor: any): string {
 {
   "verdict": "red_flag" | "caution" | "compliant",
   "riskScore": 0-100,
-  "summary": "3-4 sentences for the reviewer",
+  "summary": "at most 2 short sentences: the verdict and the one or two things that matter most",
   "findings": [{
     "id": "f1",
     "ref": "clause number and heading",
     "excerpt": "EXACT verbatim substring of the draft, 8-25 words, copied character for character so it can be located. For something MISSING, quote the heading or opening words of the clause where it belongs (or of the nearest clause)",
     "severity": "red_flag" | "caution" | "info",
     "category": "commercial" | "legal" | "financial" | "compliance" | "operational",
-    "issue": "what is wrong or missing",
-    "whyItMatters": "the consequence for the Company"
+    "issue": "what is wrong or missing — ONE short sentence, at most 18 words",
+    "whyItMatters": "the consequence for the Company — at most 18 words; empty string if it is obvious from the issue"
   }]${tpl ? `,
   "deviation": {
-    "clauses": [{ "templateClauseId": "<id in brackets above>", "status": "same" | "changed" | "missing", "draftRef": "draft clause number or empty", "excerpt": "EXACT verbatim draft text, or empty if missing", "change": "how it departs from the approved position (empty if same)", "severity": "high" | "medium" | "low" }],
-    "added": [{ "draftRef": "clause number", "excerpt": "EXACT verbatim draft text", "note": "what the added clause does and whether it is acceptable" }]
+    "clauses": [{ "templateClauseId": "<id in brackets above>", "status": "same" | "changed" | "missing", "draftRef": "draft clause number or empty", "excerpt": "EXACT verbatim draft text, or empty if missing", "change": "how it departs from the approved position, at most 15 words (empty if same)", "severity": "high" | "medium" | "low" }],
+    "added": [{ "draftRef": "clause number", "excerpt": "EXACT verbatim draft text", "note": "what it does and whether acceptable, at most 15 words" }]
   }` : ""}${t?.loaCheck ? `,
-  "loa": { "items": [{ "id": "<id in brackets above>", "status": "present" | "missing" | "unclear", "excerpt": "EXACT verbatim draft text or empty", "note": "short" }] }` : ""}
+  "loa": { "items": [{ "id": "<id in brackets above>", "status": "present" | "missing" | "unclear", "excerpt": "EXACT verbatim draft text or empty", "note": "at most 12 words" }] }` : ""}
 }
 Cover the 5-15 most significant findings${tpl ? " and EVERY template clause in deviation.clauses" : ""}. Each finding becomes a review comment that a person must close, so ${tpl ? "every template deviation that matters" : "every material issue"}${t?.loaCheck ? " and every missing or unclear Letter of Award item" : ""} must appear as its own finding; do not raise the same point twice.`);
   return parts.filter((p) => p !== undefined).join("\n");
@@ -451,7 +456,8 @@ async function syncAiThreads(sb: any, contractId: string, documentId: string, fi
     .map(({ f, ref }) => ({
       contract_id: contractId, document_id: documentId, anchor_type: "finding", anchor_ref: ref,
       quote: f.excerpt || null,
-      body: `${f.severity === "red_flag" ? "Red flag" : "Caution"} — ${f.issue}${f.whyItMatters ? `\n\nWhy it matters: ${f.whyItMatters}` : ""}`,
+      body: `${f.issue}${f.whyItMatters ? `\nWhy: ${f.whyItMatters}` : ""}`,
+      severity: f.severity,
       author_name: "AI Reviewer", acting_role: AI_ROLE,
     }));
   if (rows.length) {
@@ -589,14 +595,15 @@ export const recordCcmsReview = createServerFn({ method: "POST" })
   .middleware([requireCcms])
   .inputValidator(z.object({
     contract_id: z.string().uuid(),
-    stage: z.enum(["legal", "finance"]),
+    stage: z.enum(["legal", "finance", "contracts"]),
     outcome: z.enum(["cleared", "cleared_with_comments", "not_cleared"]),
     note: z.string().max(4000).optional().nullable(),
     acting_role: roleSchema,
   }))
   .handler(async ({ data, context }) => {
     const { sb, tenantId, userId, userName } = await ccms(context);
-    requireRole(data.acting_role, [data.stage], `record the ${data.stage} outcome`);
+    const owner: CcmsRole = data.stage === "contracts" ? "contract_manager" : data.stage;
+    requireRole(data.acting_role, [owner], `record the ${data.stage === "contracts" ? "tender comparison" : data.stage} outcome`);
     const contract = await loadContract(sb, data.contract_id, tenantId);
     if (contract.status !== "in_review") throw new Error("Reviews are recorded while the request is in review.");
     const route: Stage[] = contract.approval_route ?? [];
@@ -608,9 +615,16 @@ export const recordCcmsReview = createServerFn({ method: "POST" })
     // while the AI's threads on a returned markup were still open.
     const { data: latest } = await sb.from("ccms_documents").select("id").eq("contract_id", contract.id).in("doc_role", ["draft", "counterparty"])
       .order("created_at", { ascending: false }).limit(1);
+    // The tender comparison is cleared only when every difference is decided.
+    if (data.stage === "contracts" && data.outcome !== "not_cleared") {
+      const { data: cmp } = await sb.from("ccms_documents").select("comparison").eq("contract_id", contract.id).not("comparison", "is", null);
+      if (!cmp?.length) throw new Error("Run the tender comparison first.");
+      const pending = cmp.flatMap((d: any) => d.comparison.items).filter((i: any) => i.status !== "matches" && i.decision === "pending").length;
+      if (pending) throw new Error(`${pending} difference(s) with our tender are not decided yet.`);
+    }
     if (data.outcome === "cleared") {
       const { count: own } = await sb.from("ccms_comments").select("id", { count: "exact", head: true })
-        .eq("contract_id", contract.id).eq("acting_role", data.stage).eq("status", "open").is("parent_id", null);
+        .eq("contract_id", contract.id).eq("acting_role", owner).eq("status", "open").is("parent_id", null);
       const { count: ai } = latest?.[0]
         ? await sb.from("ccms_comments").select("id", { count: "exact", head: true })
             .eq("document_id", latest[0].id).eq("acting_role", AI_ROLE).eq("status", "open").is("parent_id", null)
@@ -651,6 +665,13 @@ export const decideCcmsApproval = createServerFn({ method: "POST" })
     requireRole(data.acting_role, [stage.role], `decide at the "${stage.label}" stage`);
     if (data.decision !== "approved" && !data.note?.trim()) throw new Error("A reason is required to return or reject.");
     const blocking = ((contract.flags ?? []) as Flag[]).filter((f) => BLOCKING_FLAGS.includes(f.key));
+    // A generated draft with blank particulars cannot be signed, so it is not approved.
+    const { data: latestDoc } = await sb.from("ccms_documents").select("ai_review").eq("contract_id", contract.id)
+      .in("doc_role", ["draft", "counterparty"]).order("created_at", { ascending: false }).limit(1);
+    const blanks = latestDoc?.[0]?.ai_review?.generated ? (latestDoc[0].ai_review.findings ?? []).length : 0;
+    if (data.decision === "approved" && blanks) {
+      throw new Error(`The draft still has ${blanks} blank particular(s) ([●]). Regenerate it with them completed before approval.`);
+    }
     if (data.decision === "approved" && blocking.length) {
       throw new Error(`Cannot approve while these are outstanding: ${blocking.map((f) => f.detail).join(" ")}`);
     }
@@ -719,14 +740,14 @@ export const exportCcmsDocumentWithComments = createServerFn({ method: "POST" })
     const stamp = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kuala_Lumpur" });
     const comments: AnchoredComment[] = threads.map((t: any) => {
       const replies = (all ?? []).filter((r: any) => r.parent_id === t.id)
-        .map((r: any) => `— ${roleLabel(r.acting_role)} (${r.author_name ?? ""}, ${stamp(r.created_at)}): ${r.body}`);
+        .map((r: any) => `— ${roleLabel(r.acting_role)} (${displayName(r.author_name)}, ${stamp(r.created_at)}): ${r.body}`);
       const heading = t.anchor_ref ? `${t.anchor_ref}\n` : "";
-      const footer = t.status === "resolved" ? `\n[Resolved by ${t.resolved_by_name ?? "—"}${t.resolved_at ? `, ${stamp(t.resolved_at)}` : ""}]` : "";
+      const footer = t.status === "resolved" ? `\n[Resolved by ${displayName(t.resolved_by_name)}${t.resolved_at ? `, ${stamp(t.resolved_at)}` : ""}]` : "";
       return {
         quote: t.quote ?? "",
         fallback: (t.anchor_ref ?? "").replace(/^(Finding|Clause|Added clause):?\s*/, "").split(/[—:]/)[0].trim(),
         text: heading + t.body + (replies.length ? `\n${replies.join("\n")}` : "") + footer,
-        author: t.acting_role === AI_ROLE ? "AI Reviewer" : `${roleLabel(t.acting_role)} — ${t.author_name ?? ""}`,
+        author: t.acting_role === AI_ROLE ? "AI Reviewer" : `${roleLabel(t.acting_role)} — ${displayName(t.author_name)}`,
         dateIso: wordDate(t.created_at),
         done: t.status === "resolved",
       };
@@ -841,5 +862,297 @@ export const recordCcmsSentToCounterparty = createServerFn({ method: "POST" })
     await logEvent(sb, { contract_id: contract.id, event_type: "sent", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
       meta: { document_id: doc.id, recipient: data.recipient },
       detail: `Draft v${doc.version} sent to the counterparty (${data.recipient})${data.note ? ` — ${data.note}` : ""}.` });
+    return { ok: true };
+  });
+
+// ===========================================================================
+// Client contracts (CMS-02): the client's award checked against our tender.
+// ===========================================================================
+
+function comparisonPrompt(contract: any): string {
+  return [
+    `You are the Head of Contracts at Lim Seong Hai Capital Berhad group, a Malaysian contractor. A client has sent its Letter of Award / contract for "${contract.title}" (client: ${contract.counterparty_name ?? "—"}, job ${contract.job_number ?? "—"}).`,
+    "Compare the CLIENT'S AWARD with OUR TENDER SUBMISSION. For each area below say whether the award matches what we tendered, differs, or is silent. The point: nothing we did not price or agree to slips into the contract unnoticed.",
+    "Write like a margin note: short and plain. No preamble. Explain only when not obvious.",
+    "",
+    "AREAS:",
+    ...COMPARISON_AREAS.map((a) => `[${a.id}] ${a.label}`),
+    "",
+    `Return ONLY JSON:
+{
+  "summary": "at most 2 short sentences",
+  "items": [{
+    "area": "<area id>",
+    "status": "matches" | "differs" | "not_in_award" | "not_in_tender",
+    "tender": "what we tendered, at most 15 words (empty if silent)",
+    "award": "what the award says, at most 15 words (empty if silent)",
+    "impact": "what the difference costs or risks us, at most 15 words (empty if matches)",
+    "excerpt": "EXACT verbatim 8-25 words from the AWARD, copied character for character (empty if the award is silent)",
+    "severity": "high" | "medium" | "low"
+  }]
+}
+One item per area; if an area has two separate differences, give two items for it. Do not report wording differences that change nothing.`,
+  ].join("\n");
+}
+
+/** The comparison itself — plain function, testable on its own. Decisions
+ *  already taken on an unchanged area carry over a re-run. */
+export async function runComparison(
+  contract: any,
+  tender: { name: string; text: string; pdfBase64?: string },
+  award: { name: string; text: string; pdfBase64?: string },
+  prev: any[] = [],
+) {
+  const parts: any[] = [{ text: comparisonPrompt(contract) }];
+  parts.push({ text: `\n=== OUR TENDER SUBMISSION (${tender.name}) ===\n${tender.text.slice(0, 90_000)}` });
+  if (tender.pdfBase64) parts.push({ inlineData: { mimeType: "application/pdf", data: tender.pdfBase64 } });
+  parts.push({ text: `\n=== THE CLIENT'S AWARD (${award.name}) ===\n${award.text.slice(0, 90_000)}` });
+  if (award.pdfBase64) parts.push({ inlineData: { mimeType: "application/pdf", data: award.pdfBase64 } });
+  const res: any = await generateWithFallback(
+    { contents: [{ role: "user", parts }], config: { responseMimeType: "application/json", maxOutputTokens: 12288, temperature: 0 } },
+    { tier: "quality" },
+  );
+  const out = parseJson(res.text ?? "");
+  if (!out || !Array.isArray(out.items)) throw new Error("The comparison came back in an unexpected format — run it again.");
+  const items = out.items
+    .filter((i: any) => COMPARISON_AREAS.some((x) => x.id === i.area))
+    .map((i: any, n: number) => {
+      const status = ["matches", "differs", "not_in_award", "not_in_tender"].includes(i.status) ? i.status : "differs";
+      const p = prev.find((x) => x.area === i.area && x.award === i.award && x.tender === i.tender);
+      return {
+        id: `${i.area}-${n}`, area: i.area, status, tender: String(i.tender ?? ""), award: String(i.award ?? ""),
+        impact: String(i.impact ?? ""), excerpt: String(i.excerpt ?? ""), severity: i.severity ?? "medium",
+        decision: status === "matches" ? "accepted" : (p?.decision ?? "pending"), decided_by: p?.decided_by ?? null, note: p?.note ?? null,
+      };
+    });
+  return { items, summary: String(out.summary ?? ""), res };
+}
+
+export const compareCcmsAward = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({ document_id: z.string().uuid(), acting_role: roleSchema }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await ccms(context);
+    requireRole(data.acting_role, ["contract_executive", "contract_manager", "legal"], "run the tender comparison");
+    const { data: award } = await sb.from("ccms_documents").select("*").eq("id", data.document_id).single();
+    if (!award) throw new Error("Document not found");
+    const contract = await loadContract(sb, award.contract_id, tenantId);
+    if (contract.side !== "client") throw new Error("The tender comparison is for client contracts.");
+    const { data: tenders } = await sb.from("ccms_documents").select("*").eq("contract_id", contract.id).eq("doc_role", "tender")
+      .order("created_at", { ascending: false }).limit(1);
+    const tender = tenders?.[0];
+    if (!tender) throw new Error("Attach our tender submission first — the award is compared with it.");
+    const [a, t] = await Promise.all([documentText(award), documentText(tender)]);
+    const { items, summary, res } = await runComparison(contract, { name: tender.file_name, ...t }, { name: award.file_name, ...a }, award.comparison?.items ?? []);
+    const comparison = { summary, tenderDocId: tender.id, comparedAt: new Date().toISOString(), items };
+    await sb.from("ccms_documents").update({ comparison }).eq("id", award.id);
+    const u = res.usageMetadata ?? {};
+    const model = res.modelVersion ?? (await getDefaultModel());
+    const cost = computeCost({ inputTokens: u.promptTokenCount ?? 0, outputTokens: u.candidatesTokenCount ?? 0, thinkingTokens: u.thoughtsTokenCount ?? 0, calls: 1 }, model);
+    await sb.from("ccms_contracts").update({
+      cost_log: [...(contract.cost_log ?? []).slice(-49), { op: "Tender comparison", usd: Number(cost.usd.toFixed(6)), model, at: new Date().toISOString() }],
+      status: contract.status === "submitted" ? "in_review" : contract.status,
+      stage_started_at: contract.status === "submitted" ? new Date().toISOString() : contract.stage_started_at,
+    }).eq("id", contract.id);
+    const diffs = items.filter((i: any) => i.status !== "matches").length;
+    await logEvent(sb, { contract_id: contract.id, event_type: "comparison", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
+      detail: `Award compared with our tender: ${diffs} difference(s) across ${COMPARISON_AREAS.length} areas.` });
+    return { differences: diffs };
+  });
+
+export const decideCcmsDifference = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({
+    document_id: z.string().uuid(), item_id: z.string(),
+    decision: z.enum(["accepted", "confirm_with_client", "pending"]),
+    note: z.string().max(1000).optional().nullable(), acting_role: roleSchema,
+  }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await ccms(context);
+    requireRole(data.acting_role, ["contract_manager"], "decide a tender difference");
+    const { data: doc } = await sb.from("ccms_documents").select("id,contract_id,comparison").eq("id", data.document_id).single();
+    if (!doc?.comparison) throw new Error("No comparison on this document.");
+    const contract = await loadContract(sb, doc.contract_id, tenantId);
+    const items = (doc.comparison.items as any[]).map((i) => i.id === data.item_id
+      ? { ...i, decision: data.decision, decided_by: userName, decided_at: new Date().toISOString(), note: data.note ?? null } : i);
+    const it = items.find((i) => i.id === data.item_id);
+    if (!it) throw new Error("Difference not found.");
+    await sb.from("ccms_documents").update({ comparison: { ...doc.comparison, items } }).eq("id", doc.id);
+    const area = COMPARISON_AREAS.find((a) => a.id === it.area)?.label ?? it.area;
+    await logEvent(sb, { contract_id: contract.id, event_type: "difference", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
+      detail: `${area}: ${data.decision === "accepted" ? "accepted" : data.decision === "confirm_with_client" ? "to confirm with the client" : "reopened"}${data.note ? ` — ${data.note}` : ""}.` });
+    return { ok: true };
+  });
+
+/** Our confirmation letter to the client, and the client's reply. A reply
+ *  confirms every difference that was waiting on it. */
+export const recordCcmsConfirmation = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({
+    contract_id: z.string().uuid(), action: z.enum(["sent", "reply"]), date: z.string(),
+    sent_to: z.string().max(300).optional().nullable(), note: z.string().max(2000).optional().nullable(), acting_role: roleSchema,
+  }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await ccms(context);
+    requireRole(data.acting_role, ["contract_manager", "contract_executive"], "record the confirmation letter");
+    const contract = await loadContract(sb, data.contract_id, tenantId);
+    const conf = { ...(contract.confirmation ?? {}) };
+    if (data.action === "sent") Object.assign(conf, { sent_date: data.date, sent_to: data.sent_to ?? "", reply_date: null, reply_note: null });
+    else {
+      if (!conf.sent_date) throw new Error("Record the letter as sent first.");
+      Object.assign(conf, { reply_date: data.date, reply_note: data.note ?? "" });
+      const { data: docs } = await sb.from("ccms_documents").select("id,comparison").eq("contract_id", contract.id).not("comparison", "is", null);
+      for (const d of docs ?? []) {
+        const items = (d.comparison.items as any[]).map((i) => i.decision === "confirm_with_client"
+          ? { ...i, decision: "confirmed", decided_by: userName, decided_at: new Date().toISOString(), note: data.note ?? i.note } : i);
+        await sb.from("ccms_documents").update({ comparison: { ...d.comparison, items } }).eq("id", d.id);
+      }
+    }
+    await sb.from("ccms_contracts").update({ confirmation: conf, updated_at: new Date().toISOString() }).eq("id", contract.id);
+    await logEvent(sb, { contract_id: contract.id, event_type: "confirmation", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
+      detail: data.action === "sent" ? `Confirmation letter sent to the client${data.sent_to ? ` (${data.sent_to})` : ""}.` : `Client replied to the confirmation letter${data.note ? ` — ${data.note}` : ""}.` });
+    return { ok: true };
+  });
+
+// ===========================================================================
+// After approval (CMS-01 steps 13–16, CMS-02 steps 8–11): signed, stamped,
+// bonds and insurance, then the repository (CMS-03).
+// ===========================================================================
+
+export const recordCcmsSigned = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({
+    contract_id: z.string().uuid(), signed_date: z.string(),
+    signatories: z.array(z.object({ name: z.string().min(2), designation: z.string().optional().nullable(), party: z.string() })).min(1),
+    acting_role: roleSchema,
+  }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await ccms(context);
+    requireRole(data.acting_role, ["contract_executive", "legal"], "record signing");
+    const contract = await loadContract(sb, data.contract_id, tenantId);
+    if (contract.status !== "approved") throw new Error("A contract is signed after it is approved.");
+    const { count } = await sb.from("ccms_documents").select("id", { count: "exact", head: true }).eq("contract_id", contract.id).eq("doc_role", "executed");
+    if (!count) throw new Error("Upload the signed copy first.");
+    if (contract.side === "client") {
+      const { data: docs } = await sb.from("ccms_documents").select("comparison").eq("contract_id", contract.id).not("comparison", "is", null);
+      const waiting = (docs ?? []).flatMap((d: any) => d.comparison.items).filter((i: any) => i.decision === "confirm_with_client" || (i.status !== "matches" && i.decision === "pending"));
+      if (waiting.length) throw new Error(`${waiting.length} difference(s) with our tender are not settled in writing — the client must confirm them before signing.`);
+    }
+    const securities = (contract.securities?.length ? contract.securities : defaultSecurities(contract.contract_type, contract.value_myr));
+    await sb.from("ccms_contracts").update({ signed_date: data.signed_date, signatories: data.signatories, securities, status: "signed", updated_at: new Date().toISOString() }).eq("id", contract.id);
+    await logEvent(sb, { contract_id: contract.id, event_type: "signed", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
+      detail: `Signed on ${data.signed_date} by ${data.signatories.map((x) => `${x.name} (${x.party})`).join(", ")}. Stamp within 30 days.` });
+    return { ok: true };
+  });
+
+export const recordCcmsStamping = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({
+    contract_id: z.string().uuid(), sent_date: z.string().optional().nullable(), stamped_date: z.string().optional().nullable(),
+    duty: z.number().nonnegative().optional().nullable(), certificate_no: z.string().max(100).optional().nullable(), acting_role: roleSchema,
+  }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await ccms(context);
+    requireRole(data.acting_role, ["contract_executive", "legal"], "record stamping");
+    const contract = await loadContract(sb, data.contract_id, tenantId);
+    if (!contract.signed_date) throw new Error("Record signing first.");
+    if (data.stamped_date && !data.certificate_no?.trim()) throw new Error("Give the stamp certificate number with the stamped date.");
+    const stamping = { ...(contract.stamping ?? {}), ...Object.fromEntries(Object.entries({ sent_date: data.sent_date, stamped_date: data.stamped_date, duty: data.duty, certificate_no: data.certificate_no }).filter(([, v]) => v !== undefined && v !== null && v !== "")) };
+    const status = stamping.stamped_date && contract.status === "signed" ? "stamped" : contract.status;
+    await sb.from("ccms_contracts").update({ stamping, status, updated_at: new Date().toISOString() }).eq("id", contract.id);
+    await logEvent(sb, { contract_id: contract.id, event_type: "stamping", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
+      detail: stamping.stamped_date ? `Stamped on ${stamping.stamped_date}, certificate ${stamping.certificate_no}${stamping.duty != null ? `, duty RM${stamping.duty}` : ""}.` : `Sent for stamping on ${stamping.sent_date}.` });
+    return { ok: true };
+  });
+
+export const saveCcmsSecurities = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({
+    contract_id: z.string().uuid(),
+    securities: z.array(z.object({ type: z.string(), required: z.boolean(), amount: z.number().nullable().optional(), reference: z.string().max(200).optional(), valid_until: z.string().nullable().optional() })),
+    acting_role: roleSchema,
+  }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await ccms(context);
+    requireRole(data.acting_role, ["finance", "contract_executive"], "record bonds and insurance");
+    const contract = await loadContract(sb, data.contract_id, tenantId);
+    if (!contract.signed_date) throw new Error("Bonds and insurance are recorded after signing.");
+    const clean: Security[] = data.securities.filter((x) => SECURITY_TYPES.some((t) => t.id === x.type))
+      .map((x) => ({ ...x, reference: (x.reference ?? "").trim(), valid_until: x.valid_until || null }));
+    await sb.from("ccms_contracts").update({ securities: clean, updated_at: new Date().toISOString() }).eq("id", contract.id);
+    const req = clean.filter((x) => x.required);
+    const done = req.filter((x) => x.type === "cidb_levy" ? !!x.reference : !!x.reference && !!x.valid_until);
+    await logEvent(sb, { contract_id: contract.id, event_type: "securities", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
+      detail: `Bonds and insurance: ${done.length} of ${req.length} required on file${done.length === req.length ? " — payment-ready" : ""}.` });
+    return { ok: true };
+  });
+
+/** The AI reads the signed copy and proposes the repository record; a person
+ *  confirms every field before it is saved. */
+/** Key terms read from a signed contract — plain function, testable. */
+export async function runKeyTerms(fileName: string, text: string, pdfBase64?: string) {
+  const prompt = `Read this signed contract and extract its key terms for the contract repository. Copy what the document says; if it does not state a term, return an empty string or null — never guess.
+Return ONLY JSON:
+{"parties": "both parties' names, short", "value": <number or null>, "currency": "MYR", "start_date": "yyyy-mm-dd or null", "end_date": "yyyy-mm-dd or null (the date it expires; compute from a stated term if the start date is stated)",
+ "notice_period": "e.g. 30 days' written notice, or empty", "renewal": "how it renews, at most 12 words, or empty", "governing_law": "short",
+ "obligations": ["up to 6 key obligations of the Company or the counterparty with a date or trigger, each at most 15 words"]}`;
+  const parts: any[] = [{ text: prompt }];
+  if (text.trim()) parts.push({ text: `CONTRACT (${fileName}):\n${text.slice(0, 120_000)}` });
+  if (pdfBase64) parts.push({ inlineData: { mimeType: "application/pdf", data: pdfBase64 } });
+  const res: any = await generateWithFallback({ contents: [{ role: "user", parts }], config: { responseMimeType: "application/json", maxOutputTokens: 4096, temperature: 0 } }, { tier: "quality" });
+  return { out: parseJson(res.text ?? "") ?? {}, res };
+}
+
+export const extractCcmsKeyTerms = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({ contract_id: z.string().uuid(), acting_role: roleSchema }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId } = await ccms(context);
+    const contract = await loadContract(sb, data.contract_id, tenantId);
+    const { data: docs } = await sb.from("ccms_documents").select("*").eq("contract_id", contract.id).eq("doc_role", "executed")
+      .order("created_at", { ascending: false }).limit(1);
+    const doc = docs?.[0];
+    if (!doc) throw new Error("Upload the signed copy first.");
+    const { text, pdfBase64 } = await documentText(doc);
+    const { out, res } = await runKeyTerms(doc.file_name, text, pdfBase64);
+    const u = res.usageMetadata ?? {};
+    const model = res.modelVersion ?? (await getDefaultModel());
+    const cost = computeCost({ inputTokens: u.promptTokenCount ?? 0, outputTokens: u.candidatesTokenCount ?? 0, thinkingTokens: u.thoughtsTokenCount ?? 0, calls: 1 }, model);
+    await sb.from("ccms_contracts").update({ cost_log: [...(contract.cost_log ?? []).slice(-49), { op: "Key terms", usd: Number(cost.usd.toFixed(6)), model, at: new Date().toISOString() }] }).eq("id", contract.id);
+    const terms: KeyTerms = {
+      parties: String(out.parties || `${contract.entity} / ${contract.counterparty_name ?? ""}`),
+      value: typeof out.value === "number" ? out.value : contract.value ?? null,
+      currency: String(out.currency || contract.currency || "MYR"),
+      start_date: out.start_date || contract.start_date || null,
+      end_date: out.end_date || contract.end_date || null,
+      notice_period: String(out.notice_period ?? ""), renewal: String(out.renewal ?? ""), governing_law: String(out.governing_law ?? ""),
+      obligations: Array.isArray(out.obligations) ? out.obligations.map(String).slice(0, 8) : [],
+    };
+    return { terms, fromDocument: doc.file_name };
+  });
+
+export const saveCcmsRepository = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({
+    contract_id: z.string().uuid(),
+    terms: z.object({
+      parties: z.string().min(2), value: z.number().nullable().optional(), currency: z.string().optional(),
+      start_date: z.string().nullable().optional(), end_date: z.string().nullable().optional(),
+      notice_period: z.string().optional(), renewal: z.string().optional(), governing_law: z.string().optional(),
+      obligations: z.array(z.string()).default([]),
+    }),
+    acting_role: roleSchema,
+  }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await ccms(context);
+    requireRole(data.acting_role, ["contract_executive", "legal", "contract_manager"], "save to the repository");
+    const contract = await loadContract(sb, data.contract_id, tenantId);
+    if (!contract.signed_date) throw new Error("Only a signed contract goes into the repository.");
+    if (!contract.stamping?.stamped_date) throw new Error("Record stamping first — the repository holds the stamped contract.");
+    if (!data.terms.end_date) throw new Error("Give the expiry date — it drives the 30-day alert.");
+    const repository = { ...data.terms, confirmed_by: userName, confirmed_at: new Date().toISOString() };
+    await sb.from("ccms_contracts").update({ repository, expiry_date: data.terms.end_date, status: "active", updated_at: new Date().toISOString() }).eq("id", contract.id);
+    await logEvent(sb, { contract_id: contract.id, event_type: "repository", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
+      detail: `Saved to the repository. Expires ${data.terms.end_date}; alert from 30 days before.` });
     return { ok: true };
   });

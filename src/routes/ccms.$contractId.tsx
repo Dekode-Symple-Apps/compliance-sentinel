@@ -8,6 +8,7 @@ import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { TemplateFieldsForm } from "@/components/ccms-template-form";
+import { CommentBody, ConfirmationPanel, ExecutionPanel, Milestones } from "@/components/ccms-execution";
 import { supabase } from "@/integrations/supabase/client";
 import {
   attachCcmsDocument, decideCcmsApproval, generateCcmsDraft, getCcmsContract, recordCcmsSentToCounterparty, resubmitCcmsContract, reviewCcmsDocument,
@@ -16,7 +17,7 @@ import {
   CcmsHeader, StatusBadge, OutcomeText, SlaText, CARD, TH, TD, fmtMoney, useCcmsRole,
 } from "@/components/ccms-widgets";
 import {
-  AI_ROLE, CCMS_ROLES, CONTRACT_TYPES, FLAG_META, BLOCKING_FLAGS, DEMO_SINGLE_USER, nextApproval, roleLabel, templateById, fillNda, ENTITY_DETAILS,
+  AI_ROLE, CCMS_ROLES, CONTRACT_TYPES, FLAG_META, BLOCKING_FLAGS, DEMO_SINGLE_USER, nextApproval, roleLabel, templateById, fillNda, ENTITY_DETAILS, displayName,
   type Flag, type Stage,
 } from "@/lib/ccms";
 import { Loader2, Upload, FileText, MessageSquare, AlertTriangle, ArrowLeft } from "lucide-react";
@@ -52,6 +53,8 @@ function ContractDetail() {
       <div className="p-6 bg-white min-h-full space-y-5">
         <Link to="/ccms/contracts" className="inline-flex items-center gap-1 text-sm text-gray-600 hover:underline"><ArrowLeft className="size-4" /> Contracts</Link>
 
+        <Milestones c={c} documents={documents} events={events} />
+
         <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-5">
           <div className="space-y-5 min-w-0">
             {/* Summary */}
@@ -65,12 +68,14 @@ function ContractDetail() {
                   <Row k="Project / job" v={[c.project, c.job_number].filter(Boolean).join(" · ") || "—"} />
                   <Row k="Award reference" v={c.award_reference || "—"} />
                   <Row k="Scope" v={<span className="whitespace-pre-wrap">{c.scope_summary}</span>} />
-                  <Row k="Requested by" v={`${c.requestor_name ?? "—"}${c.requestor_department ? ` · ${c.requestor_department}` : ""} · ${format(new Date(c.created_at), "d MMM yyyy")}`} />
+                  <Row k="Requested by" v={`${displayName(c.requestor_name)}${c.requestor_department ? ` · ${c.requestor_department}` : ""} · ${format(new Date(c.created_at), "d MMM yyyy")}`} />
                 </tbody>
               </table>
             </section>
 
             <ActionPanel c={c} route={route} flags={flags} openThreads={openThreads.length} latestDraft={latestDraft} documents={documents} events={events} onDone={refresh} />
+            {c.side === "client" && <ConfirmationPanel c={c} documents={documents} onDone={refresh} />}
+            <ExecutionPanel c={c} documents={documents} onDone={refresh} />
 
             {/* Route */}
             <section className={CARD}>
@@ -84,7 +89,7 @@ function ContractDetail() {
                       <tr key={s.key} className={cn("border-b border-gray-100 last:border-0", current && "bg-blue-50/40")}>
                         <td className={TD}><div className="font-medium">{s.label}</div><div className="text-sm text-gray-600">{CCMS_ROLES[s.role]} · {s.kind}</div></td>
                         <td className={TD + " text-gray-700"}>{s.reason}</td>
-                        <td className={TD}><OutcomeText status={s.status} />{s.decided_by && <div className="text-sm text-gray-600">{s.decided_by} · {s.decided_at ? format(new Date(s.decided_at), "d MMM") : ""}</div>}{s.note && <div className="text-sm text-gray-700 mt-0.5">{s.note}</div>}</td>
+                        <td className={TD}><OutcomeText status={s.status} />{s.decided_by && <div className="text-sm text-gray-600">{displayName(s.decided_by)} · {s.decided_at ? format(new Date(s.decided_at), "d MMM") : ""}</div>}{s.note && <div className="text-sm text-gray-700 mt-0.5">{s.note}</div>}</td>
                         <td className={TD}>{current ? <SlaText since={c.stage_started_at} days={s.sla_days} /> : <span className="text-sm text-gray-500">{s.sla_days} working days</span>}</td>
                       </tr>
                     );
@@ -97,11 +102,16 @@ function ContractDetail() {
             <section className={CARD}>
               <Head title="Documents" sub="Every upload is a new version. The AI flags issues — it never rewrites the draft." right={
                 <div className="flex gap-2">
+                  {c.side === "client" && <UploadButton contractId={c.id} onDone={refresh} docRole="tender" label="Attach our tender" />}
                   {templateById(c.template_id) && !["approved", "rejected", "closed"].includes(c.status) && (
                     <RegenerateButton contract={c} previous={documents.find((d: any) => d.generated)?.fields ?? null} onDone={refresh} />
                   )}
-                  {documents.length > 0 && <UploadButton contractId={c.id} onDone={refresh} docRole="counterparty" label="Upload counterparty markup" />}
-                  <UploadButton contractId={c.id} onDone={refresh} docRole="draft" label={documents.length ? "Upload revised draft" : "Upload draft"} />
+                  {c.side === "client"
+                    ? <UploadButton contractId={c.id} onDone={refresh} docRole="counterparty" label={documents.some((d: any) => d.doc_role === "counterparty") ? "Upload revised award" : "Upload client's award"} />
+                    : <>
+                        {documents.length > 0 && <UploadButton contractId={c.id} onDone={refresh} docRole="counterparty" label="Upload counterparty markup" />}
+                        <UploadButton contractId={c.id} onDone={refresh} docRole="draft" label={documents.length ? "Upload revised draft" : "Upload draft"} />
+                      </>}
                 </div>} />
               {documents.length === 0 ? <p className="p-4 text-sm text-gray-500">No draft yet. Upload the draft contract to start the review.</p> : (
                 <table className="w-full">
@@ -109,8 +119,8 @@ function ContractDetail() {
                   <tbody>
                     {documents.map((d: any) => (
                       <tr key={d.id} className="border-b border-gray-100 last:border-0">
-                        <td className={TD}><div className="font-medium flex items-center gap-1.5"><FileText className="size-4 text-gray-500" />{d.file_name}</div><div className="text-sm text-gray-600">{d.doc_role === "counterparty" ? "Counterparty markup" : "Our draft"} v{d.version}{d.generated ? " · generated from the approved template" : ""}</div></td>
-                        <td className={TD + " text-gray-700"}>{d.uploaded_by_name ?? "—"}<div className="text-sm text-gray-600">{format(new Date(d.created_at), "d MMM yyyy, HH:mm")}</div></td>
+                        <td className={TD}><div className="font-medium flex items-center gap-1.5"><FileText className="size-4 text-gray-500" />{d.file_name}</div><div className="text-sm text-gray-600">{({ counterparty: c.side === "client" ? "Client's award" : "Counterparty markup", draft: "Our draft", tender: "Our tender", executed: "Signed copy", supporting: "Supporting" } as Record<string, string>)[d.doc_role] ?? d.doc_role} v{d.version}{d.generated ? " · generated from the approved template" : ""}</div></td>
+                        <td className={TD + " text-gray-700"}>{displayName(d.uploaded_by_name)}<div className="text-sm text-gray-600">{format(new Date(d.created_at), "d MMM yyyy, HH:mm")}</div></td>
                         <td className={TD}>{d.ai_review_status === "done" ? <span>Risk {d.riskScore ?? "—"} · <span className={d.verdict === "red_flag" ? "text-red-700" : d.verdict === "caution" ? "text-amber-700" : "text-emerald-700"}>{String(d.verdict ?? "").replace("_", " ")}</span></span> : <span className="text-gray-600">{d.ai_review_status}</span>}</td>
                         <td className={TD + " text-right"}>
                           <div className="flex justify-end gap-2">
@@ -135,10 +145,10 @@ function ContractDetail() {
                   <tbody>
                     {threads.map((x: any) => (
                       <tr key={x.id} className="border-b border-gray-100 last:border-0">
-                        <td className={TD}>{roleLabel(x.acting_role)}<div className="text-sm text-gray-600">{x.acting_role === AI_ROLE ? "on the draft" : x.author_name}</div></td>
-                        <td className={TD + " text-gray-700"}>{x.anchor_ref || (x.quote ? `"${x.quote.slice(0, 60)}…"` : "General")}</td>
-                        <td className={TD}>{x.body}<div className="text-sm text-gray-500">{comments.filter((r: any) => r.parent_id === x.id).length} repl{comments.filter((r: any) => r.parent_id === x.id).length === 1 ? "y" : "ies"}</div></td>
-                        <td className={TD}><span className={x.status === "open" ? "text-amber-700 font-semibold text-sm" : "text-emerald-700 text-sm"}>{x.status === "open" ? "Open" : `Resolved · ${x.resolved_by_name ?? ""}`}</span></td>
+                        <td className={TD}>{roleLabel(x.acting_role)}<div className="text-sm text-gray-600">{x.acting_role === AI_ROLE ? "" : displayName(x.author_name)}</div></td>
+                        <td className={TD + " text-gray-700 w-48"}>{(x.anchor_ref || (x.quote ? `"${x.quote.slice(0, 50)}…"` : "General")).replace(/^Finding:\s*/, "")}</td>
+                        <td className={TD}><CommentBody body={x.body} severity={x.severity} clamp /><div className="text-xs text-gray-500 mt-0.5">{comments.filter((r: any) => r.parent_id === x.id).length} repl{comments.filter((r: any) => r.parent_id === x.id).length === 1 ? "y" : "ies"}</div></td>
+                        <td className={TD}><span className={x.status === "open" ? "text-amber-700 font-semibold text-sm" : "text-emerald-700 text-sm"}>{x.status === "open" ? "Open" : `Resolved · ${displayName(x.resolved_by_name)}`}</span></td>
                       </tr>
                     ))}
                   </tbody>
@@ -154,7 +164,7 @@ function ContractDetail() {
                   {events.map((e: any) => (
                     <tr key={e.id} className="border-b border-gray-100 last:border-0">
                       <td className={TD + " w-40 text-gray-600 whitespace-nowrap"}>{format(new Date(e.created_at), "d MMM yyyy, HH:mm")}</td>
-                      <td className={TD + " w-48"}>{e.actor_name}<div className="text-sm text-gray-600">{CCMS_ROLES[e.acting_role as keyof typeof CCMS_ROLES] ?? ""}</div></td>
+                      <td className={TD + " w-48"}>{displayName(e.actor_name)}<div className="text-sm text-gray-600">{CCMS_ROLES[e.acting_role as keyof typeof CCMS_ROLES] ?? ""}</div></td>
                       <td className={TD}>{e.detail}</td>
                     </tr>
                   ))}
@@ -222,7 +232,7 @@ function Head({ title, sub, right }: { title: string; sub?: string; right?: Reac
   );
 }
 
-function UploadButton({ contractId, onDone, label, docRole }: { contractId: string; onDone: () => void; label: string; docRole: "draft" | "counterparty" }) {
+function UploadButton({ contractId, onDone, label, docRole }: { contractId: string; onDone: () => void; label: string; docRole: "draft" | "counterparty" | "tender" }) {
   const [role] = useCcmsRole();
   const attachFn = useServerFn(attachCcmsDocument);
   const reviewFn = useServerFn(reviewCcmsDocument);
@@ -236,9 +246,12 @@ function UploadButton({ contractId, onDone, label, docRole }: { contractId: stri
       const url = supabase.storage.from("policies").getPublicUrl(path).data.publicUrl;
       const doc = await attachFn({ data: { contract_id: contractId, file_name: file.name, file_url: url, mime_type: file.type || null, size_bytes: file.size, doc_role: docRole, acting_role: role } });
       onDone();
-      setBusy("AI reviewing…");
-      await reviewFn({ data: { document_id: doc.id, acting_role: role } });
-      toast.success("Draft reviewed");
+      // Our own tender is the baseline, not something to review.
+      if (docRole !== "tender") {
+        setBusy("AI reviewing…");
+        await reviewFn({ data: { document_id: doc.id, acting_role: role } });
+        toast.success("Reviewed");
+      } else toast.success("Tender attached");
     } catch (e: any) { toast.error(e?.message ?? "Upload failed"); }
     finally { setBusy(null); onDone(); }
   }
@@ -318,8 +331,6 @@ function ActionPanel({ c, route, flags, openThreads, latestDraft, documents, eve
         ) : <p className="text-sm text-gray-600">Switch "Acting as" to Requestor or Contract Executive to resubmit.</p>}
       </div>
     );
-  } else if (c.status === "approved") {
-    body = <p className="text-sm text-gray-700">Approved. Signing, stamping, bonds and obligations are the next phase of this workflow.</p>;
   } else if (c.status === "rejected") {
     body = <p className="text-sm text-gray-700">Rejected. The request is closed.</p>;
   }

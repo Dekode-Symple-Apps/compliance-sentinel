@@ -30,6 +30,7 @@ import { Route as LayoutJobIdRouteImport } from './routes/layout.$jobId'
 import { Route as CreditReportIdRouteImport } from './routes/credit.$reportId'
 import { Route as CcmsVendorsRouteImport } from './routes/ccms.vendors'
 import { Route as CcmsTemplatesRouteImport } from './routes/ccms.templates'
+import { Route as CcmsRepositoryRouteImport } from './routes/ccms.repository'
 import { Route as CcmsNewRouteImport } from './routes/ccms.new'
 import { Route as CcmsContractsRouteImport } from './routes/ccms.contracts'
 import { Route as CcmsContractIdRouteImport } from './routes/ccms.$contractId'
@@ -144,6 +145,11 @@ const CcmsTemplatesRoute = CcmsTemplatesRouteImport.update({
   path: '/ccms/templates',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CcmsRepositoryRoute = CcmsRepositoryRouteImport.update({
+  id: '/ccms/repository',
+  path: '/ccms/repository',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CcmsNewRoute = CcmsNewRouteImport.update({
   id: '/ccms/new',
   path: '/ccms/new',
@@ -194,6 +200,7 @@ export interface FileRoutesByFullPath {
   '/ccms/$contractId': typeof CcmsContractIdRoute
   '/ccms/contracts': typeof CcmsContractsRoute
   '/ccms/new': typeof CcmsNewRoute
+  '/ccms/repository': typeof CcmsRepositoryRoute
   '/ccms/templates': typeof CcmsTemplatesRoute
   '/ccms/vendors': typeof CcmsVendorsRoute
   '/credit/$reportId': typeof CreditReportIdRoute
@@ -225,6 +232,7 @@ export interface FileRoutesByTo {
   '/ccms/$contractId': typeof CcmsContractIdRoute
   '/ccms/contracts': typeof CcmsContractsRoute
   '/ccms/new': typeof CcmsNewRoute
+  '/ccms/repository': typeof CcmsRepositoryRoute
   '/ccms/templates': typeof CcmsTemplatesRoute
   '/ccms/vendors': typeof CcmsVendorsRoute
   '/credit/$reportId': typeof CreditReportIdRoute
@@ -257,6 +265,7 @@ export interface FileRoutesById {
   '/ccms/$contractId': typeof CcmsContractIdRoute
   '/ccms/contracts': typeof CcmsContractsRoute
   '/ccms/new': typeof CcmsNewRoute
+  '/ccms/repository': typeof CcmsRepositoryRoute
   '/ccms/templates': typeof CcmsTemplatesRoute
   '/ccms/vendors': typeof CcmsVendorsRoute
   '/credit/$reportId': typeof CreditReportIdRoute
@@ -290,6 +299,7 @@ export interface FileRouteTypes {
     | '/ccms/$contractId'
     | '/ccms/contracts'
     | '/ccms/new'
+    | '/ccms/repository'
     | '/ccms/templates'
     | '/ccms/vendors'
     | '/credit/$reportId'
@@ -321,6 +331,7 @@ export interface FileRouteTypes {
     | '/ccms/$contractId'
     | '/ccms/contracts'
     | '/ccms/new'
+    | '/ccms/repository'
     | '/ccms/templates'
     | '/ccms/vendors'
     | '/credit/$reportId'
@@ -352,6 +363,7 @@ export interface FileRouteTypes {
     | '/ccms/$contractId'
     | '/ccms/contracts'
     | '/ccms/new'
+    | '/ccms/repository'
     | '/ccms/templates'
     | '/ccms/vendors'
     | '/credit/$reportId'
@@ -384,6 +396,7 @@ export interface RootRouteChildren {
   CcmsContractIdRoute: typeof CcmsContractIdRoute
   CcmsContractsRoute: typeof CcmsContractsRoute
   CcmsNewRoute: typeof CcmsNewRoute
+  CcmsRepositoryRoute: typeof CcmsRepositoryRoute
   CcmsTemplatesRoute: typeof CcmsTemplatesRoute
   CcmsVendorsRoute: typeof CcmsVendorsRoute
   CreditReportIdRoute: typeof CreditReportIdRoute
@@ -555,6 +568,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CcmsTemplatesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/ccms/repository': {
+      id: '/ccms/repository'
+      path: '/ccms/repository'
+      fullPath: '/ccms/repository'
+      preLoaderRoute: typeof CcmsRepositoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/ccms/new': {
       id: '/ccms/new'
       path: '/ccms/new'
@@ -635,6 +655,7 @@ const rootRouteChildren: RootRouteChildren = {
   CcmsContractIdRoute: CcmsContractIdRoute,
   CcmsContractsRoute: CcmsContractsRoute,
   CcmsNewRoute: CcmsNewRoute,
+  CcmsRepositoryRoute: CcmsRepositoryRoute,
   CcmsTemplatesRoute: CcmsTemplatesRoute,
   CcmsVendorsRoute: CcmsVendorsRoute,
   CreditReportIdRoute: CreditReportIdRoute,

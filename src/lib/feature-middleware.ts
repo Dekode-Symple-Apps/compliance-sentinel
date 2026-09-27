@@ -12,8 +12,9 @@ export function requireProduct(key: TenantFeature) {
   return createMiddleware({ type: "function" })
     .middleware([requireSupabaseAuth])
     .server(async ({ next, context }) => {
-      const { features } = await getCallerTenant((context as any).userId);
-      requireFeature(features, key);
-      return next();
+      const tenant = await getCallerTenant((context as any).userId);
+      requireFeature(tenant.features, key);
+      // Handed on so the function does not look the organisation up again.
+      return next({ context: { tenant } });
     });
 }

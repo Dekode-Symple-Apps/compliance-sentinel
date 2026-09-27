@@ -44,9 +44,10 @@ const COMMERCIAL_NAV: NavItem[] = [
     // The queue owns the request form, contract detail and document review.
     match: (p) =>
       p.startsWith("/ccms/contracts") || p === "/ccms/new" || p.startsWith("/ccms/review") ||
-      /^\/ccms\/(?!contracts|vendors|templates|new|review)[^/]+/.test(p),
+      /^\/ccms\/(?!contracts|vendors|templates|repository|new|review)[^/]+/.test(p),
   },
   { to: "/ccms/vendors", label: "Vendors", icon: Building2, match: (p) => p.startsWith("/ccms/vendors") },
+  { to: "/ccms/repository", label: "Repository", icon: Library, match: (p) => p.startsWith("/ccms/repository") },
   { to: "/ccms/templates", label: "Templates", icon: FileText, match: (p) => p.startsWith("/ccms/templates") },
 ];
 const SETTINGS_ITEM: NavItem = { to: "/settings", label: "Settings", icon: Settings };

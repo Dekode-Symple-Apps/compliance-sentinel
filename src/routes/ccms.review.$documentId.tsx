@@ -9,10 +9,11 @@ import { Button } from "@/components/ui/button";
 import { DocViewer, type DocHighlight } from "@/components/doc-viewer";
 import { PdfViewer } from "@/components/pdf-viewer";
 import {
-  addCcmsComment, exportCcmsDocumentWithComments, getCcmsDocument, recordCcmsReview, reviewCcmsDocument, setCcmsCommentStatus,
+  addCcmsComment, compareCcmsAward, decideCcmsDifference, exportCcmsDocumentWithComments, getCcmsDocument, recordCcmsReview, reviewCcmsDocument, setCcmsCommentStatus,
 } from "@/lib/ccms.functions";
 import { CcmsHeader, StatusBadge, OutcomeText, CARD, useCcmsRole } from "@/components/ccms-widgets";
-import { AI_ROLE, CCMS_ROLES, CONTRACT_TYPES, roleLabel, templateById, type CcmsRole, type Stage } from "@/lib/ccms";
+import { AI_ROLE, CCMS_ROLES, COMPARISON_AREAS, CONTRACT_TYPES, DECISION_LABEL, displayName, roleLabel, templateById, type CcmsRole, type Decision, type Stage } from "@/lib/ccms";
+import { CommentBody } from "@/components/ccms-execution";
 import { ArrowLeft, Loader2, MessageSquarePlus, RefreshCw, Check, RotateCcw, Lock, Quote, Download, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -21,7 +22,7 @@ export const Route = createFileRoute("/ccms/review/$documentId")({
   head: () => ({ meta: [{ title: "Commercial CMS · Review" }] }),
 });
 
-type Tab = "findings" | "template" | "loa" | "comments";
+type Tab = "findings" | "template" | "loa" | "comments" | "tender";
 type Anchor = { anchor_type: "general" | "finding" | "clause" | "quote"; anchor_ref?: string; quote?: string };
 
 const sevTone = (s: string) =>
@@ -38,6 +39,7 @@ function ReviewScreen() {
   const refresh = () => { qc.invalidateQueries({ queryKey: ["ccms-doc", documentId] }); qc.invalidateQueries({ queryKey: ["ccms-contract"] }); };
 
   const [tab, setTab] = useState<Tab>("findings");
+  const [tabChosen, setTabChosen] = useState(false);
   const [active, setActive] = useState<string | null>(null);
   const [anchors, setAnchors] = useState<Record<string, boolean>>({});
   const [composer, setComposer] = useState<Anchor | null>(null);
@@ -58,17 +60,20 @@ function ReviewScreen() {
     for (const f of review?.findings ?? []) if (f.excerpt) out.push({ id: `f:${f.id}`, text: f.excerpt, kind: f.severity === "red_flag" ? "critical" : f.severity === "caution" ? "medium" : "info" });
     for (const c of deviation?.clauses ?? []) if (c.excerpt && c.status !== "same") out.push({ id: `c:${c.templateClauseId}`, text: c.excerpt, kind: c.severity === "high" ? "critical" : "medium" });
     for (const i of loa?.items ?? []) if (i.excerpt) out.push({ id: `l:${i.id}`, text: i.excerpt, kind: i.status === "present" ? "info" : "medium" });
+    for (const i of doc?.comparison?.items ?? []) if (i.excerpt && i.status !== "matches") out.push({ id: `x:${i.id}`, text: i.excerpt, kind: i.severity === "high" ? "critical" : "medium" });
     // Reviewers' comments on selected text are highlighted too.
     for (const t of (data?.comments ?? []) as any[]) {
       if (!t.parent_id && t.acting_role !== AI_ROLE && t.quote && t.status === "open" && t.document_id === doc?.id) out.push({ id: `t:${t.id}`, text: t.quote, kind: "edit" });
     }
     return out;
-  }, [review, deviation, loa, data?.comments, doc?.id]);
+  }, [review, deviation, loa, data?.comments, doc?.id, doc?.comparison]);
 
   if (isLoading) return <AppShell><div className="p-10 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="size-4 animate-spin" /> Loading…</div></AppShell>;
   if (error || !doc) return <AppShell><div className="p-10 text-sm text-red-700">{(error as Error)?.message ?? "Not found"}</div></AppShell>;
 
   const isPdf = /\.pdf$/i.test(doc.file_name) || (doc.mime_type ?? "").includes("pdf");
+  const isClientAward = contract.side === "client" && doc.doc_role === "counterparty";
+  if (isClientAward && !tabChosen && tab === "findings") { setTabChosen(true); setTab("tender"); }
   const comments: any[] = data!.comments.filter((x: any) => !x.document_id || x.document_id === doc.id);
   const threads = comments.filter((x) => !x.parent_id);
   const openCount = threads.filter((x) => x.status === "open").length;
@@ -142,7 +147,11 @@ function ReviewScreen() {
 
           <div className="flex flex-col min-h-0">
             <div className="flex border-b border-gray-200">
-              {([["findings", `Findings ${review?.findings?.length ?? 0}`], ["template", tpl ? `Template ${devCount}` : "Template"], ...(loa ? [["loa", `LoA items ${loaMissing}`]] : []), ["comments", `Comments ${openCount}`]] as [Tab, string][]).map(([k, l]) => (
+              {([
+                ...(isClientAward ? [["tender", `Tender ${(doc.comparison?.items ?? []).filter((i: any) => i.status !== "matches").length}`]] : []),
+                ["findings", `Findings ${review?.findings?.length ?? 0}`],
+                ...(isClientAward ? [] : [["template", tpl ? `Template ${devCount}` : "Template"]]),
+                ...(loa ? [["loa", `LoA items ${loaMissing}`]] : []), ["comments", `Comments ${openCount}`]] as [Tab, string][]).map(([k, l]) => (
                 <button key={k} onClick={() => setTab(k)} className={cn("flex-1 px-3 py-2.5 text-sm", tab === k ? "border-b-2 border-gray-900 font-semibold text-gray-900" : "text-gray-600")}>{l}</button>
               ))}
             </div>
@@ -218,6 +227,10 @@ function ReviewScreen() {
                     </div>
                   ))}
                 </>
+              )}
+
+              {tab === "tender" && isClientAward && (
+                <TenderComparison doc={doc} onDone={refresh} onFocus={(id) => focus(`x:${id}`)} active={active} />
               )}
 
               {tab === "comments" && (
@@ -301,7 +314,7 @@ function Comments({ contractId, documentId, threads, all, composer, setComposer,
           <div className="flex items-center gap-2 text-sm">
             {t.acting_role === AI_ROLE && <Bot className="size-4 text-gray-600" />}
             <span className="font-semibold text-gray-900">{roleLabel(t.acting_role)}</span>
-            <span className="text-gray-500">{t.acting_role === AI_ROLE ? "" : `${t.author_name} · `}{format(new Date(t.created_at), "d MMM, HH:mm")}</span>
+            <span className="text-gray-500">{t.acting_role === AI_ROLE ? "" : `${displayName(t.author_name)} · `}{format(new Date(t.created_at), "d MMM, HH:mm")}</span>
             <span className={cn("ml-auto text-sm", t.status === "open" ? "text-amber-700 font-semibold" : "text-emerald-700")}>{t.status === "open" ? "Open" : "Resolved"}</span>
           </div>
           {t.anchor_ref && <div className="mt-1 text-sm text-gray-600">On: {t.anchor_ref}</div>}
@@ -310,14 +323,14 @@ function Comments({ contractId, documentId, threads, all, composer, setComposer,
               <span className="line-clamp-2">{t.quote}</span>
             </button>
           )}
-          <p className="mt-1.5 text-sm text-gray-900 whitespace-pre-wrap">{t.body}</p>
+          <div className="mt-1.5"><CommentBody body={t.body} severity={t.severity} /></div>
           {all.filter((r) => r.parent_id === t.id).map((r) => (
             <div key={r.id} className="mt-2 ml-3 border-l border-gray-200 pl-3">
-              <div className="text-sm"><span className="font-semibold text-gray-900">{roleLabel(r.acting_role)}</span> <span className="text-gray-500">{r.author_name} · {format(new Date(r.created_at), "d MMM, HH:mm")}</span></div>
+              <div className="text-sm"><span className="font-semibold text-gray-900">{roleLabel(r.acting_role)}</span> <span className="text-gray-500">{displayName(r.author_name)} · {format(new Date(r.created_at), "d MMM, HH:mm")}</span></div>
               <p className="text-sm text-gray-900 whitespace-pre-wrap">{r.body}</p>
             </div>
           ))}
-          {t.status === "resolved" && <div className="mt-1 text-sm text-gray-500">Resolved by {t.resolved_by_name}{t.resolved_at ? ` · ${format(new Date(t.resolved_at), "d MMM")}` : ""}</div>}
+          {t.status === "resolved" && <div className="mt-1 text-sm text-gray-500">Resolved by {displayName(t.resolved_by_name)}{t.resolved_at ? ` · ${format(new Date(t.resolved_at), "d MMM")}` : ""}</div>}
           <div className="mt-2 flex gap-2">
             {t.status === "open" && (
               <>
@@ -348,7 +361,7 @@ function OutcomeBar({ contract, role, openThreadsByRole, onDone }: { contract: a
     if (!mine) return;
     setBusy(true);
     try {
-      await recordFn({ data: { contract_id: contract.id, stage: mine.key as "legal" | "finance", outcome, note, acting_role: role } });
+      await recordFn({ data: { contract_id: contract.id, stage: mine.key as "legal" | "finance" | "contracts", outcome, note, acting_role: role } });
       toast.success(`${mine.label}: outcome recorded`); setNote(""); onDone();
     } catch (e: any) { toast.error(e?.message ?? "Failed"); } finally { setBusy(false); }
   }
@@ -371,6 +384,58 @@ function OutcomeBar({ contract, role, openThreadsByRole, onDone }: { contract: a
         </div>
       )}
       {!mine && contract.status === "in_review" && <span className="ml-auto text-sm text-gray-500">Switch "Acting as" to {stages.filter((s) => s.status === "pending").map((s) => CCMS_ROLES[s.role]).join(" or ") || "a reviewer"} to record an outcome.</span>}
+    </div>
+  );
+}
+
+/** The client's award against our tender: each area, what changed, and the
+ *  Contract Manager's decision — accept it, or confirm it with the client. */
+function TenderComparison({ doc, onDone, onFocus, active }: { doc: any; onDone: () => void; onFocus: (id: string) => void; active: string | null }) {
+  const [role] = useCcmsRole();
+  const compareFn = useServerFn(compareCcmsAward);
+  const decideFn = useServerFn(decideCcmsDifference);
+  const [busy, setBusy] = useState<string | null>(null);
+  const cmp = doc.comparison;
+  const items: any[] = cmp?.items ?? [];
+  const canDecide = role === "contract_manager";
+  async function runCompare() {
+    setBusy("compare");
+    try { const r: any = await compareFn({ data: { document_id: doc.id, acting_role: role } }); toast.success(`${r.differences} difference(s) found`); onDone(); }
+    catch (e: any) { toast.error(e?.message ?? "Comparison failed"); } finally { setBusy(null); }
+  }
+  async function decide(id: string, decision: "accepted" | "confirm_with_client" | "pending") {
+    setBusy(id);
+    try { await decideFn({ data: { document_id: doc.id, item_id: id, decision, acting_role: role } }); onDone(); }
+    catch (e: any) { toast.error(e?.message ?? "Failed"); } finally { setBusy(null); }
+  }
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <p className="text-sm text-gray-700 flex-1">{cmp ? cmp.summary : "Compare the client's award with our tender submission — nothing we did not price should slip in."}</p>
+        <Button size="sm" variant="outline" disabled={busy === "compare"} onClick={runCompare}>{busy === "compare" ? <Loader2 className="size-4 animate-spin" /> : cmp ? "Re-run" : "Compare with tender"}</Button>
+      </div>
+      {items.filter((i) => i.status !== "matches").map((i) => (
+        <div key={i.id} className={cn(CARD, "p-3", i.excerpt && "cursor-pointer", active === `x:${i.id}` && "ring-2 ring-gray-900")} onClick={() => i.excerpt && onFocus(i.id)}>
+          <div className="flex items-center gap-2">
+            <span className={cn("rounded border px-1.5 py-0.5 text-xs font-semibold", sevTone(i.severity))}>{i.status === "differs" ? "differs" : i.status === "not_in_award" ? "not in award" : "not in tender"}</span>
+            <span className="text-sm font-semibold text-gray-900">{COMPARISON_AREAS.find((a) => a.id === i.area)?.label}</span>
+            <span className={cn("ml-auto text-xs font-semibold", i.decision === "pending" ? "text-amber-700" : i.decision === "accepted" || i.decision === "confirmed" ? "text-emerald-700" : "text-blue-800")}>{DECISION_LABEL[i.decision as Decision]}</span>
+          </div>
+          <ul className="mt-1.5 space-y-0.5 text-sm">
+            <li><span className="text-gray-500">Tender:</span> {i.tender || "—"}</li>
+            <li><span className="text-gray-500">Award:</span> {i.award || "—"}</li>
+            {i.impact && <li className="text-gray-600">Impact: {i.impact}</li>}
+          </ul>
+          {canDecide && i.decision !== "confirmed" && (
+            <div className="mt-2 flex gap-2" onClick={(e) => e.stopPropagation()}>
+              <Button size="sm" variant={i.decision === "accepted" ? "default" : "outline"} disabled={busy === i.id} onClick={() => decide(i.id, i.decision === "accepted" ? "pending" : "accepted")}>Accept</Button>
+              <Button size="sm" variant={i.decision === "confirm_with_client" ? "default" : "outline"} disabled={busy === i.id} onClick={() => decide(i.id, i.decision === "confirm_with_client" ? "pending" : "confirm_with_client")}>Confirm with client</Button>
+            </div>
+          )}
+          {i.decided_by && i.decision !== "pending" && <p className="mt-1 text-xs text-gray-500">{displayName(i.decided_by)}{i.note ? ` — ${i.note}` : ""}</p>}
+        </div>
+      ))}
+      {cmp && <p className="text-xs text-gray-500">{items.filter((i) => i.status === "matches").length} area(s) match the tender.{!canDecide ? " Switch \"Acting as\" to Contract Manager to decide." : ""}</p>}
     </div>
   );
 }

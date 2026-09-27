@@ -16,11 +16,12 @@ export const Route = createFileRoute("/ccms/contracts")({
 });
 
 const TABS: { key: string; label: string; match: (s: string) => boolean }[] = [
-  { key: "open", label: "Open", match: (s) => !["approved", "rejected", "closed", "active"].includes(s) },
+  { key: "open", label: "Open", match: (s) => !["approved", "signed", "stamped", "rejected", "closed", "active"].includes(s) },
   { key: "review", label: "In review", match: (s) => s === "in_review" || s === "submitted" },
   { key: "approval", label: "Approval", match: (s) => s === "pending_approval" || s === "pending_committee" },
   { key: "returned", label: "Returned", match: (s) => s === "returned" },
-  { key: "done", label: "Approved / rejected", match: (s) => ["approved", "rejected", "closed", "active"].includes(s) },
+  { key: "execution", label: "Signing & stamping", match: (s) => ["approved", "signed", "stamped"].includes(s) },
+  { key: "done", label: "Active / closed / rejected", match: (s) => ["rejected", "closed", "active"].includes(s) },
   { key: "all", label: "All", match: () => true },
 ];
 

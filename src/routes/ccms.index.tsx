@@ -5,7 +5,7 @@ import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { listCcmsContracts } from "@/lib/ccms.functions";
 import { CcmsHeader, StatusBadge, FlagChips, CARD, TH, TD, fmtMoney, waitingOn } from "@/components/ccms-widgets";
-import { CONTRACT_TYPES } from "@/lib/ccms";
+import { CONTRACT_TYPES, contractAlerts } from "@/lib/ccms";
 import { Plus, Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/ccms/")({
@@ -17,10 +17,13 @@ function CcmsDashboard() {
   const listFn = useServerFn(listCcmsContracts);
   const { data: rows = [], isLoading, error } = useQuery({ queryKey: ["ccms-contracts"], queryFn: () => listFn(), staleTime: 15_000 });
 
-  const open = rows.filter((c: any) => !["approved", "rejected", "closed", "active"].includes(c.status));
+  const open = rows.filter((c: any) => !["approved", "signed", "stamped", "rejected", "closed", "active"].includes(c.status));
+  // Everything with a date on it: expiry, stamping window, lapsing bonds, client letters.
+  const alerts = rows.flatMap((c: any) => contractAlerts(c).map((a) => ({ ...a, c }))).sort((a: any, b: any) => a.days - b.days);
   const stat = [
     { label: "Open requests", value: open.length },
     { label: "In review", value: rows.filter((c: any) => c.status === "in_review").length },
+    { label: "Signing & stamping", value: rows.filter((c: any) => ["approved", "signed", "stamped"].includes(c.status)).length },
     { label: "Awaiting approval", value: rows.filter((c: any) => c.status === "pending_approval" || c.status === "pending_committee").length },
     { label: "Past service level", value: open.filter((c: any) => waitingOn(c)?.overdue).length, alert: true },
     { label: "High-severity flags", value: open.filter((c: any) => (c.flags ?? []).some((f: any) => ["related_party", "deviation", "dd_expired", "vendor_not_approved", "loa_items_missing", "work_order_cap", "high_risk_vendor"].includes(f.key))).length, alert: true },
@@ -35,7 +38,7 @@ function CcmsDashboard() {
         action={<Button asChild className="gap-1.5"><Link to="/ccms/new"><Plus className="size-4" /> New request</Link></Button>} />
       <div className="p-6 space-y-6 bg-white min-h-full">
         {error && <p className="text-sm text-red-700">{(error as Error).message}</p>}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
           {stat.map((s) => (
             <div key={s.label} className={CARD + " p-4"}>
               <div className="text-sm text-gray-600">{s.label}</div>
@@ -43,6 +46,25 @@ function CcmsDashboard() {
             </div>
           ))}
         </div>
+
+        {alerts.length > 0 && (
+          <section className={CARD}>
+            <div className="px-4 py-3 border-b border-gray-200">
+              <h2 className="text-sm font-semibold text-gray-900">Alerts · {alerts.length}</h2>
+              <p className="text-sm text-gray-600">Expiring within 30 days, stamping deadlines, lapsing bonds and insurance, unanswered client letters.</p>
+            </div>
+            <ul className="divide-y divide-gray-100">
+              {alerts.map((a: any, i: number) => (
+                <li key={i} className="px-4 py-2.5 flex items-center gap-3 text-sm">
+                  <span className={a.severity === "high" ? "text-red-700 font-semibold w-24" : "text-amber-700 font-semibold w-24"}>{({ expiry: "Expiry", stamping: "Stamping", security: "Bond / policy", confirmation: "Client letter" } as Record<string, string>)[a.kind]}</span>
+                  <Link to="/ccms/$contractId" params={{ contractId: a.c.id }} className="font-medium text-blue-700 hover:underline w-32">{a.c.reference_number}</Link>
+                  <span className="text-gray-900 flex-1">{a.text}</span>
+                  <span className="text-gray-600 truncate max-w-72">{a.c.title}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         <section className={CARD}>
           <div className="px-4 py-3 border-b border-gray-200">

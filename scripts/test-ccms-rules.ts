@@ -1,6 +1,6 @@
 // Commercial CMS routing rules: flags from the request, vendor and review; the
 // route they produce; decisions carried across a re-route.
-import { buildRoute, computeFlags, nextApproval, reviewsDone, templateById, TEMPLATES, type Stage } from "../src/lib/ccms";
+import { buildRoute, computeFlags, nextApproval, reviewsDone, templateById, TEMPLATES, contractAlerts, contractMilestones, displayName, paymentReady, defaultSecurities, type Stage } from "../src/lib/ccms";
 let pass = 0, fail = 0;
 const check = (name: string, ok: boolean, detail = "") => { ok ? pass++ : fail++; console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  — " + detail : ""}`); };
 const ok = { name: "Sinar", status: "approved", dd_valid_until: "2099-01-01", risk_rating: "low", related_party: false };
@@ -54,6 +54,42 @@ const keys = (s: Stage[]) => s.map((x) => x.key).join(",");
   check("ABMS and inside-information clauses are locked", t.clauses.filter((c) => c.locked).map((c) => c.id).sort().join() === "anti_corruption,inside_information");
   check("clause ids unique", new Set(t.clauses.map((c) => c.id)).size === t.clauses.length);
   check("one template registered", TEMPLATES.length === 1);
+}
+{ // names only
+  check("an email shows as a name", displayName("jeremy.teh@cloud-space.co") === "Jeremy Teh", displayName("jeremy.teh@cloud-space.co"));
+  check("a name stays a name", displayName("Siti Aminah") === "Siti Aminah");
+}
+{ // client route: tender comparison + Legal always
+  const r = buildRoute({ contract_type: "client_loa", value_myr: 4_650_000 }, []);
+  check("client award: Tender comparison → Legal → Finance → FAC", keys(r) === "contracts,legal,finance,approval" && r.at(-1)!.label === "Final Approval Committee", keys(r));
+}
+{ // alerts
+  const d = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+  const a = contractAlerts({ status: "active", expiry_date: d(20) });
+  check("expiry alert inside 30 days", a.length === 1 && a[0].kind === "expiry" && /20 days/.test(a[0].text), JSON.stringify(a));
+  check("no expiry alert at 45 days", contractAlerts({ status: "active", expiry_date: d(45) }).length === 0);
+  const s = contractAlerts({ signed_date: d(-26), stamping: null });
+  check("stamping urgent from day 25", s[0]?.kind === "stamping" && s[0].severity === "high", JSON.stringify(s));
+  check("no stamping alert before day 14", contractAlerts({ signed_date: d(-5) }).length === 0);
+  check("lapsing bond alerted", contractAlerts({ securities: [{ type: "performance_bond", required: true, valid_until: d(10) }] })[0]?.kind === "security");
+  check("unanswered client letter after 7 days", contractAlerts({ confirmation: { sent_date: d(-9) } })[0]?.kind === "confirmation");
+}
+{ // payment-ready
+  const sec = defaultSecurities("letter_of_award", 1_000_000);
+  check("LoA needs a 5% bond", sec.find((x) => x.type === "performance_bond")?.amount === 50_000);
+  check("not payment-ready while empty", !paymentReady(sec));
+  const filled = sec.map((x) => ({ ...x, reference: "REF", valid_until: "2027-12-31" }));
+  check("payment-ready once every required item is on file", paymentReady(filled));
+}
+{ // milestones
+  const c = { side: "vendor", status: "stamped", created_at: "2026-09-01", signed_date: "2026-09-10", stamping: { stamped_date: "2026-09-20" },
+    securities: [], approval_route: [{ key: "finance", kind: "review", status: "cleared" }, { key: "approval", kind: "approval", status: "approved", role: "approver", label: "Director" }] };
+  const m = contractMilestones(c, [{ doc_role: "draft" }], []);
+  check("stamped contract: bonds & insurance is the current stage", m.stages.find((x) => x.state === "current")?.key === "securities", JSON.stringify(m.stages.map((x) => x.key + ":" + x.state)));
+  check("…and the next step names Finance", m.next?.role === "finance");
+  const client = contractMilestones({ side: "client", status: "in_review", created_at: "2026-09-01", approval_route: [] }, [{ doc_role: "counterparty" }], [],
+    { items: [{ status: "differs", decision: "confirm_with_client" }, { status: "matches", decision: "accepted" }] });
+  check("client: waiting on the client's confirmation", client.stages.find((x) => x.state === "current")?.key === "tender", JSON.stringify(client.stages.map((x) => x.key + ":" + x.state)));
 }
 console.log(`\n${pass}/${pass + fail} rule checks passed`);
 process.exit(fail ? 1 : 0);
