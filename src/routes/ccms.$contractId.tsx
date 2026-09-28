@@ -211,6 +211,14 @@ function ContractDetail() {
                 <div className="text-sm text-gray-600">AI cost on this request</div>
                 <div className="text-lg font-semibold text-gray-900">US${(c.cost_log as any[]).reduce((a, x) => a + (x.usd ?? 0), 0).toFixed(4)}</div>
                 <div className="text-sm text-gray-500">{c.cost_log.length} AI call{c.cost_log.length === 1 ? "" : "s"}</div>
+                <ul className="mt-2 space-y-1.5">
+                  {(c.cost_log as any[]).map((x, i) => (
+                    <li key={i} className="text-sm">
+                      <div className="flex"><span className="text-gray-800">{x.op}</span><span className="ml-auto text-gray-900">${(x.usd ?? 0).toFixed(4)}</span></div>
+                      <div className="text-gray-500">{x.model}{x.tokens ? ` · in ${x.tokens.input.toLocaleString()} · thinking ${x.tokens.thinking.toLocaleString()} · out ${x.tokens.output.toLocaleString()}` : ""}</div>
+                    </li>
+                  ))}
+                </ul>
               </section>
             )}
           </aside>

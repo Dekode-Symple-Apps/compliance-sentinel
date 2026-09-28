@@ -16,6 +16,15 @@ import {
   type CcmsRole, type Flag, type Stage, type VendorLite,
 } from "@/lib/ccms";
 
+/** One cost-log line: exact token counts from the API, priced from the table. */
+function costEntry(op: string, res: any, model: string) {
+  const u = res.usageMetadata ?? {};
+  const tokens = { input: u.promptTokenCount ?? 0, thinking: u.thoughtsTokenCount ?? 0, output: u.candidatesTokenCount ?? 0 };
+  const cost = computeCost({ inputTokens: tokens.input, outputTokens: tokens.output, thinkingTokens: tokens.thinking, calls: 1 }, model);
+  return { op, usd: Number(cost.usd.toFixed(6)), model, tokens, at: new Date().toISOString() };
+}
+
+
 // ---------------------------------------------------------------------------
 // Commercial CMS — server functions.
 //
@@ -490,9 +499,7 @@ export const reviewCcmsDocument = createServerFn({ method: "POST" })
       // Flags and route follow the new review; status follows the route.
       const routing = await refreshRouting(sb, contract, tenantId);
       const model = res.modelVersion ?? (await getDefaultModel());
-      const u = res.usageMetadata ?? {};
-      const cost = computeCost({ inputTokens: u.promptTokenCount ?? 0, outputTokens: u.candidatesTokenCount ?? 0, thinkingTokens: u.thoughtsTokenCount ?? 0, calls: 1 }, model);
-      const cost_log = [...(contract.cost_log ?? []).slice(-49), { op: "Draft review", usd: Number(cost.usd.toFixed(6)), model, at: new Date().toISOString() }];
+      const cost_log = [...(contract.cost_log ?? []).slice(-49), costEntry("Draft review", res, model)];
       await sb.from("ccms_contracts").update({
         ...routing, cost_log,
         status: contract.status === "submitted" ? statusFor(routing.approval_route, true) : contract.status,
@@ -947,11 +954,9 @@ export const compareCcmsAward = createServerFn({ method: "POST" })
     const { items, summary, res } = await runComparison(contract, { name: tender.file_name, ...t }, { name: award.file_name, ...a }, award.comparison?.items ?? []);
     const comparison = { summary, tenderDocId: tender.id, comparedAt: new Date().toISOString(), items };
     await sb.from("ccms_documents").update({ comparison }).eq("id", award.id);
-    const u = res.usageMetadata ?? {};
     const model = res.modelVersion ?? (await getDefaultModel());
-    const cost = computeCost({ inputTokens: u.promptTokenCount ?? 0, outputTokens: u.candidatesTokenCount ?? 0, thinkingTokens: u.thoughtsTokenCount ?? 0, calls: 1 }, model);
     await sb.from("ccms_contracts").update({
-      cost_log: [...(contract.cost_log ?? []).slice(-49), { op: "Tender comparison", usd: Number(cost.usd.toFixed(6)), model, at: new Date().toISOString() }],
+      cost_log: [...(contract.cost_log ?? []).slice(-49), costEntry("Tender comparison", res, model)],
       status: contract.status === "submitted" ? "in_review" : contract.status,
       stage_started_at: contract.status === "submitted" ? new Date().toISOString() : contract.stage_started_at,
     }).eq("id", contract.id);
@@ -1116,10 +1121,8 @@ export const extractCcmsKeyTerms = createServerFn({ method: "POST" })
     if (!doc) throw new Error("Upload the signed copy first.");
     const { text, pdfBase64 } = await documentText(doc);
     const { out, res } = await runKeyTerms(doc.file_name, text, pdfBase64);
-    const u = res.usageMetadata ?? {};
     const model = res.modelVersion ?? (await getDefaultModel());
-    const cost = computeCost({ inputTokens: u.promptTokenCount ?? 0, outputTokens: u.candidatesTokenCount ?? 0, thinkingTokens: u.thoughtsTokenCount ?? 0, calls: 1 }, model);
-    await sb.from("ccms_contracts").update({ cost_log: [...(contract.cost_log ?? []).slice(-49), { op: "Key terms", usd: Number(cost.usd.toFixed(6)), model, at: new Date().toISOString() }] }).eq("id", contract.id);
+    await sb.from("ccms_contracts").update({ cost_log: [...(contract.cost_log ?? []).slice(-49), costEntry("Key terms", res, model)] }).eq("id", contract.id);
     const terms: KeyTerms = {
       parties: String(out.parties || `${contract.entity} / ${contract.counterparty_name ?? ""}`),
       value: typeof out.value === "number" ? out.value : contract.value ?? null,
