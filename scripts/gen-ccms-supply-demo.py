@@ -74,8 +74,8 @@ def build(path, signed):
 
     h("SUPPLY AGREEMENT", 16, True)
     h("Precast Concrete Drains — LSH 33 Block C", 12, True)
-    if signed: para("Stamp duty paid — Certificate No. STAMPS-2026-DEMO-0231 · LHDN · 1 October 2026")
-    para("THIS AGREEMENT is made on 30 September 2026 and takes effect on 1 October 2026 (the \"Commencement Date\").")
+    if signed: para("Stamp duty paid — Certificate No. STAMPS-2026-DEMO-0231 · LHDN · 28 September 2026")
+    para("THIS AGREEMENT is made on 28 September 2026 and takes effect on 1 October 2026 (the \"Commencement Date\").")
     h("BETWEEN")
     para("(1) LSH BEST BUILDERS SDN BHD (Registration No. 200501023456 (234567-A)), of Wisma Lim Seong Hai, Kuala Lumpur (the \"Purchaser\"); and")
     para("(2) SINAR PRECAST INDUSTRIES SDN BHD (Registration No. 201501012345), of Lot 45, Kawasan Perindustrian Senai, Johor (the \"Supplier\").")
@@ -97,7 +97,7 @@ def build(path, signed):
                           ("SINAR PRECAST INDUSTRIES SDN BHD", (("Rahman bin Ali", "Director"), ("Siti Aminah binti Yusof", "Company Secretary")))]:
         para(f"Signed for and on behalf of {party}:")
         if signed:
-            para(f"    {a[0]}, {a[1]} — 30 September 2026        {b[0]}, {b[1]} — 30 September 2026")
+            para(f"    {a[0]}, {a[1]} — 28 September 2026        {b[0]}, {b[1]} — 28 September 2026")
         else:
             para(f"    ____________________ Name / {a[1]} / Date        ____________________ Name / {b[1]} / Date")
     doc.save(path); print(path)
