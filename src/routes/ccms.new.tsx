@@ -13,11 +13,12 @@ import { CcmsHeader, CARD, useCcmsRole, fmtMoney } from "@/components/ccms-widge
 import { friendlyError } from "@/components/ccms-widgets";
 import { TemplateFieldsForm } from "@/components/ccms-template-form";
 import { FillButton } from "@/components/ccms-actions";
+import { IntakeChat } from "@/components/ccms-intake-chat";
 import { recallForm, rememberForm } from "@/lib/ccms-prefill";
 import {
-  CONTRACT_TYPES, LSH_ENTITIES, FX_TO_MYR, ENTITY_DETAILS, TEMPLATES, fillNda, templateById, toMyr,
+  CONTRACT_TYPES, LSH_ENTITIES, FX_TO_MYR, TEMPLATES, fillNda, particularsFromRecords, templateById, toMyr,
 } from "@/lib/ccms";
-import { Loader2, Upload, ArrowRight } from "lucide-react";
+import { Loader2, Upload, ArrowRight, Bot, ClipboardList } from "lucide-react";
 
 export const Route = createFileRoute("/ccms/new")({
   component: NewRequest,
@@ -56,20 +57,18 @@ function NewRequest() {
   });
   const setT = (k: string, v: string) => setTf((p) => ({ ...p, [k]: v }));
   const [phase, setPhase] = useState<string | null>(null);
+  const [intake, setIntake] = useState<"form" | "chat">("form");
 
   const t = CONTRACT_TYPES[f.contract_type];
   const vendor = vendors.find((v: any) => v.id === f.vendor_id) ?? null;
-  // Carry what the request already knows into the template's particulars —
-  // the vendor record, the entity, the scope — without overwriting an edit.
-  useEffect(() => {
-    if (!vendor) return;
-    setTf((p) => ({ ...p, cp_name: vendor.name, cp_reg: vendor.registration_no ?? "",
-      cp_contact: p.cp_contact || [vendor.contact_name, vendor.contact_email].filter(Boolean).join(", ") }));
-  }, [vendor?.id]);
-  useEffect(() => {
-    const d = ENTITY_DETAILS[f.entity];
-    setTf((p) => ({ ...p, company_reg: d?.regNo ?? "", company_address: d?.address ?? "" }));
-  }, [f.entity]);
+  // The particulars come from the records: the entity master for the Company,
+  // the vendor record for the counterparty. What the record lacks is kept as typed.
+  const fromRecords = (entity: string, v: any | null, prev: Record<string, string>) => {
+    const r = particularsFromRecords(entity, v);
+    return { ...prev, ...Object.fromEntries(Object.entries(r).filter(([, x]) => x)) };
+  };
+  useEffect(() => { if (vendor) setTf((p) => fromRecords(f.entity, vendor, p)); }, [vendor?.id]);
+  useEffect(() => { setTf((p) => fromRecords(f.entity, null, p)); }, [f.entity]);
   // "Fill last used": the particulars go in after the entity and vendor effects
   // above have run, so they are not reset by them.
   const pendingTf = useRef<Record<string, string> | null>(null);
@@ -93,6 +92,13 @@ function NewRequest() {
   const valueNum = f.value === "" ? null : Number(f.value);
   const valueMyr = toMyr(valueNum, f.currency);
   async function submit() {
+    return submitWith({ f, tf, side, tpl, draftMode: mode, file, vendor });
+  }
+  /** Submit with explicit values — the AI Chat submits a proposal it has just
+   *  applied, before the form state has re-rendered. */
+  async function submitWith(x: { f: any; tf: Record<string, string>; side: "vendor" | "client"; tpl: any; draftMode: string; file: File | null; vendor: any }) {
+    const { f, tf, side, tpl, draftMode, file, vendor } = x;
+    const valueNum = f.value === "" || f.value == null ? null : Number(f.value);
     setPhase("Creating the request…");
     let contract: any;
     try {
@@ -130,6 +136,27 @@ function NewRequest() {
     nav({ to: "/ccms/$contractId", params: { contractId: contract.id } });
   }
 
+  /** The AI Chat's proposal, applied to the form — then reviewed, or submitted. */
+  function applyDraft(d: any, submitNow: boolean) {
+    const nextSide: "vendor" | "client" = d.side === "client" ? "client" : "vendor";
+    const v = nextSide === "vendor" ? vendors.find((x: any) => x.name.toLowerCase() === String(d.vendor_name ?? "").toLowerCase()) ?? null : null;
+    const nextF = { ...f, contract_type: d.contract_type, entity: d.entity, vendor_id: v?.id ?? "", counterparty_name: nextSide === "client" ? d.counterparty_name ?? "" : "",
+      title: d.title ?? "", project: d.project ?? "", award_reference: d.award_reference ?? "", value: d.value ?? "", currency: d.currency || "MYR",
+      start_date: d.start_date ?? "", end_date: d.end_date ?? "", scope_summary: d.scope_summary ?? "", requestor_department: d.requestor_department ?? "",
+      personal_data_cross_border: !!d.personal_data_cross_border };
+    const avail = TEMPLATES.filter((x) => x.contractTypes.includes(d.contract_type));
+    const nextTpl = avail[0] ?? null;
+    const p = d.particulars ?? {};
+    const nextTf = fromRecords(d.entity, v, { ...tf, date: d.start_date || tf.date, purpose: p.purpose || d.scope_summary || "",
+      ...(p.direction ? { direction: p.direction } : {}), ...(p.term ? { term: p.term } : {}) });
+    setSide(nextSide); setF(nextF); setTf(nextTf);
+    if (nextTpl) { setDraftMode("generate"); setTplId(nextTpl.id); }
+    if (submitNow) {
+      if (nextSide === "vendor" && !v) { toast.error(`${d.vendor_name ?? "The vendor"} is not on the vendor list.`); setIntake("form"); return; }
+      submitWith({ f: nextF, tf: nextTf, side: nextSide, tpl: nextTpl, draftMode: nextTpl ? "generate" : "upload", file: null, vendor: v });
+    } else setIntake("form");
+  }
+
   const types = Object.entries(CONTRACT_TYPES).filter(([, v]) => v.side === side);
   const available = TEMPLATES.filter((x) => x.contractTypes.includes(f.contract_type));
   const mode = available.length ? draftMode : "upload";
@@ -139,7 +166,16 @@ function NewRequest() {
     <AppShell>
       <CcmsHeader subtitle="New contract request" />
       <div className="p-6 bg-white min-h-full">
-        <div className="max-w-4xl">
+        <div className="max-w-4xl space-y-3">
+          <div className="flex items-center gap-1 rounded-lg border border-gray-200 p-0.5 w-fit">
+            {([["form", "Form", ClipboardList], ["chat", "AI Chat", Bot]] as const).map(([k, l, Icon]) => (
+              <button key={k} onClick={() => setIntake(k)} className={"flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm " + (intake === k ? "bg-gray-900 text-white" : "text-gray-600 hover:text-gray-900")}>
+                <Icon className="size-4" /> {l}
+              </button>
+            ))}
+          </div>
+          {phase && intake === "chat" && <p className="flex items-center gap-2 text-sm text-gray-700"><Loader2 className="size-4 animate-spin" /> {phase}</p>}
+          {intake === "chat" ? <IntakeChat onApply={applyDraft} /> : (
           <div className={CARD + " p-5 space-y-5"}>
             <div className="flex flex-wrap items-center gap-2">
               {(["vendor", "client"] as const).map((s) => (
@@ -264,6 +300,7 @@ function NewRequest() {
               <Link to="/ccms/contracts" className="text-sm text-gray-600 hover:underline">Cancel</Link>
             </div>
           </div>
+          )}
 
         </div>
       </div>

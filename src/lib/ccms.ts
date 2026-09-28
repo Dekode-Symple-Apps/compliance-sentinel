@@ -309,11 +309,41 @@ export function workingDaysSince(from: string | null | undefined, now = new Date
 // — nothing else in the wording changes, so a generated draft is standard by
 // construction and needs no deviation review until the counterparty marks it up.
 
-/** Group entity particulars for the parties block (ASSUMPTION: registration
- *  numbers are left for the requester — never guessed). */
-export const ENTITY_DETAILS: Record<string, { regNo: string; address: string }> = {
-  "Lim Seong Hai Capital Berhad": { regNo: "", address: "Wisma Lim Seong Hai, Kuala Lumpur" },
+/** Group entity particulars for the parties block and notices.
+ *  ASSUMPTION: DEMO values — the registration numbers are placeholders in a
+ *  visibly fake pattern, not the entities' real numbers; replace them with the
+ *  group's entity master before any draft is used for real. */
+export interface EntityDetails { regNo: string; address: string; contact: string; whistleblowing: string }
+const HQ = "Wisma Lim Seong Hai, Kuala Lumpur";
+const legalContact = "Head of Legal, " + HQ + ", legal@example.com";
+export const ENTITY_DETAILS: Record<string, EntityDetails> = {
+  "Lim Seong Hai Capital Berhad": { regNo: "199001012345 (123456-X)", address: HQ, contact: legalContact, whistleblowing: "whistleblowing@example.com" },
+  "LSH BEST Builders Sdn Bhd": { regNo: "200501023456 (234567-A)", address: HQ, contact: legalContact, whistleblowing: "whistleblowing@example.com" },
+  "Astana Setia Sdn Bhd": { regNo: "200801034567 (345678-B)", address: HQ, contact: legalContact, whistleblowing: "whistleblowing@example.com" },
+  "Lim Seong Hai Lighting Sdn Bhd": { regNo: "201101045678 (456789-C)", address: HQ, contact: legalContact, whistleblowing: "whistleblowing@example.com" },
+  "Knight Auto Sdn Bhd": { regNo: "201401056789 (567890-D)", address: HQ, contact: legalContact, whistleblowing: "whistleblowing@example.com" },
+  "Lim Seong Hai Ventures Sdn Bhd": { regNo: "201701067890 (678901-E)", address: HQ, contact: legalContact, whistleblowing: "whistleblowing@example.com" },
 };
+
+/** The counterparty's notice line from the vendor record: name, designation,
+ *  address, email — whatever the record has. */
+export const vendorContact = (v: any): string =>
+  [v?.contact_name, v?.contact_designation, v?.address, v?.contact_email, v?.contact_phone].map((x) => String(x ?? "").trim()).filter(Boolean).join(", ");
+
+/** Template particulars that come from the records: the entity's and the vendor's. */
+export function particularsFromRecords(entity: string, vendor: any | null): Record<string, string> {
+  const e = ENTITY_DETAILS[entity];
+  const out: Record<string, string> = {};
+  if (e) Object.assign(out, { company_reg: e.regNo, company_address: e.address, company_contact: e.contact, whistleblowing: e.whistleblowing });
+  if (vendor) {
+    out.cp_name = vendor.name ?? "";
+    out.cp_reg = vendor.registration_no ?? "";
+    if (vendor.address) out.cp_address = vendor.address;
+    const c = vendorContact(vendor);
+    if (c) out.cp_contact = c;
+  }
+  return out;
+}
 
 export interface TemplateField {
   key: string; label: string; kind: "text" | "textarea" | "date" | "select";

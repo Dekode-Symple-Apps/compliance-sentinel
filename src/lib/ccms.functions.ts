@@ -10,7 +10,7 @@ import { extractPdfPages } from "@/lib/pdf-pages";
 import { computeCost } from "@/lib/pricing";
 import { assertRowTenant, getCallerTenant, requireFeature } from "@/lib/tenant.functions";
 import {
-  CONTRACT_TYPES, CCMS_ROLES, DEMO_SINGLE_USER, flowOf, LOA_ITEMS, BLOCKING_FLAGS, AI_ROLE, roleLabel,
+  CONTRACT_TYPES, CCMS_ROLES, DEMO_SINGLE_USER, flowOf, LSH_ENTITIES, LOA_ITEMS, BLOCKING_FLAGS, AI_ROLE, roleLabel,
   buildRoute, computeFlags, nextApproval, reviewsDone, templateById, toMyr, fillNda, displayName,
   COMPARISON_AREAS, defaultSecurities, SECURITY_TYPES, APPROVAL_BANDS, type Security, type KeyTerms,
   type CcmsRole, type Flag, type Stage, type VendorLite,
@@ -153,20 +153,37 @@ const vendorSchema = z.object({
   cidb_grade: z.string().optional().nullable(),
   contact_name: z.string().optional().nullable(),
   contact_email: z.string().optional().nullable(),
+  contact_designation: z.string().max(200).optional().nullable(),
+  contact_phone: z.string().max(100).optional().nullable(),
+  address: z.string().max(500).optional().nullable(),
   notes: z.string().optional().nullable(),
 });
+
+/** Address, designation and phone live in columns added by
+ *  20260930b_vendor_contact.sql. Written separately, so saving a vendor still
+ *  works on a database where that migration has not been applied yet. */
+const CONTACT_EXTRAS = ["address", "contact_designation", "contact_phone"] as const;
+async function saveContactExtras(sb: any, id: string, data: Record<string, any>) {
+  const extras = Object.fromEntries(CONTACT_EXTRAS.filter((k) => k in data).map((k) => [k, data[k] || null]));
+  if (!Object.keys(extras).length) return;
+  const { error } = await sb.from("ccms_vendors").update(extras).eq("id", id);
+  if (error && !/column/i.test(error.message)) throw new Error(error.message);
+}
 
 export const saveCcmsVendor = createServerFn({ method: "POST" })
   .middleware([requireCcms])
   .inputValidator(vendorSchema)
   .handler(async ({ data, context }) => {
     const { sb, tenantId, userId } = await ccms(context);
-    const row = { ...data, dd_valid_until: data.dd_valid_until || null, updated_at: new Date().toISOString() };
+    const { address, contact_designation, contact_phone, ...base } = data;
+    const extras = { address, contact_designation, contact_phone };
+    const row = { ...base, dd_valid_until: data.dd_valid_until || null, updated_at: new Date().toISOString() };
     if (data.id) {
       await loadVendor(sb, data.id, tenantId);
       const { data: out, error } = await sb.from("ccms_vendors").update(row).eq("id", data.id).select().single();
       if (error) throw new Error(error.message);
-      return out;
+      await saveContactExtras(sb, data.id, extras);
+      return { ...out, ...extras };
     }
     // Duplicate check on SSM number — one master record per company.
     if (data.registration_no) {
@@ -177,7 +194,8 @@ export const saveCcmsVendor = createServerFn({ method: "POST" })
     const { data: out, error } = await sb.from("ccms_vendors")
       .insert({ ...row, id: undefined, tenant_id: tenantId, created_by: userId }).select().single();
     if (error) throw new Error(error.message);
-    return out;
+    await saveContactExtras(sb, out.id, extras);
+    return { ...out, ...extras };
   });
 
 /** Sample vendors so the flow can be walked before real data exists. Only
@@ -1319,4 +1337,58 @@ export const closeCcmsContract = createServerFn({ method: "POST" })
     await logEvent(sb, { contract_id: c.id, event_type: "closed", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
       detail: `${lite ? `Ended — ${data.override_reason}` : `Closed${open.length ? ` with override (${open.join(", ")}): ${data.override_reason}` : ""}`}. Retained to ${closure.retain_until}${data.legal_hold ? " — legal hold" : ""}.${c.vendor_id && works ? " Subcontractor evaluation due." : ""}` });
     return closure;
+  });
+
+// ---------------------------------------------------------------------------
+// AI Chat intake — the same stateless interview as Legal CMS's intake: the
+// client sends the whole conversation each turn; the model asks at most one
+// question at a time and, once it has enough, proposes the request as
+// structured fields that fill the New Request form.
+// ---------------------------------------------------------------------------
+
+function intakeSystem(vendors: any[]): string {
+  const types = Object.entries(CONTRACT_TYPES).map(([k, t]) => `${k}: ${t.label} (${t.side === "vendor" ? "we award" : "we are awarded"}${t.templateId ? "; approved template, draft generated from it" : ""})`);
+  const today = new Date().toISOString().slice(0, 10);
+  return `You are the Commercial Contracts Intake Assistant for the Lim Seong Hai group. You replace the contract request form: interview the requester in plain English, then propose the request.
+
+Ask AT MOST ONE question per turn and at most three in total. Be brief and warm. Today is ${today}.
+
+What a request needs: which side (vendor contract — the Company awards work; or client contract — the Company is awarded work), the contract type, the contracting entity, the vendor (or the client's name), a short title, the scope in 1–2 sentences, value and currency (not needed for an NDA), start and end dates, and the requesting department. For an NDA also: the purpose of the disclosure, who discloses (Mutual / Company to Counterparty only / Counterparty to Company only), the term (One (1) year / Two (2) years / Three (3) years).
+
+CONTRACT TYPES (use the key): ${types.join("; ")}.
+ENTITIES: ${LSH_ENTITIES.join("; ")}.
+VENDORS ON FILE (name — status): ${vendors.map((v) => `${v.name} — ${v.compliance_hold ? "on compliance hold" : v.status}`).join("; ") || "none"}.
+
+Rules:
+- Use a vendor from the list, spelled exactly. If the vendor is not on file, blacklisted or on hold, say so and tell them to onboard or clear it in Vendor Management first; do not propose.
+- Never invent a value, date or reference the requester did not give; leave it null. NDAs run from today; end date = start + term − 1 day.
+- Propose only when you have the type, entity, counterparty, title and scope (and the NDA answers for an NDA). Never on the first turn unless the first message already has all of it.
+
+Reply with ONLY JSON, no markdown:
+{"reply": "your message", "action": null | {"type": "propose_request", "draft": {
+  "side": "vendor" | "client", "contract_type": "key", "entity": "exact entity", "vendor_name": "exact vendor name or null", "counterparty_name": "client name or null",
+  "title": "", "scope_summary": "", "project": "", "award_reference": "", "value": null, "currency": "MYR", "start_date": "yyyy-mm-dd or null", "end_date": "yyyy-mm-dd or null",
+  "requestor_department": "", "personal_data_cross_border": false,
+  "particulars": {"purpose": "", "direction": "Mutual", "term": "Two (2) years"} }}}`;
+}
+
+export const ccmsIntakeChat = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({ messages: z.array(z.object({ role: z.enum(["user", "assistant"]), text: z.string().max(4000) })).min(1).max(40) }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId } = await ccms(context);
+    const { data: vendors } = await sb.from("ccms_vendors").select("name,status,compliance_hold").eq("tenant_id", tenantId).order("name");
+    const res: any = await generateWithFallback({
+      contents: data.messages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.text }] })),
+      config: { systemInstruction: intakeSystem(vendors ?? []), responseMimeType: "application/json", maxOutputTokens: 2048, temperature: 0.2 },
+    }, { tier: "quality" });
+    const text = res.text ?? res.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    const out = parseJson(text);
+    if (out && typeof out.reply === "string") {
+      const d = out.action?.type === "propose_request" ? out.action.draft : null;
+      // Keep only a proposal the form can take: a known type and entity.
+      const ok = d && CONTRACT_TYPES[d.contract_type] && LSH_ENTITIES.includes(d.entity);
+      return { reply: out.reply, action: ok ? { type: "propose_request", draft: d } : null };
+    }
+    return { reply: text || "Sorry — could you say a bit more about the contract you need?", action: null };
   });

@@ -223,6 +223,9 @@ export const saveVendorPortal = createServerFn({ method: "POST" })
         bank_name: reg.bank_name ?? null, bank_account: reg.bank_account ?? null, directors: reg.directors ?? [],
         contact_name: reg.contact_name ?? null, contact_email: reg.contact_email ?? null, cidb_grade: reg.cidb_grade ?? null,
       }).eq("id", r.vendor_id);
+      // Address and phone (20260930b_vendor_contact.sql) — best effort, so an
+      // unmigrated database does not block the vendor's submission.
+      await admin().from("ccms_vendors").update({ address: reg.address ?? null, contact_phone: reg.contact_phone ?? null, contact_designation: ab.designation ?? null }).eq("id", r.vendor_id);
       await admin().from("vms_events").insert({ request_id: r.id, vendor_id: r.vendor_id, event_type: "vendor_submitted", actor_name: `Vendor (${ab.signatory ?? ""})`, detail: `Registration submitted by the vendor.${ab.ctos_consent === "declined" ? " CTOS consent declined." : ""}` });
     }
     return { ok: true };

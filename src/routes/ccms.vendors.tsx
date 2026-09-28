@@ -20,7 +20,7 @@ const CATEGORIES: Record<string, string> = {
   supplier_material: "Supplier — material", supplier_pme: "Supplier — PME / rental / transport", services: "Services (testing, maintenance)",
   subcontractor: "Subcontractor", consultant: "Consultant", agent: "Agent", it_service: "IT service provider",
 };
-const BLANK = { name: "", registration_no: "", category: "subcontractor", status: "approved", dd_valid_until: "", risk_rating: "low", related_party: false, related_party_note: "", cidb_grade: "", contact_name: "", contact_email: "", notes: "" };
+const BLANK = { name: "", registration_no: "", category: "subcontractor", status: "approved", dd_valid_until: "", risk_rating: "low", related_party: false, related_party_note: "", cidb_grade: "", contact_name: "", contact_email: "", contact_designation: "", contact_phone: "", address: "", notes: "" };
 const INPUT = "w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm";
 
 function Vendors() {
@@ -101,6 +101,9 @@ function Vendors() {
               {edit.related_party && <L label="Related-party link" span><input className={INPUT} value={edit.related_party_note ?? ""} onChange={(e) => setEdit({ ...edit, related_party_note: e.target.value })} placeholder="e.g. A director of the Company holds 30%" /></L>}
               <L label="Contact name"><input className={INPUT} value={edit.contact_name ?? ""} onChange={(e) => setEdit({ ...edit, contact_name: e.target.value })} /></L>
               <L label="Contact email"><input className={INPUT} value={edit.contact_email ?? ""} onChange={(e) => setEdit({ ...edit, contact_email: e.target.value })} /></L>
+              <L label="Contact designation"><input className={INPUT} value={edit.contact_designation ?? ""} onChange={(e) => setEdit({ ...edit, contact_designation: e.target.value })} placeholder="e.g. Director" /></L>
+              <L label="Contact phone"><input className={INPUT} value={edit.contact_phone ?? ""} onChange={(e) => setEdit({ ...edit, contact_phone: e.target.value })} /></L>
+              <L label="Registered address" span><input className={INPUT} value={edit.address ?? ""} onChange={(e) => setEdit({ ...edit, address: e.target.value })} /></L>
               <div className="col-span-2 flex gap-2 pt-2"><Button onClick={save} disabled={busy || !edit.name.trim()}>{busy ? <Loader2 className="size-4 animate-spin" /> : "Save"}</Button><Button variant="outline" onClick={() => setEdit(null)}>Cancel</Button></div>
             </div>
           )}
