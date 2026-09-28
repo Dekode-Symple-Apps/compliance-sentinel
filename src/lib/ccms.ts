@@ -325,6 +325,73 @@ export const ENTITY_DETAILS: Record<string, EntityDetails> = {
   "Lim Seong Hai Ventures Sdn Bhd": { regNo: "201701067890 (678901-E)", address: HQ, contact: legalContact, whistleblowing: "whistleblowing@example.com" },
 };
 
+/** "Lim Seong Hai Lighting Sdn Bhd" → "LSH Lighting", for lists and folders. */
+export const entityShort = (e?: string | null) =>
+  String(e ?? "").replace(/^Lim Seong Hai\b/, "LSH").replace(/\s+(Sdn\.? Bhd\.?|Berhad|Bhd)$/i, "").trim();
+
+// ── ownership and obligations ────────────────────────────────────────────────
+// A contract has an owner in the business, not only Legal; each obligation has
+// a category, a person in charge and a due date, so each person sees their own.
+
+export type ObligationCategory = "finance" | "business" | "legal";
+export const OBLIGATION_CATEGORIES: Record<ObligationCategory, string> = { finance: "Finance", business: "Business", legal: "Legal" };
+/** ASSUMPTION: demo people — placeholders until the client's user list is connected. */
+export const DEMO_PEOPLE: { name: string; team: ObligationCategory }[] = [
+  { name: "Jeremy Teh", team: "business" }, { name: "Dabraj", team: "finance" }, { name: "Irwin", team: "legal" },
+];
+export const contractOwner = (c: any): string => c?.owner_name || c?.repository?.owner || c?.requestor_name || "";
+/** Finance and Legal go to their teams; Business to the contract owner. */
+export const defaultPic = (cat: ObligationCategory, owner?: string) =>
+  cat === "business" ? owner || DEMO_PEOPLE.find((p) => p.team === "business")!.name : DEMO_PEOPLE.find((p) => p.team === cat)!.name;
+
+export interface Obligation {
+  id: string; text: string; category: ObligationCategory; pic: string; due_date: string | null; trigger?: string;
+  amount?: number | null; percent?: number | null; status: "open" | "done"; done_by?: string | null; done_at?: string | null; auto?: string;
+}
+/** A category from the wording, for obligations saved before categories existed. */
+export function categoryOf(text: string): ObligationCategory {
+  if (/\b(pay|paid|payment|invoice|deposit|retention|instal|fee|fees|remit|refund)\w*|\d+\s?%|\bRM\s?\d/i.test(text)) return "finance";
+  if (/\b(notif|notice|stamp|return|destroy|confidential|conflict|comply|compliance|law|breach|personal data|dispute|indemn)\w*/i.test(text)) return "legal";
+  return "business";
+}
+const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+/** Old (text) or new (object) obligations → objects with category, PIC and status. */
+export function normalizeObligations(list: any[] | null | undefined, owner?: string): Obligation[] {
+  return (list ?? []).filter(Boolean).map((x: any, i: number) => {
+    const o = typeof x === "string" ? { text: x } : x;
+    const category: ObligationCategory = ["finance", "business", "legal"].includes(o.category) ? o.category : categoryOf(String(o.text ?? ""));
+    return {
+      id: o.id || `o${i + 1}`, text: String(o.text ?? "").trim(), category, pic: o.pic || defaultPic(category, owner),
+      due_date: /^\d{4}-\d{2}-\d{2}$/.test(o.due_date ?? "") ? o.due_date : null, trigger: o.trigger ?? "",
+      amount: typeof o.amount === "number" ? o.amount : o.amount ? Number(o.amount) || null : null,
+      percent: typeof o.percent === "number" ? o.percent : o.percent ? Number(o.percent) || null : null,
+      status: o.status === "done" ? "done" : "open", done_by: o.done_by ?? null, done_at: o.done_at ?? null, auto: o.auto,
+    } as Obligation;
+  }).filter((o) => o.text);
+}
+/** Obligations every filed contract has: decide on renewal 30 days before expiry,
+ *  and stamping while a full-flow contract is unstamped. Added once (by `auto` key). */
+export function autoObligations(c: any, end_date: string | null | undefined, existing: Obligation[], owner: string): Obligation[] {
+  const out: Obligation[] = [];
+  const has = (k: string) => existing.some((o) => o.auto === k);
+  if (end_date && !has("renewal")) {
+    const d = new Date(end_date); d.setDate(d.getDate() - 30);
+    out.push({ id: "auto-renewal", auto: "renewal", text: "Decide on renewal or exit before expiry", category: "business", pic: owner || defaultPic("business"), due_date: isoDay(d), trigger: `30 days before expiry (${end_date})`, status: "open" });
+  }
+  if (flowOf(c) === "full" && !c.stamping?.stamped_date && !has("stamping")) {
+    const base = c.signed_date ? new Date(c.signed_date) : new Date(); base.setDate(base.getDate() + 30);
+    out.push({ id: "auto-stamping", auto: "stamping", text: "Stamp the contract (within 30 days of signing)", category: "legal", pic: defaultPic("legal"), due_date: isoDay(base), trigger: "30 days from signing", status: "open" });
+  }
+  return out;
+}
+export type ObligationBucket = "overdue" | "soon" | "later" | "nodate" | "done";
+export function obligationBucket(o: Obligation, today = new Date()): ObligationBucket {
+  if (o.status === "done") return "done";
+  if (!o.due_date) return "nodate";
+  const d = daysBetween(today, o.due_date);
+  return d < 0 ? "overdue" : d <= 30 ? "soon" : "later";
+}
+
 /** The counterparty's notice line from the vendor record: name, designation,
  *  address, email — whatever the record has. */
 export const vendorContact = (v: any): string =>
@@ -452,7 +519,9 @@ export const paymentReady = (sec: Security[]) =>
 // ── the repository record (CMS-03) ───────────────────────────────────────────
 export interface KeyTerms {
   parties: string; value?: number | null; currency?: string; start_date?: string | null; end_date?: string | null;
-  notice_period?: string; renewal?: string; governing_law?: string; obligations: string[];
+  notice_period?: string; renewal?: string; governing_law?: string;
+  /** Saved as objects; older records hold plain text — read through normalizeObligations(). */
+  obligations: (string | Obligation)[]; owner?: string;
 }
 
 // ── dates ────────────────────────────────────────────────────────────────────

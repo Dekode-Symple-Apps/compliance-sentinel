@@ -6,7 +6,7 @@ import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { listCcmsContracts } from "@/lib/ccms.functions";
 import { CcmsHeader, StatusBadge, FlagChips, CARD, TH, TD, fmtMoney, PRIORITY_TINT } from "@/components/ccms-widgets";
-import { CONTRACT_TYPES, byPriority, priorityOf } from "@/lib/ccms";
+import { CONTRACT_TYPES, LSH_ENTITIES, byPriority, contractOwner, entityShort, priorityOf } from "@/lib/ccms";
 import { Plus, Loader2, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -31,15 +31,16 @@ function CcmsContracts() {
   const [tab, setTab] = useState("open");
   const [side, setSide] = useState<"all" | "vendor" | "client">("all");
   const [q, setQ] = useState("");
+  const [entity, setEntity] = useState("");
 
   const shown = useMemo(() => {
     const t = TABS.find((x) => x.key === tab)!;
     const needle = q.trim().toLowerCase();
     return rows.filter((c: any) =>
-      t.match(c.status) && (side === "all" || c.side === side) &&
+      t.match(c.status) && (side === "all" || c.side === side) && (!entity || c.entity === entity) &&
       (!needle || [c.reference_number, c.title, c.counterparty_name, c.project, c.entity].some((v) => String(v ?? "").toLowerCase().includes(needle))))
       .sort(byPriority);
-  }, [rows, tab, side, q]);
+  }, [rows, tab, side, q, entity]);
 
   return (
     <AppShell>
@@ -57,6 +58,9 @@ function CcmsContracts() {
             <option value="all">All Contracts</option>
             <option value="vendor">Vendor Contracts</option>
             <option value="client">Client Contracts</option>
+          </select>
+          <select value={entity} onChange={(e) => setEntity(e.target.value)} className="rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm">
+            <option value="">All entities</option>{LSH_ENTITIES.map((e) => <option key={e} value={e}>{entityShort(e)}</option>)}
           </select>
           <div className="ml-auto flex items-center gap-2 rounded-md border border-gray-200 px-2 py-1.5">
             <Search className="size-4 text-gray-400" />
@@ -81,7 +85,7 @@ function CcmsContracts() {
                       <tr key={c.id} className={cn("border-b border-gray-100 last:border-0 hover:bg-gray-50/60", PRIORITY_TINT[p.rank])}>
                         <td className={TD}><Link to="/ccms/$contractId" params={{ contractId: c.id }} className="font-medium text-blue-700 hover:underline">{c.reference_number}</Link></td>
                         <td className={TD}><div className="font-medium">{c.title}</div><div className="text-sm text-gray-600">{CONTRACT_TYPES[c.contract_type]?.label} · {c.counterparty_name}</div></td>
-                        <td className={TD}>{c.entity}</td>
+                        <td className={TD}><div title={c.entity}>{entityShort(c.entity)}</div>{contractOwner(c) && <div className="text-sm text-gray-500">Owner: {contractOwner(c)}</div>}</td>
                         <td className={TD}><StatusBadge status={c.status} contract={c} /></td>
                         <td className={TD}><span className={p.rank === 1 ? "text-red-800" : p.rank === 2 ? "text-amber-800" : "text-gray-600"}>{p.reason || "—"}</span></td>
                         <td className={TD}><FlagChips flags={c.flags ?? []} max={2} /></td>
