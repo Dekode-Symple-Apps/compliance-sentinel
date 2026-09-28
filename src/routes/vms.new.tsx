@@ -1,18 +1,20 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { createVmsRequest } from "@/lib/vms.functions";
 import { listVmsVendors } from "@/lib/vms.functions";
-import { CcmsHeader, CARD, useCcmsRole } from "@/components/ccms-widgets";
-import { VENDOR_CATEGORIES, docsFor } from "@/lib/vms";
+import { CcmsHeader, CARD, useCcmsRole, friendlyError } from "@/components/ccms-widgets";
+import { VENDOR_CATEGORIES, docsFor, daysTo } from "@/lib/vms";
 import { LSH_ENTITIES } from "@/lib/ccms";
 import { Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/vms/new")({
+  // ?vendor=<id> opens re-due diligence on that vendor (from Monitoring).
+  validateSearch: (s: Record<string, unknown>): { vendor?: string } => (typeof s.vendor === "string" ? { vendor: s.vendor } : {}),
   component: NewVmsRequest,
   head: () => ({ meta: [{ title: "Vendor Management · New request" }] }),
 });
@@ -31,7 +33,23 @@ function NewVmsRequest() {
   const [f, setF] = useState<any>({ company_name: "", registration_no: "", entity: LSH_ENTITIES[1], category: "supplier_material", goods_services: "", justification: "", annual_spend: "", urgency: "normal", project: "", trade: "", expected_value: "", contact_name: "", contact_email: "", vendor_id: "" });
   const set = (k: string, v: any) => setF((p: any) => ({ ...p, [k]: v }));
   const [busy, setBusy] = useState(false);
-  const category = kind === "subcontractor" ? "subcontractor" : f.category;
+  const { vendor: startVendor } = Route.useSearch();
+  const picked = kind === "redd" ? vendors.find((x: any) => x.id === f.vendor_id) ?? null : null;
+  const category = kind === "subcontractor" ? "subcontractor" : picked?.category ?? f.category;
+
+  /** Start from the vendor's record: entity, contact and why it is due. */
+  function pickVendor(id: string) {
+    const v: any = vendors.find((x: any) => x.id === id);
+    if (!v) { set("vendor_id", id); return; }
+    const d = v.dd_valid_until ? daysTo(v.dd_valid_until) : null;
+    setF((p: any) => ({ ...p, vendor_id: v.id, entity: v.entity || p.entity, category: v.category || p.category,
+      contact_name: v.contact_name ?? "", contact_email: v.contact_email ?? "",
+      justification: d == null ? "Periodic re-due diligence." : d < 0 ? `Due diligence lapsed on ${v.dd_valid_until}${v.compliance_hold ? "; vendor on compliance hold" : ""}.` : `Due diligence expires on ${v.dd_valid_until}.` }));
+  }
+  useEffect(() => {
+    if (!startVendor || !vendors.length) return;
+    setKind("redd"); pickVendor(startVendor);
+  }, [startVendor, vendors.length]);
 
   async function submit() {
     setBusy(true);
@@ -40,7 +58,7 @@ function NewVmsRequest() {
       const r: any = await createFn({ data: {
         kind: kind === "subcontractor" ? "subcontractor" : "onboarding", acting_role: role,
         vendor_id: v?.id ?? null, company_name: v?.name ?? f.company_name, registration_no: v?.registration_no ?? (f.registration_no || null),
-        entity: f.entity, category: v?.category ?? category, goods_services: f.goods_services || null,
+        entity: f.entity, category: v?.category ?? category, goods_services: f.goods_services || v?.goods_services || null,
         justification: kind === "redd" ? `Re-due diligence${f.justification ? `: ${f.justification}` : ""}` : f.justification || null,
         annual_spend: f.annual_spend === "" ? null : Number(f.annual_spend), urgency: f.urgency,
         project: f.project || null, trade: f.trade || null, expected_value: f.expected_value === "" ? null : Number(f.expected_value),
@@ -48,7 +66,7 @@ function NewVmsRequest() {
       } });
       qc.invalidateQueries({ queryKey: ["vms-requests"] });
       nav({ to: "/vms/$requestId", params: { requestId: r.id } });
-    } catch (e: any) { toast.error(e?.message ?? "Could not create the request"); } finally { setBusy(false); }
+    } catch (e: any) { toast.error(friendlyError(e)); } finally { setBusy(false); }
   }
 
   return (
@@ -58,16 +76,30 @@ function NewVmsRequest() {
         <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-6 max-w-6xl">
           <div className={CARD + " p-5 space-y-4"}>
             <div className="flex flex-wrap gap-2">
-              {([["onboarding", "New vendor (VMS-01)"], ["subcontractor", "Subcontractor pre-qualification (VMS-02)"], ["redd", "Re-due diligence of a vendor"]] as const).map(([k, l]) => (
+              {([["onboarding", "New Vendor"], ["subcontractor", "Subcontractor Pre-qualification"], ["redd", "Re-Due Diligence"]] as const).map(([k, l]) => (
                 <button key={k} onClick={() => setKind(k)} className={"rounded-md border px-3 py-1.5 text-sm " + (kind === k ? "border-gray-900 font-semibold" : "border-gray-200 text-gray-600")}>{l}</button>
               ))}
             </div>
             {kind === "redd" ? (
-              <div><label className={LABEL}>Vendor</label>
-                <select className={INPUT} value={f.vendor_id} onChange={(e) => set("vendor_id", e.target.value)}>
-                  <option value="">Select…</option>
-                  {vendors.filter((v: any) => ["approved", "conditional", "on_hold"].includes(v.status)).map((v: any) => <option key={v.id} value={v.id}>{v.name}{v.dd_valid_until ? ` — due diligence to ${v.dd_valid_until}` : ""}</option>)}
-                </select>
+              <div className="space-y-3">
+                <div><label className={LABEL}>Vendor</label>
+                  <select className={INPUT} value={f.vendor_id} onChange={(e) => pickVendor(e.target.value)}>
+                    <option value="">Select…</option>
+                    {vendors.filter((v: any) => ["approved", "conditional", "on_hold"].includes(v.status) || v.id === f.vendor_id).map((v: any) => <option key={v.id} value={v.id}>{v.name}{v.dd_valid_until ? ` · due diligence to ${v.dd_valid_until}` : ""}</option>)}
+                  </select>
+                </div>
+                {picked && (
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-1 rounded-md border border-gray-200 bg-gray-50/50 p-3 text-sm">
+                    {([["Vendor code", picked.vendor_code], ["SSM no.", picked.registration_no], ["Category", VENDOR_CATEGORIES[picked.category] ?? picked.category], ["Status", `${picked.status}${picked.compliance_hold ? " · on hold" : ""}`],
+                      ["Due diligence to", picked.dd_valid_until], ["Risk rating", picked.risk_rating], ["Related party", picked.related_party ? "Yes" : "No"], ["TIN", picked.tin]] as [string, any][]).map(([k, v]) => (
+                      <div key={k}><span className="text-gray-500">{k}</span> <span className={"ml-1 " + (k === "Status" && picked.compliance_hold ? "text-red-700" : "text-gray-900")}>{v || "—"}</span></div>
+                    ))}
+                    {picked.hold_reason && <div className="col-span-2 text-red-700">{picked.hold_reason}</div>}
+                  </div>
+                )}
+                {picked && !picked.category && (
+                  <div><label className={LABEL}>Category <span className="text-red-700">*</span></label><select className={INPUT} value={f.category} onChange={(e) => set("category", e.target.value)}>{Object.entries(VENDOR_CATEGORIES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
+                )}
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-4">
@@ -92,16 +124,16 @@ function NewVmsRequest() {
               </div>
             )}
             <div><label className={LABEL}>Justification {kind === "onboarding" && <span className="text-red-700">*</span>}</label><textarea className={INPUT + " min-h-16"} value={f.justification} onChange={(e) => set("justification", e.target.value)} /></div>
-            {kind !== "redd" && (
+            {(kind !== "redd" || picked) && (
               <div className="grid grid-cols-2 gap-4">
                 <div><label className={LABEL}>Vendor contact name</label><input className={INPUT} value={f.contact_name} onChange={(e) => set("contact_name", e.target.value)} /></div>
                 <div><label className={LABEL}>Vendor contact email</label><input className={INPUT} value={f.contact_email} onChange={(e) => set("contact_email", e.target.value)} /></div>
               </div>
             )}
-            <Button onClick={submit} disabled={busy}>{busy ? <Loader2 className="size-4 animate-spin" /> : "Submit request"}</Button>
+            <Button onClick={submit} disabled={busy || (kind === "redd" && !picked)}>{busy ? <Loader2 className="size-4 animate-spin" /> : "Submit Request"}</Button>
           </div>
           <aside className={CARD + " p-4 h-fit"}>
-            <h2 className="text-sm font-semibold text-gray-900">What the vendor will be asked for</h2>
+            <h2 className="text-sm font-semibold text-gray-900">Required Documents</h2>
             <p className="text-sm text-gray-600">{VENDOR_CATEGORIES[category]}</p>
             <ul className="mt-2 space-y-1 text-sm">
               {docsFor(category).map((d) => <li key={d.id}><span className={d.level === "M" ? "font-semibold text-gray-900" : "text-gray-600"}>{d.label}</span> <span className="text-xs text-gray-500">{d.level === "M" ? "mandatory" : d.level === "C" ? "if relevant" : "suggested"}{d.expires ? " · tracked expiry" : ""}</span></li>)}

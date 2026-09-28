@@ -182,7 +182,7 @@ function RecordDialog({ row, data, onClose, onDone, act }: { row: Row; data: any
           {row.kind === "dd" && (
             <div className="flex items-center gap-3">
               <p className="flex-1 text-gray-700">Due diligence valid to {v?.dd_valid_until}. A new vendor request re-runs screening, documents and approval.</p>
-              <Button asChild onClick={() => act("purchasing_executive")}><Link to="/vms/new">Start Re-Due Diligence</Link></Button>
+              <Button asChild onClick={() => act("purchasing_executive")}><Link to="/vms/new" search={{ vendor: row.vendor_id }}>Start Re-Due Diligence</Link></Button>
             </div>
           )}
           {row.kind === "condition" && (
