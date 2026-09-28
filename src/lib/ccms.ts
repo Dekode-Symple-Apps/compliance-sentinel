@@ -110,6 +110,9 @@ export const TEMPLATES: ContractTemplate[] = [NDA_TEMPLATE as ContractTemplate];
 export const templateFile = (t: ContractTemplate) =>
   `/templates/ccms/${t.code}-${t.title.replace(/ /g, "-")}-v${t.version}.docx`;
 export const templateById = (id?: string | null) => TEMPLATES.find((t) => t.id === id);
+/** A template's status as a short chip ("Draft for Legal adoption" → Draft). */
+export const templateStatus = (s: string) =>
+  /^draft/i.test(s) ? { label: "Draft", tone: "border-amber-200 bg-amber-50/70 text-amber-800" } : { label: "Approved", tone: "border-emerald-200 bg-emerald-50/70 text-emerald-800" };
 
 // ── Letter of Award mandatory items (ASSUMPTION: the spec names 12 items but
 //    does not list them; drafted from the spec's own controls) ───────────────

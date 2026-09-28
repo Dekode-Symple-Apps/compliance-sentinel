@@ -37,7 +37,6 @@ import { Route as LegalMatterIdRouteImport } from './routes/legal.$matterId'
 import { Route as LayoutJobIdRouteImport } from './routes/layout.$jobId'
 import { Route as CreditReportIdRouteImport } from './routes/credit.$reportId'
 import { Route as CcmsVendorsRouteImport } from './routes/ccms.vendors'
-import { Route as CcmsTemplatesRouteImport } from './routes/ccms.templates'
 import { Route as CcmsRepositoryRouteImport } from './routes/ccms.repository'
 import { Route as CcmsNewRouteImport } from './routes/ccms.new'
 import { Route as CcmsContractsRouteImport } from './routes/ccms.contracts'
@@ -47,8 +46,10 @@ import { Route as AmsNewRouteImport } from './routes/ams.new'
 import { Route as AmsDriversRouteImport } from './routes/ams.drivers'
 import { Route as AmsAssetsRouteImport } from './routes/ams.assets'
 import { Route as AmsAssetIdRouteImport } from './routes/ams.$assetId'
+import { Route as CcmsTemplatesIndexRouteImport } from './routes/ccms.templates.index'
 import { Route as ReportsReportIdPresentRouteImport } from './routes/reports.$reportId.present'
 import { Route as LegalReviewDocumentIdRouteImport } from './routes/legal.review.$documentId'
+import { Route as CcmsTemplatesTemplateIdRouteImport } from './routes/ccms.templates.$templateId'
 import { Route as CcmsReviewDocumentIdRouteImport } from './routes/ccms.review.$documentId'
 import { Route as AuthGoogleCallbackRouteImport } from './routes/auth.google.callback'
 
@@ -192,11 +193,6 @@ const CcmsVendorsRoute = CcmsVendorsRouteImport.update({
   path: '/ccms/vendors',
   getParentRoute: () => rootRouteImport,
 } as any)
-const CcmsTemplatesRoute = CcmsTemplatesRouteImport.update({
-  id: '/ccms/templates',
-  path: '/ccms/templates',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const CcmsRepositoryRoute = CcmsRepositoryRouteImport.update({
   id: '/ccms/repository',
   path: '/ccms/repository',
@@ -242,6 +238,11 @@ const AmsAssetIdRoute = AmsAssetIdRouteImport.update({
   path: '/ams/$assetId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CcmsTemplatesIndexRoute = CcmsTemplatesIndexRouteImport.update({
+  id: '/ccms/templates/',
+  path: '/ccms/templates/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ReportsReportIdPresentRoute = ReportsReportIdPresentRouteImport.update({
   id: '/present',
   path: '/present',
@@ -250,6 +251,11 @@ const ReportsReportIdPresentRoute = ReportsReportIdPresentRouteImport.update({
 const LegalReviewDocumentIdRoute = LegalReviewDocumentIdRouteImport.update({
   id: '/legal/review/$documentId',
   path: '/legal/review/$documentId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CcmsTemplatesTemplateIdRoute = CcmsTemplatesTemplateIdRouteImport.update({
+  id: '/ccms/templates/$templateId',
+  path: '/ccms/templates/$templateId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CcmsReviewDocumentIdRoute = CcmsReviewDocumentIdRouteImport.update({
@@ -277,7 +283,6 @@ export interface FileRoutesByFullPath {
   '/ccms/contracts': typeof CcmsContractsRoute
   '/ccms/new': typeof CcmsNewRoute
   '/ccms/repository': typeof CcmsRepositoryRoute
-  '/ccms/templates': typeof CcmsTemplatesRoute
   '/ccms/vendors': typeof CcmsVendorsRoute
   '/credit/$reportId': typeof CreditReportIdRoute
   '/layout/$jobId': typeof LayoutJobIdRoute
@@ -304,8 +309,10 @@ export interface FileRoutesByFullPath {
   '/vms/': typeof VmsIndexRoute
   '/auth/google/callback': typeof AuthGoogleCallbackRoute
   '/ccms/review/$documentId': typeof CcmsReviewDocumentIdRoute
+  '/ccms/templates/$templateId': typeof CcmsTemplatesTemplateIdRoute
   '/legal/review/$documentId': typeof LegalReviewDocumentIdRoute
   '/reports/$reportId/present': typeof ReportsReportIdPresentRoute
+  '/ccms/templates/': typeof CcmsTemplatesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -321,7 +328,6 @@ export interface FileRoutesByTo {
   '/ccms/contracts': typeof CcmsContractsRoute
   '/ccms/new': typeof CcmsNewRoute
   '/ccms/repository': typeof CcmsRepositoryRoute
-  '/ccms/templates': typeof CcmsTemplatesRoute
   '/ccms/vendors': typeof CcmsVendorsRoute
   '/credit/$reportId': typeof CreditReportIdRoute
   '/layout/$jobId': typeof LayoutJobIdRoute
@@ -348,8 +354,10 @@ export interface FileRoutesByTo {
   '/vms': typeof VmsIndexRoute
   '/auth/google/callback': typeof AuthGoogleCallbackRoute
   '/ccms/review/$documentId': typeof CcmsReviewDocumentIdRoute
+  '/ccms/templates/$templateId': typeof CcmsTemplatesTemplateIdRoute
   '/legal/review/$documentId': typeof LegalReviewDocumentIdRoute
   '/reports/$reportId/present': typeof ReportsReportIdPresentRoute
+  '/ccms/templates': typeof CcmsTemplatesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -366,7 +374,6 @@ export interface FileRoutesById {
   '/ccms/contracts': typeof CcmsContractsRoute
   '/ccms/new': typeof CcmsNewRoute
   '/ccms/repository': typeof CcmsRepositoryRoute
-  '/ccms/templates': typeof CcmsTemplatesRoute
   '/ccms/vendors': typeof CcmsVendorsRoute
   '/credit/$reportId': typeof CreditReportIdRoute
   '/layout/$jobId': typeof LayoutJobIdRoute
@@ -393,8 +400,10 @@ export interface FileRoutesById {
   '/vms/': typeof VmsIndexRoute
   '/auth/google/callback': typeof AuthGoogleCallbackRoute
   '/ccms/review/$documentId': typeof CcmsReviewDocumentIdRoute
+  '/ccms/templates/$templateId': typeof CcmsTemplatesTemplateIdRoute
   '/legal/review/$documentId': typeof LegalReviewDocumentIdRoute
   '/reports/$reportId/present': typeof ReportsReportIdPresentRoute
+  '/ccms/templates/': typeof CcmsTemplatesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -412,7 +421,6 @@ export interface FileRouteTypes {
     | '/ccms/contracts'
     | '/ccms/new'
     | '/ccms/repository'
-    | '/ccms/templates'
     | '/ccms/vendors'
     | '/credit/$reportId'
     | '/layout/$jobId'
@@ -439,8 +447,10 @@ export interface FileRouteTypes {
     | '/vms/'
     | '/auth/google/callback'
     | '/ccms/review/$documentId'
+    | '/ccms/templates/$templateId'
     | '/legal/review/$documentId'
     | '/reports/$reportId/present'
+    | '/ccms/templates/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -456,7 +466,6 @@ export interface FileRouteTypes {
     | '/ccms/contracts'
     | '/ccms/new'
     | '/ccms/repository'
-    | '/ccms/templates'
     | '/ccms/vendors'
     | '/credit/$reportId'
     | '/layout/$jobId'
@@ -483,8 +492,10 @@ export interface FileRouteTypes {
     | '/vms'
     | '/auth/google/callback'
     | '/ccms/review/$documentId'
+    | '/ccms/templates/$templateId'
     | '/legal/review/$documentId'
     | '/reports/$reportId/present'
+    | '/ccms/templates'
   id:
     | '__root__'
     | '/'
@@ -500,7 +511,6 @@ export interface FileRouteTypes {
     | '/ccms/contracts'
     | '/ccms/new'
     | '/ccms/repository'
-    | '/ccms/templates'
     | '/ccms/vendors'
     | '/credit/$reportId'
     | '/layout/$jobId'
@@ -527,8 +537,10 @@ export interface FileRouteTypes {
     | '/vms/'
     | '/auth/google/callback'
     | '/ccms/review/$documentId'
+    | '/ccms/templates/$templateId'
     | '/legal/review/$documentId'
     | '/reports/$reportId/present'
+    | '/ccms/templates/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -545,7 +557,6 @@ export interface RootRouteChildren {
   CcmsContractsRoute: typeof CcmsContractsRoute
   CcmsNewRoute: typeof CcmsNewRoute
   CcmsRepositoryRoute: typeof CcmsRepositoryRoute
-  CcmsTemplatesRoute: typeof CcmsTemplatesRoute
   CcmsVendorsRoute: typeof CcmsVendorsRoute
   CreditReportIdRoute: typeof CreditReportIdRoute
   LayoutJobIdRoute: typeof LayoutJobIdRoute
@@ -572,7 +583,9 @@ export interface RootRouteChildren {
   VmsIndexRoute: typeof VmsIndexRoute
   AuthGoogleCallbackRoute: typeof AuthGoogleCallbackRoute
   CcmsReviewDocumentIdRoute: typeof CcmsReviewDocumentIdRoute
+  CcmsTemplatesTemplateIdRoute: typeof CcmsTemplatesTemplateIdRoute
   LegalReviewDocumentIdRoute: typeof LegalReviewDocumentIdRoute
+  CcmsTemplatesIndexRoute: typeof CcmsTemplatesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -773,13 +786,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CcmsVendorsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/ccms/templates': {
-      id: '/ccms/templates'
-      path: '/ccms/templates'
-      fullPath: '/ccms/templates'
-      preLoaderRoute: typeof CcmsTemplatesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/ccms/repository': {
       id: '/ccms/repository'
       path: '/ccms/repository'
@@ -843,6 +849,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AmsAssetIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/ccms/templates/': {
+      id: '/ccms/templates/'
+      path: '/ccms/templates'
+      fullPath: '/ccms/templates/'
+      preLoaderRoute: typeof CcmsTemplatesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/reports/$reportId/present': {
       id: '/reports/$reportId/present'
       path: '/present'
@@ -855,6 +868,13 @@ declare module '@tanstack/react-router' {
       path: '/legal/review/$documentId'
       fullPath: '/legal/review/$documentId'
       preLoaderRoute: typeof LegalReviewDocumentIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ccms/templates/$templateId': {
+      id: '/ccms/templates/$templateId'
+      path: '/ccms/templates/$templateId'
+      fullPath: '/ccms/templates/$templateId'
+      preLoaderRoute: typeof CcmsTemplatesTemplateIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/ccms/review/$documentId': {
@@ -900,7 +920,6 @@ const rootRouteChildren: RootRouteChildren = {
   CcmsContractsRoute: CcmsContractsRoute,
   CcmsNewRoute: CcmsNewRoute,
   CcmsRepositoryRoute: CcmsRepositoryRoute,
-  CcmsTemplatesRoute: CcmsTemplatesRoute,
   CcmsVendorsRoute: CcmsVendorsRoute,
   CreditReportIdRoute: CreditReportIdRoute,
   LayoutJobIdRoute: LayoutJobIdRoute,
@@ -927,7 +946,9 @@ const rootRouteChildren: RootRouteChildren = {
   VmsIndexRoute: VmsIndexRoute,
   AuthGoogleCallbackRoute: AuthGoogleCallbackRoute,
   CcmsReviewDocumentIdRoute: CcmsReviewDocumentIdRoute,
+  CcmsTemplatesTemplateIdRoute: CcmsTemplatesTemplateIdRoute,
   LegalReviewDocumentIdRoute: LegalReviewDocumentIdRoute,
+  CcmsTemplatesIndexRoute: CcmsTemplatesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

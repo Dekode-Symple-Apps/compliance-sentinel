@@ -168,24 +168,28 @@ export const ALERT_DAYS = [60, 30, 7];
 export const daysTo = (iso: string, today = new Date()) =>
   Math.round((new Date(iso).setHours(0, 0, 0, 0) - new Date(today).setHours(0, 0, 0, 0)) / 86_400_000);
 
-export interface CredentialAlert { vendor_id: string; vendor: string; item: string; days: number; stage: "60" | "30" | "7" | "overdue"; mandatory: boolean }
+export interface CredentialAlert {
+  vendor_id: string; vendor: string; item: string; days: number; stage: "60" | "30" | "7" | "overdue"; mandatory: boolean;
+  /** What lapses: due diligence, a conditional-approval deadline, or a document (with its type and id). */
+  kind: "dd" | "condition" | "doc"; doc_type?: string; doc_id?: string; date: string;
+}
 
 /** Every credential, due-diligence date and conditional-approval due date
  *  inside the alert window (60 days), or already lapsed. */
 export function credentialAlerts(vendors: any[], docs: any[], today = new Date()): CredentialAlert[] {
   const out: CredentialAlert[] = [];
-  const push = (v: any, item: string, iso: string, mandatory: boolean) => {
+  const push = (v: any, item: string, iso: string, mandatory: boolean, extra: Pick<CredentialAlert, "kind" | "doc_type" | "doc_id">) => {
     const d = daysTo(iso, today);
     if (d > 60) return;
-    out.push({ vendor_id: v.id, vendor: v.name, item, days: d, stage: d < 0 ? "overdue" : d <= 7 ? "7" : d <= 30 ? "30" : "60", mandatory });
+    out.push({ vendor_id: v.id, vendor: v.name, item, days: d, stage: d < 0 ? "overdue" : d <= 7 ? "7" : d <= 30 ? "30" : "60", mandatory, date: iso, ...extra });
   };
   for (const v of vendors) {
     if (v.status === "blacklisted" || v.status === "rejected") continue;
-    if (v.dd_valid_until) push(v, "Due diligence", v.dd_valid_until, true);
-    if (v.conditions?.due) push(v, "Conditional approval", v.conditions.due, true);
+    if (v.dd_valid_until) push(v, "Due diligence", v.dd_valid_until, true, { kind: "dd" });
+    if (v.conditions?.due) push(v, "Conditional approval", v.conditions.due, true, { kind: "condition" });
     for (const d of docs.filter((x) => x.vendor_id === v.id && x.status === "verified" && x.expiry_date)) {
       const t = DOC_TYPES.find((x) => x.id === d.doc_type);
-      push(v, t?.label ?? d.doc_type, d.expiry_date, (t?.need[v.category ?? ""] ?? "-") === "M");
+      push(v, t?.label ?? d.doc_type, d.expiry_date, (t?.need[v.category ?? ""] ?? "-") === "M", { kind: "doc", doc_type: d.doc_type, doc_id: d.id });
     }
   }
   return out.sort((a, b) => a.days - b.days);
