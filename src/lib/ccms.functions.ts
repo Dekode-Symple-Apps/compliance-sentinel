@@ -10,7 +10,7 @@ import { extractPdfPages } from "@/lib/pdf-pages";
 import { computeCost } from "@/lib/pricing";
 import { assertRowTenant, getCallerTenant, requireFeature } from "@/lib/tenant.functions";
 import {
-  CONTRACT_TYPES, CCMS_ROLES, DEMO_SINGLE_USER, LOA_ITEMS, BLOCKING_FLAGS, AI_ROLE, roleLabel,
+  CONTRACT_TYPES, CCMS_ROLES, DEMO_SINGLE_USER, flowOf, LOA_ITEMS, BLOCKING_FLAGS, AI_ROLE, roleLabel,
   buildRoute, computeFlags, nextApproval, reviewsDone, templateById, toMyr, fillNda, displayName,
   COMPARISON_AREAS, defaultSecurities, SECURITY_TYPES, APPROVAL_BANDS, type Security, type KeyTerms,
   type CcmsRole, type Flag, type Stage, type VendorLite,
@@ -104,6 +104,19 @@ async function refreshRouting(sb: any, contract: any, tenantId: string) {
   const flags = computeFlags({ ...contract, review: reviewSignals(docs?.[0]) }, vendor);
   const route = buildRoute(contract, flags, contract.approval_route ?? []);
   return { flags, approval_route: route };
+}
+
+/** What stops a request being approved: a blocking flag, or a generated draft
+ *  whose particulars are still blank ([●]) and so cannot be signed. Shared by
+ *  the approval stage and by Lite, where Legal's decision is the approval. */
+async function approvalBlocks(sb: any, contract: any): Promise<string | null> {
+  const { data: latestDoc } = await sb.from("ccms_documents").select("ai_review").eq("contract_id", contract.id)
+    .in("doc_role", ["draft", "counterparty"]).order("created_at", { ascending: false }).limit(1);
+  const blanks = latestDoc?.[0]?.ai_review?.generated ? (latestDoc[0].ai_review.findings ?? []).length : 0;
+  if (blanks) return `${blanks} required particular(s) are blank in the draft. Regenerate the draft with them completed before approval.`;
+  const blocking = ((contract.flags ?? []) as Flag[]).filter((f) => BLOCKING_FLAGS.includes(f.key));
+  if (blocking.length) return `Cannot approve while these are outstanding: ${blocking.map((f) => f.detail).join(" ")}`;
+  return null;
 }
 
 function statusFor(route: Stage[], hasDraft: boolean): string {
@@ -512,7 +525,7 @@ export const reviewCcmsDocument = createServerFn({ method: "POST" })
           (tpl ? `, ${devCount} template deviation(s)` : ", no approved template") +
           (loa_check ? `, ${loa_check.items.filter((i) => i.status !== "present").length} Letter of Award item(s) missing or unclear` : "") +
           `; ${threads.added} comment thread(s) opened by the AI Reviewer${threads.kept ? `, ${threads.kept} earlier thread(s) kept` : ""}.` });
-      return { ok: true };
+      return { ok: true, findings: ai_review.findings.length, riskScore: ai_review.riskScore, verdict: ai_review.verdict, threads: threads.added };
     } catch (e: any) {
       await sb.from("ccms_documents").update({ ai_review_status: "failed" }).eq("id", doc.id);
       throw new Error(e?.message ?? "AI review failed");
@@ -640,12 +653,13 @@ export const recordCcmsReview = createServerFn({ method: "POST" })
       const open = [own ? `${own} of your own` : "", ai ? `${ai} from the AI Reviewer on the latest draft` : ""].filter(Boolean);
       if (open.length) throw new Error(`Comment threads are still open (${open.join(", ")}). Resolve them, or record "Cleared with comments".`);
     }
-    await sb.from("ccms_reviews").insert({ contract_id: contract.id, document_id: latest?.[0]?.id ?? null, stage: data.stage,
-      outcome: data.outcome, note: data.note, reviewer_id: userId, reviewer_name: userName, acting_role: data.acting_role });
-
     const now = new Date().toISOString();
     const nextRoute = route.map((s) => s.key === data.stage ? { ...s, status: data.outcome, decided_by: userName, decided_at: now, note: data.note ?? null } : s);
     const status = data.outcome === "not_cleared" ? "returned" : statusFor(nextRoute, true);
+    // Lite: Legal's decision is the approval, so the approval's blocks apply here.
+    if (status === "approved") { const block = await approvalBlocks(sb, contract); if (block) throw new Error(block); }
+    await sb.from("ccms_reviews").insert({ contract_id: contract.id, document_id: latest?.[0]?.id ?? null, stage: data.stage,
+      outcome: data.outcome, note: data.note, reviewer_id: userId, reviewer_name: userName, acting_role: data.acting_role });
     await sb.from("ccms_contracts").update({
       approval_route: nextRoute, status,
       stage_started_at: status !== contract.status ? now : contract.stage_started_at, updated_at: now,
@@ -672,17 +686,7 @@ export const decideCcmsApproval = createServerFn({ method: "POST" })
     if (!stage) throw new Error("No approval stage is pending.");
     requireRole(data.acting_role, [stage.role], `decide at the "${stage.label}" stage`);
     if (data.decision !== "approved" && !data.note?.trim()) throw new Error("A reason is required to return or reject.");
-    const blocking = ((contract.flags ?? []) as Flag[]).filter((f) => BLOCKING_FLAGS.includes(f.key));
-    // A generated draft with blank particulars cannot be signed, so it is not approved.
-    const { data: latestDoc } = await sb.from("ccms_documents").select("ai_review").eq("contract_id", contract.id)
-      .in("doc_role", ["draft", "counterparty"]).order("created_at", { ascending: false }).limit(1);
-    const blanks = latestDoc?.[0]?.ai_review?.generated ? (latestDoc[0].ai_review.findings ?? []).length : 0;
-    if (data.decision === "approved" && blanks) {
-      throw new Error(`The draft still has ${blanks} blank particular(s) ([●]). Regenerate it with them completed before approval.`);
-    }
-    if (data.decision === "approved" && blocking.length) {
-      throw new Error(`Cannot approve while these are outstanding: ${blocking.map((f) => f.detail).join(" ")}`);
-    }
+    if (data.decision === "approved") { const block = await approvalBlocks(sb, contract); if (block) throw new Error(block); }
     // Self-approval is blocked; in the single-user demo it is recorded instead.
     const selfApproval = contract.requestor_id && contract.requestor_id === userId;
     if (selfApproval && !DEMO_SINGLE_USER) throw new Error("You raised this request and cannot approve it.");
@@ -825,9 +829,9 @@ export const generateCcmsDraft = createServerFn({ method: "POST" })
     const ai_review = {
       verdict: missing.length ? "caution" : "compliant", riskScore: 0, generated: true,
       summary: `Generated from the approved template ${tpl.code} v${tpl.version}. The wording is the template's; only the parties and Schedule 1 were completed from the request.` +
-        (missing.length ? ` Still to complete (left as [●] in the draft): ${missing.join(", ")}.` : " Ready to send to the counterparty."),
+        (missing.length ? ` Missing particulars: ${missing.join(", ")}.` : " Ready to send to the counterparty."),
       findings: missing.map((m, i) => ({ id: `m${i + 1}`, ref: "Schedule 1 / parties", excerpt: "", severity: "caution", category: "commercial",
-        issue: `${m} not provided — left as [●].`, whyItMatters: "The agreement cannot be signed with a blank particular." })),
+        issue: `${m} not provided.`, whyItMatters: "The agreement cannot be signed with a blank particular." })),
       fields: data.fields, reviewedAt: new Date().toISOString(),
     };
     const { data: doc, error } = await sb.from("ccms_documents").insert({
@@ -870,6 +874,20 @@ export const recordCcmsSentToCounterparty = createServerFn({ method: "POST" })
     await logEvent(sb, { contract_id: contract.id, event_type: "sent", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
       meta: { document_id: doc.id, recipient: data.recipient },
       detail: `Draft v${doc.version} sent to the counterparty (${data.recipient})${data.note ? ` — ${data.note}` : ""}.` });
+    return { ok: true };
+  });
+
+/** The counterparty accepts our draft without changes — the "their version"
+ *  step is then done without a markup to review. */
+export const recordCcmsAcceptedAsIs = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({ contract_id: z.string().uuid(), note: z.string().max(2000).optional().nullable(), acting_role: roleSchema }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await ccms(context);
+    requireRole(data.acting_role, ["requestor", "contract_executive", "legal"], "record the counterparty's answer");
+    const contract = await loadContract(sb, data.contract_id, tenantId);
+    await logEvent(sb, { contract_id: contract.id, event_type: "accepted_as_is", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
+      detail: `Counterparty accepts our draft as is${data.note ? ` — ${data.note}` : ""}.` });
     return { ok: true };
   });
 
@@ -1152,7 +1170,7 @@ export const saveCcmsRepository = createServerFn({ method: "POST" })
     requireRole(data.acting_role, ["contract_executive", "legal", "contract_manager"], "save to the repository");
     const contract = await loadContract(sb, data.contract_id, tenantId);
     if (!contract.signed_date) throw new Error("Only a signed contract goes into the repository.");
-    if (!contract.stamping?.stamped_date) throw new Error("Record stamping first — the repository holds the stamped contract.");
+    if (!contract.stamping?.stamped_date && flowOf(contract) === "full") throw new Error("Record stamping first — the repository holds the stamped contract.");
     if (!data.terms.end_date) throw new Error("Give the expiry date — it drives the 30-day alert.");
     const repository = { ...data.terms, confirmed_by: userName, confirmed_at: new Date().toISOString() };
     await sb.from("ccms_contracts").update({ repository, expiry_date: data.terms.end_date, status: "active", updated_at: new Date().toISOString() }).eq("id", contract.id);
@@ -1283,7 +1301,11 @@ export const closeCcmsContract = createServerFn({ method: "POST" })
     if (c.status !== "active") throw new Error("Only an active contract is closed.");
     const works = ["letter_of_award", "work_order", "subcontract", "client_loa", "client_contract"].includes(c.contract_type);
     const k = data.checklist;
-    const open = [
+    // Lite (a template document): nothing to pay, return or make good — it
+    // ends with a reason and is kept like any other contract.
+    const lite = flowOf(c) === "lite";
+    if (lite && !data.override_reason?.trim()) throw new Error("Say why it ends — e.g. expired, purpose completed.");
+    const open = lite ? [] : [
       !k.payments && "final payments", works && !k.retention_cpc && "first half of retention (CPC reference)", works && !k.retention_cmgd && "second half of retention (CMGD and final account reference)",
       !k.bonds_returned && "bonds returned", !k.defects_closed && "defects closed", !k.obligations_met && "obligations met",
       (c.changes ?? []).some((x: any) => x.approval === "pending" || (x.approval === "approved" && !x.signed)) && "open change requests",
@@ -1291,10 +1313,10 @@ export const closeCcmsContract = createServerFn({ method: "POST" })
     if (open.length && !data.override_reason?.trim()) throw new Error(`Still open: ${open.join(", ")}. Close them, or override with a reason.`);
     const now = new Date();
     const retain = new Date(now); retain.setFullYear(retain.getFullYear() + 7);
-    const closure = { checklist: k, open_at_close: open, override_reason: open.length ? data.override_reason : null, legal_hold: data.legal_hold,
+    const closure = { checklist: k, open_at_close: open, override_reason: open.length || lite ? data.override_reason : null, legal_hold: data.legal_hold,
       closed_at: now.toISOString(), by: userName, retain_until: retain.toISOString().slice(0, 10) };
     await sb.from("ccms_contracts").update({ closure, status: "closed", updated_at: now.toISOString() }).eq("id", c.id);
     await logEvent(sb, { contract_id: c.id, event_type: "closed", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
-      detail: `Closed${open.length ? ` with override (${open.join(", ")}): ${data.override_reason}` : ""}. Retained to ${closure.retain_until}${data.legal_hold ? " — legal hold" : ""}.${c.vendor_id && works ? " Subcontractor evaluation due." : ""}` });
+      detail: `${lite ? `Ended — ${data.override_reason}` : `Closed${open.length ? ` with override (${open.join(", ")}): ${data.override_reason}` : ""}`}. Retained to ${closure.retain_until}${data.legal_hold ? " — legal hold" : ""}.${c.vendor_id && works ? " Subcontractor evaluation due." : ""}` });
     return closure;
   });

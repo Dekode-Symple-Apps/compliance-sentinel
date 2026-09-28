@@ -11,9 +11,13 @@ import { PdfViewer } from "@/components/pdf-viewer";
 import {
   addCcmsComment, compareCcmsAward, decideCcmsDifference, exportCcmsDocumentWithComments, getCcmsDocument, recordCcmsReview, reviewCcmsDocument, setCcmsCommentStatus,
 } from "@/lib/ccms.functions";
-import { CcmsHeader, StatusBadge, OutcomeText, CARD, useCcmsRole } from "@/components/ccms-widgets";
-import { AI_ROLE, CCMS_ROLES, COMPARISON_AREAS, CONTRACT_TYPES, DECISION_LABEL, displayName, roleLabel, templateById, type CcmsRole, type Decision, type Stage } from "@/lib/ccms";
+import { CcmsHeader, StatusBadge, OutcomeText, CARD, useCcmsRole, SeverityIcon, CostChip } from "@/components/ccms-widgets";
+import { friendlyError } from "@/components/ccms-widgets";
+import { AI_ROLE, CCMS_ROLES, COMPARISON_AREAS, CONTRACT_TYPES, DECISION_LABEL, DEMO_SINGLE_USER, displayName, flowOf, stageTitle, roleLabel, templateById, type CcmsRole, type Decision, type Stage } from "@/lib/ccms";
 import { CommentBody } from "@/components/ccms-execution";
+import { RememberedTextarea } from "@/components/ccms-actions";
+import { remember } from "@/lib/ccms-prefill";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ArrowLeft, Loader2, MessageSquarePlus, RefreshCw, Check, RotateCcw, Lock, Quote, Download, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -84,7 +88,7 @@ function ReviewScreen() {
   async function rerun() {
     setRunning(true);
     try { await reviewFn({ data: { document_id: doc.id, acting_role: role } }); toast.success("Review complete"); refresh(); }
-    catch (e: any) { toast.error(e?.message ?? "Review failed"); }
+    catch (e: any) { toast.error(friendlyError(e)); }
     finally { setRunning(false); }
   }
   function commentOnSelection() {
@@ -116,7 +120,7 @@ function ReviewScreen() {
       const a = document.createElement("a"); a.href = url; a.download = r.fileName; a.click();
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
       toast.success(`${r.comments} comment${r.comments === 1 ? "" : "s"} added${r.loose + r.unplaced ? ` — ${r.loose + r.unplaced} attached to the nearest paragraph` : ""}`);
-    } catch (e: any) { toast.error(e?.message ?? "Download failed"); } finally { setExporting(false); }
+    } catch (e: any) { toast.error(friendlyError(e)); } finally { setExporting(false); }
   }
 
   return (
@@ -125,7 +129,8 @@ function ReviewScreen() {
       <div className="bg-white">
         <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-gray-200">
           <Link to="/ccms/$contractId" params={{ contractId: contract.id }} className="inline-flex items-center gap-1 text-sm text-gray-600 hover:underline"><ArrowLeft className="size-4" /> {contract.reference_number}</Link>
-          <StatusBadge status={contract.status} />
+          <StatusBadge status={contract.status} contract={contract} />
+          <CostChip log={contract.cost_log ?? []} />
           {review && <span className="text-sm text-gray-700">Risk <b>{review.riskScore}</b> · {review.findings?.length ?? 0} findings{tpl ? ` · ${devCount} deviation${devCount === 1 ? "" : "s"}` : " · no template"}{loa ? ` · ${loaMissing} LoA item${loaMissing === 1 ? "" : "s"} missing` : ""}</span>}
           <div className="ml-auto flex items-center gap-2">
             <Button variant="outline" size="sm" onMouseDown={(e) => e.preventDefault()} onClick={commentOnSelection} className="gap-1.5"><Quote className="size-4" /> Comment on selected text</Button>
@@ -162,10 +167,10 @@ function ReviewScreen() {
               {tab === "findings" && (review ? (
                 <>
                   <p className="text-sm text-gray-800">{review.summary}</p>
-                  {(review.findings ?? []).map((f: any) => (
+                  {[...(review.findings ?? [])].sort((a: any, b: any) => (({ red_flag: 0, caution: 1 } as any)[a.severity] ?? 2) - (({ red_flag: 0, caution: 1 } as any)[b.severity] ?? 2)).map((f: any) => (
                     <div key={f.id} className={cn(CARD, "p-3 cursor-pointer", active === `f:${f.id}` && "ring-2 ring-gray-900")} onClick={() => focus(`f:${f.id}`)}>
                       <div className="flex items-center gap-2">
-                        <span className={cn("rounded border px-1.5 py-0.5 text-xs font-semibold", sevTone(f.severity))}>{String(f.severity).replace("_", " ")}</span>
+                        <SeverityIcon severity={f.severity} />
                         <span className="text-sm font-semibold text-gray-900">{f.ref}</span>
                         {anchors[`f:${f.id}`] === false && <span className="text-xs text-gray-500">not located</span>}
                       </div>
@@ -282,10 +287,10 @@ function Comments({ contractId, documentId, threads, all, composer, setComposer,
         ...(parent ? { anchor_type: "general" } : { anchor_type: composer?.anchor_type ?? "general", anchor_ref: composer?.anchor_ref ?? null, quote: composer?.quote ?? null }) } });
       if (parent) setReply((r) => ({ ...r, [parent]: "" })); else { setBody(""); setComposer(null); }
       onDone();
-    } catch (e: any) { toast.error(e?.message ?? "Could not post"); } finally { setBusy(false); }
+    } catch (e: any) { toast.error(friendlyError(e)); } finally { setBusy(false); }
   }
   async function setStatus(id: string, status: "open" | "resolved") {
-    try { await statusFn({ data: { comment_id: id, status, acting_role: role } }); onDone(); } catch (e: any) { toast.error(e?.message ?? "Failed"); }
+    try { await statusFn({ data: { comment_id: id, status, acting_role: role } }); onDone(); } catch (e: any) { toast.error(friendlyError(e)); }
   }
 
   const shown = threads.filter((t) => (show === "all" || t.status === "open") &&
@@ -346,45 +351,86 @@ function Comments({ contractId, documentId, threads, all, composer, setComposer,
   );
 }
 
-/** Legal or Finance records its outcome here, beside the draft it reviewed. */
+/** Where each review stands, and a button per pending review. The decision
+ *  itself is a pop-up, opened here or straight from the contract's milestone. */
 function OutcomeBar({ contract, role, openThreadsByRole, onDone }: { contract: any; role: CcmsRole; openThreadsByRole: any[]; onDone: () => void }) {
-  const recordFn = useServerFn(recordCcmsReview);
-  const [outcome, setOutcome] = useState<"cleared" | "cleared_with_comments" | "not_cleared">("cleared");
-  const [note, setNote] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [, setRole] = useCcmsRole();
   const route: Stage[] = contract.approval_route ?? [];
   const stages = route.filter((s) => s.kind === "review");
-  const mine = stages.find((s) => s.role === role);
-  const myOpen = openThreadsByRole.filter((t) => t.acting_role === role || t.acting_role === AI_ROLE).length;
-
-  async function submit() {
-    if (!mine) return;
-    setBusy(true);
-    try {
-      await recordFn({ data: { contract_id: contract.id, stage: mine.key as "legal" | "finance" | "contracts", outcome, note, acting_role: role } });
-      toast.success(`${mine.label}: outcome recorded`); setNote(""); onDone();
-    } catch (e: any) { toast.error(e?.message ?? "Failed"); } finally { setBusy(false); }
-  }
-
+  const lite = flowOf(contract) === "lite";
+  const pending = contract.status === "in_review" ? stages.filter((s) => s.status === "pending") : [];
+  const [open, setOpen] = useState<Stage | null>(null);
+  const start = (s: Stage) => { if (DEMO_SINGLE_USER && role !== s.role) setRole(s.role); setOpen(s); };
+  // Arriving from the milestone button (#decide-legal) opens that decision.
+  useEffect(() => {
+    const key = window.location.hash.replace(/^#decide-/, "");
+    const s = pending.find((x) => x.key === key);
+    if (s) { start(s); window.history.replaceState(null, "", window.location.pathname + window.location.search); }
+  }, [contract.id]);
   return (
     <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-6 py-2.5 border-b border-gray-200">
-      {stages.map((s) => (
-        <span key={s.key} className="text-sm text-gray-700">{s.label}: <OutcomeText status={s.status} /></span>
-      ))}
-      {mine && mine.status === "pending" && contract.status === "in_review" && (
-        <div className="ml-auto flex items-center gap-2">
-          <select value={outcome} onChange={(e) => setOutcome(e.target.value as any)} className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm">
-            <option value="cleared">Cleared</option>
-            <option value="cleared_with_comments">Cleared with comments</option>
-            <option value="not_cleared">Not cleared (return)</option>
-          </select>
-          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={outcome === "cleared" ? "Note (optional)" : "Reason / comments (required)"} className="w-72 rounded-md border border-gray-300 px-2 py-1.5 text-sm" />
-          <Button size="sm" disabled={busy} onClick={submit}>{busy ? <Loader2 className="size-4 animate-spin" /> : "Record outcome"}</Button>
-          {outcome === "cleared" && myOpen > 0 && <span className="text-sm text-amber-700">{myOpen} thread{myOpen === 1 ? "" : "s"} open (yours and the AI Reviewer's) — resolve, or clear with comments</span>}
-        </div>
-      )}
-      {!mine && contract.status === "in_review" && <span className="ml-auto text-sm text-gray-500">Switch "Acting as" to {stages.filter((s) => s.status === "pending").map((s) => CCMS_ROLES[s.role]).join(" or ") || "a reviewer"} to record an outcome.</span>}
+      {stages.map((s) => <span key={s.key} className="text-sm text-gray-700">{stageTitle(s.label)}: <OutcomeText status={s.status} lite={lite} /></span>)}
+      <div className="ml-auto flex flex-wrap gap-2">
+        {pending.map((s, i) => {
+          const blocked = !DEMO_SINGLE_USER && role !== s.role;
+          return (
+            <Button key={s.key} size="sm" variant={i === 0 ? "default" : "outline"} disabled={blocked} onClick={() => start(s)} className="gap-1.5" title={blocked ? `Waiting on ${CCMS_ROLES[s.role]}` : undefined}>
+              {stageTitle(s.label)}{!DEMO_SINGLE_USER && <span className="text-xs font-normal opacity-70">· {CCMS_ROLES[s.role]}</span>}
+            </Button>
+          );
+        })}
+      </div>
+      {open && <OutcomeDialog stage={open} contract={contract} lite={lite} openThreads={openThreadsByRole} onClose={() => setOpen(null)} onDone={onDone} />}
     </div>
+  );
+}
+
+function OutcomeDialog({ stage, contract, lite, openThreads, onClose, onDone }: { stage: Stage; contract: any; lite: boolean; openThreads: any[]; onClose: () => void; onDone: () => void }) {
+  const recordFn = useServerFn(recordCcmsReview);
+  const mineOpen = openThreads.filter((t) => t.acting_role === stage.role || t.acting_role === AI_ROLE).length;
+  const [outcome, setOutcome] = useState<"cleared" | "cleared_with_comments" | "not_cleared">(mineOpen ? "cleared_with_comments" : "cleared");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function submit(o: typeof outcome) {
+    const n = note.trim() || (o === "cleared_with_comments" ? `${lite ? "Approved" : "Cleared"} with ${mineOpen} comment${mineOpen === 1 ? "" : "s"} noted.` : "");
+    setBusy(true);
+    try {
+      await recordFn({ data: { contract_id: contract.id, stage: stage.key as "legal" | "finance" | "contracts", outcome: o, note: n || null, acting_role: stage.role } });
+      remember(o === "not_cleared" ? { return_note: note } : { approve_note: note });
+      toast.success(lite ? (o === "not_cleared" ? "Returned" : "Approved") : `${stage.label}: outcome recorded`);
+      onClose(); onDone();
+    } catch (e: any) { toast.error(friendlyError(e)); } finally { setBusy(false); }
+  }
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-xl bg-white">
+        <DialogHeader>
+          <DialogTitle>{stageTitle(stage.label)}</DialogTitle>
+          <DialogDescription>{contract.reference_number} · {stage.reason}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          {mineOpen > 0 && <p className="flex gap-1.5 text-sm text-amber-800"><SeverityIcon severity="caution" className="mt-0.5" /> {mineOpen} open comment thread{mineOpen === 1 ? "" : "s"} on this version. {lite ? "Approval records them as noted." : "\"Cleared\" requires them resolved."}</p>}
+          {!lite && (
+            <div className="flex flex-wrap gap-3 text-sm">
+              {([["cleared", "Cleared"], ["cleared_with_comments", "Cleared with Comments"], ["not_cleared", "Not Cleared · Return"]] as const).map(([k, l]) => (
+                <label key={k} className="flex items-center gap-1.5"><input type="radio" checked={outcome === k} onChange={() => setOutcome(k)} /> {l}</label>
+              ))}
+            </div>
+          )}
+          <label className="block text-sm text-gray-700">{lite ? "Note · required to return" : outcome === "cleared" ? "Note · optional" : "Reason"}
+            <RememberedTextarea field={lite || outcome === "not_cleared" ? "return_note" : "approve_note"} value={note} onChange={setNote} />
+          </label>
+          <div className="flex gap-2 pt-1">
+            {lite ? (
+              <>
+                <Button disabled={busy} onClick={() => submit(mineOpen ? "cleared_with_comments" : "cleared")}>{busy ? <Loader2 className="size-4 animate-spin" /> : "Approve"}</Button>
+                <Button variant="outline" disabled={busy || !note.trim()} onClick={() => submit("not_cleared")}>Return</Button>
+              </>
+            ) : <Button disabled={busy} onClick={() => submit(outcome)}>{busy ? <Loader2 className="size-4 animate-spin" /> : "Record Outcome"}</Button>}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -401,12 +447,12 @@ function TenderComparison({ doc, onDone, onFocus, active }: { doc: any; onDone: 
   async function runCompare() {
     setBusy("compare");
     try { const r: any = await compareFn({ data: { document_id: doc.id, acting_role: role } }); toast.success(`${r.differences} difference(s) found`); onDone(); }
-    catch (e: any) { toast.error(e?.message ?? "Comparison failed"); } finally { setBusy(null); }
+    catch (e: any) { toast.error(friendlyError(e)); } finally { setBusy(null); }
   }
   async function decide(id: string, decision: "accepted" | "confirm_with_client" | "pending") {
     setBusy(id);
     try { await decideFn({ data: { document_id: doc.id, item_id: id, decision, acting_role: role } }); onDone(); }
-    catch (e: any) { toast.error(e?.message ?? "Failed"); } finally { setBusy(null); }
+    catch (e: any) { toast.error(friendlyError(e)); } finally { setBusy(null); }
   }
   return (
     <div className="space-y-3">

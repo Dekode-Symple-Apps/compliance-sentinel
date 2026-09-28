@@ -5,8 +5,8 @@ import { useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { listCcmsContracts } from "@/lib/ccms.functions";
-import { CcmsHeader, StatusBadge, FlagChips, CARD, TH, TD, fmtMoney, waitingOn } from "@/components/ccms-widgets";
-import { CONTRACT_TYPES } from "@/lib/ccms";
+import { CcmsHeader, StatusBadge, FlagChips, CARD, TH, TD, fmtMoney, PRIORITY_TINT } from "@/components/ccms-widgets";
+import { CONTRACT_TYPES, byPriority, priorityOf } from "@/lib/ccms";
 import { Plus, Loader2, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -17,11 +17,11 @@ export const Route = createFileRoute("/ccms/contracts")({
 
 const TABS: { key: string; label: string; match: (s: string) => boolean }[] = [
   { key: "open", label: "Open", match: (s) => !["approved", "signed", "stamped", "rejected", "closed", "active"].includes(s) },
-  { key: "review", label: "In review", match: (s) => s === "in_review" || s === "submitted" },
+  { key: "review", label: "In Review", match: (s) => s === "in_review" || s === "submitted" },
   { key: "approval", label: "Approval", match: (s) => s === "pending_approval" || s === "pending_committee" },
   { key: "returned", label: "Returned", match: (s) => s === "returned" },
-  { key: "execution", label: "Signing & stamping", match: (s) => ["approved", "signed", "stamped"].includes(s) },
-  { key: "done", label: "Active / closed / rejected", match: (s) => ["rejected", "closed", "active"].includes(s) },
+  { key: "execution", label: "Signing & Stamping", match: (s) => ["approved", "signed", "stamped"].includes(s) },
+  { key: "done", label: "Active / Closed / Rejected", match: (s) => ["rejected", "closed", "active"].includes(s) },
   { key: "all", label: "All", match: () => true },
 ];
 
@@ -37,7 +37,8 @@ function CcmsContracts() {
     const needle = q.trim().toLowerCase();
     return rows.filter((c: any) =>
       t.match(c.status) && (side === "all" || c.side === side) &&
-      (!needle || [c.reference_number, c.title, c.counterparty_name, c.project, c.entity].some((v) => String(v ?? "").toLowerCase().includes(needle))));
+      (!needle || [c.reference_number, c.title, c.counterparty_name, c.project, c.entity].some((v) => String(v ?? "").toLowerCase().includes(needle))))
+      .sort(byPriority);
   }, [rows, tab, side, q]);
 
   return (
@@ -53,9 +54,9 @@ function CcmsContracts() {
             </button>
           ))}
           <select value={side} onChange={(e) => setSide(e.target.value as any)} className="ml-2 rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm">
-            <option value="all">Vendor and client</option>
-            <option value="vendor">Vendor contracts (tender-out)</option>
-            <option value="client">Client contracts (tender-in)</option>
+            <option value="all">All Contracts</option>
+            <option value="vendor">Vendor Contracts</option>
+            <option value="client">Client Contracts</option>
           </select>
           <div className="ml-auto flex items-center gap-2 rounded-md border border-gray-200 px-2 py-1.5">
             <Search className="size-4 text-gray-400" />
@@ -71,18 +72,18 @@ function CcmsContracts() {
               <table className="w-full">
                 <thead><tr className="border-b border-gray-200">
                   <th className={TH}>Reference</th><th className={TH}>Request</th><th className={TH}>Entity</th>
-                  <th className={TH}>Status</th><th className={TH}>Waiting on</th><th className={TH}>Flags</th><th className={TH + " text-right"}>Value</th>
+                  <th className={TH}>Status</th><th className={TH}>Needs</th><th className={TH}>Flags</th><th className={TH + " text-right"}>Value</th>
                 </tr></thead>
                 <tbody>
                   {shown.map((c: any) => {
-                    const w = waitingOn(c);
+                    const p = priorityOf(c);
                     return (
-                      <tr key={c.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50/60">
+                      <tr key={c.id} className={cn("border-b border-gray-100 last:border-0 hover:bg-gray-50/60", PRIORITY_TINT[p.rank])}>
                         <td className={TD}><Link to="/ccms/$contractId" params={{ contractId: c.id }} className="font-medium text-blue-700 hover:underline">{c.reference_number}</Link></td>
                         <td className={TD}><div className="font-medium">{c.title}</div><div className="text-sm text-gray-600">{CONTRACT_TYPES[c.contract_type]?.label} · {c.counterparty_name}</div></td>
                         <td className={TD}>{c.entity}</td>
-                        <td className={TD}><StatusBadge status={c.status} /></td>
-                        <td className={TD}><span className={w?.overdue ? "text-red-700 font-semibold" : ""}>{w?.label ?? "—"}{w?.overdue ? " (overdue)" : ""}</span></td>
+                        <td className={TD}><StatusBadge status={c.status} contract={c} /></td>
+                        <td className={TD}><span className={p.rank === 1 ? "text-red-800" : p.rank === 2 ? "text-amber-800" : "text-gray-600"}>{p.reason || "—"}</span></td>
                         <td className={TD}><FlagChips flags={c.flags ?? []} max={2} /></td>
                         <td className={TD + " text-right tabular-nums"}>{fmtMoney(c.value, c.currency)}</td>
                       </tr>

@@ -4,8 +4,9 @@ import { useServerFn } from "@tanstack/react-start";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { listCcmsContracts } from "@/lib/ccms.functions";
-import { CcmsHeader, StatusBadge, FlagChips, CARD, TH, TD, fmtMoney, waitingOn } from "@/components/ccms-widgets";
-import { CONTRACT_TYPES, contractAlerts } from "@/lib/ccms";
+import { CcmsHeader, StatusBadge, FlagChips, CARD, TH, TD, fmtMoney, waitingOn, PRIORITY_TINT } from "@/components/ccms-widgets";
+import { CONTRACT_TYPES, contractAlerts, byPriority, priorityOf } from "@/lib/ccms";
+import { cn } from "@/lib/utils";
 import { Plus, Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/ccms/")({
@@ -28,9 +29,8 @@ function CcmsDashboard() {
     { label: "Past service level", value: open.filter((c: any) => waitingOn(c)?.overdue).length, alert: true },
     { label: "High-severity flags", value: open.filter((c: any) => (c.flags ?? []).some((f: any) => ["related_party", "deviation", "dd_expired", "vendor_not_approved", "loa_items_missing", "work_order_cap", "high_risk_vendor"].includes(f.key))).length, alert: true },
   ];
-  const attention = open
-    .filter((c: any) => waitingOn(c)?.overdue || c.status === "returned" || (c.flags ?? []).length)
-    .slice(0, 8);
+  // Highest priority first: past service level or blocked, then decisions due.
+  const attention = rows.filter((c: any) => priorityOf(c).rank <= 2).sort(byPriority).slice(0, 10);
 
   return (
     <AppShell>
@@ -55,7 +55,7 @@ function CcmsDashboard() {
             </div>
             <ul className="divide-y divide-gray-100">
               {alerts.map((a: any, i: number) => (
-                <li key={i} className="px-4 py-2.5 flex items-center gap-3 text-sm">
+                <li key={i} className={cn("px-4 py-2.5 flex items-center gap-3 text-sm", a.severity === "high" ? PRIORITY_TINT[1] : PRIORITY_TINT[2])}>
                   <span className={a.severity === "high" ? "text-red-700 font-semibold w-24" : "text-amber-700 font-semibold w-24"}>{({ expiry: "Expiry", stamping: "Stamping", security: "Bond / policy", confirmation: "Client letter" } as Record<string, string>)[a.kind]}</span>
                   <Link to="/ccms/$contractId" params={{ contractId: a.c.id }} className="font-medium text-blue-700 hover:underline w-32">{a.c.reference_number}</Link>
                   <span className="text-gray-900 flex-1">{a.text}</span>
@@ -69,22 +69,22 @@ function CcmsDashboard() {
         <section className={CARD}>
           <div className="px-4 py-3 border-b border-gray-200">
             <h2 className="text-sm font-semibold text-gray-900">Needs attention</h2>
-            <p className="text-sm text-gray-600">Past their service level, returned, or carrying flags.</p>
+            <p className="text-sm text-gray-600">Urgent first (past service level, blocked, expiring), then decisions due.</p>
           </div>
           {isLoading ? <div className="p-6 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="size-4 animate-spin" /> Loading…</div>
             : attention.length === 0 ? <p className="p-6 text-sm text-gray-500">Nothing needs attention.</p>
             : (
               <table className="w-full">
-                <thead><tr className="border-b border-gray-200"><th className={TH}>Reference</th><th className={TH}>Request</th><th className={TH}>Status</th><th className={TH}>Waiting on</th><th className={TH}>Flags</th><th className={TH + " text-right"}>Value</th></tr></thead>
+                <thead><tr className="border-b border-gray-200"><th className={TH}>Reference</th><th className={TH}>Request</th><th className={TH}>Status</th><th className={TH}>Needs</th><th className={TH}>Flags</th><th className={TH + " text-right"}>Value</th></tr></thead>
                 <tbody>
                   {attention.map((c: any) => {
-                    const w = waitingOn(c);
+                    const p = priorityOf(c);
                     return (
-                      <tr key={c.id} className="border-b border-gray-100 last:border-0">
+                      <tr key={c.id} className={cn("border-b border-gray-100 last:border-0", PRIORITY_TINT[p.rank])}>
                         <td className={TD}><Link to="/ccms/$contractId" params={{ contractId: c.id }} className="font-medium text-blue-700 hover:underline">{c.reference_number}</Link></td>
                         <td className={TD}><div className="font-medium">{c.title}</div><div className="text-sm text-gray-600">{CONTRACT_TYPES[c.contract_type]?.label} · {c.counterparty_name}</div></td>
-                        <td className={TD}><StatusBadge status={c.status} /></td>
-                        <td className={TD}><span className={w?.overdue ? "text-red-700 font-semibold" : ""}>{w?.label ?? "—"}{w?.overdue ? " (overdue)" : ""}</span></td>
+                        <td className={TD}><StatusBadge status={c.status} contract={c} /></td>
+                        <td className={TD}><span className={p.rank === 1 ? "text-red-800" : "text-amber-800"}>{p.reason}</span></td>
                         <td className={TD}><FlagChips flags={c.flags ?? []} max={3} /></td>
                         <td className={TD + " text-right tabular-nums"}>{fmtMoney(c.value, c.currency)}</td>
                       </tr>

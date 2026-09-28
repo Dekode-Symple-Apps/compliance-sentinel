@@ -73,6 +73,9 @@ export interface ContractTypeSpec {
   /** Hard value cap in MYR. */
   capMyr?: number;
   templateId?: string;
+  /** Lite flow: a template document (an NDA, not a contract) — Legal decides
+   *  alone, and stamping, bonds and the close-out checklist are not required. */
+  lite?: boolean;
 }
 export const CONTRACT_TYPES: Record<string, ContractTypeSpec> = {
   letter_of_award:       { label: "Letter of Award",                side: "vendor", needsAward: true, loaCheck: true },
@@ -84,10 +87,14 @@ export const CONTRACT_TYPES: Record<string, ContractTypeSpec> = {
   consultancy_agreement: { label: "Consultancy agreement",          side: "vendor" },
   agency_agreement:      { label: "Letter of Agreement (agent)",    side: "vendor", legalAlways: true },
   it_service_agreement:  { label: "IT service agreement",           side: "vendor", itService: true, legalAlways: true },
-  nda:                   { label: "Non-disclosure agreement",       side: "vendor", templateId: "lsh-nda-mutual" },
+  nda:                   { label: "Non-disclosure agreement",       side: "vendor", templateId: "lsh-nda-mutual", lite: true },
   client_loa:            { label: "Client Letter of Award",         side: "client", legalAlways: true },
   client_contract:       { label: "Client contract",                side: "client", legalAlways: true },
 };
+
+/** Lite for template documents, full for contracts. Derived from the type, so
+ *  nothing is stored and a type can be moved between flows in one edit. */
+export const flowOf = (c: { contract_type: string }): "lite" | "full" => (CONTRACT_TYPES[c.contract_type]?.lite ? "lite" : "full");
 
 // ── templates ────────────────────────────────────────────────────────────────
 export interface TemplateClause {
@@ -220,9 +227,17 @@ export function buildRoute(
   ].filter(Boolean) as string[];
   const band = APPROVAL_BANDS.find((b) => (c.value_myr ?? 0) <= b.upToMyr)!;
   const stages: Omit<Stage, "status">[] = [];
-  if (t?.side === "client") stages.push({ key: "contracts", label: "Tender comparison", kind: "review", role: "contract_manager", sla_days: 5, reason: "Award checked against our tender; every difference decided" });
-  if (legalReasons.length) stages.push({ key: "legal", label: "Legal vetting", kind: "review", role: "legal", sla_days: SLA_DAYS.legal, reason: legalReasons.join("; ") });
-  stages.push({ key: "finance", label: "Finance review", kind: "review", role: "finance", sla_days: SLA_DAYS.finance, reason: "Payment terms, bonds, insurance and budget" });
+  if (t?.lite) {
+    // One decision by Legal, beside the document and the AI's comments. A
+    // related party still goes to the Committee — Lite never skips governance.
+    stages.push({ key: "legal", label: "Legal Decision", kind: "review", role: "legal", sla_days: SLA_DAYS.legal,
+      reason: ["Template document — Legal decides", ...legalReasons].join("; ") });
+    if (has("related_party")) stages.push({ key: "committee", label: "Audit & Risk Management Committee", kind: "approval", role: "committee", sla_days: SLA_DAYS.approval, reason: "Related-party transaction" });
+    return carry(stages, previous);
+  }
+  if (t?.side === "client") stages.push({ key: "contracts", label: "Tender Comparison", kind: "review", role: "contract_manager", sla_days: 5, reason: "Award checked against our tender; every difference decided" });
+  if (legalReasons.length) stages.push({ key: "legal", label: "Legal Vetting", kind: "review", role: "legal", sla_days: SLA_DAYS.legal, reason: legalReasons.join("; ") });
+  stages.push({ key: "finance", label: "Finance Review", kind: "review", role: "finance", sla_days: SLA_DAYS.finance, reason: "Payment terms, bonds, insurance and budget" });
   if (has("related_party")) {
     stages.push({ key: "committee", label: "Audit & Risk Management Committee", kind: "approval", role: "committee", sla_days: SLA_DAYS.approval, reason: "Related-party transaction" });
     stages.push({ key: "board_noninterested", label: "Non-interested Board", kind: "approval", role: "approver", sla_days: SLA_DAYS.approval, reason: "Related-party transaction; interested directors excluded" });
@@ -235,6 +250,11 @@ export function buildRoute(
   if (!stages.some((s) => s.key.startsWith("board"))) {
     stages.push({ key: "approval", label: band.label, kind: "approval", role: "approver", sla_days: SLA_DAYS.approval, reason: `Approval matrix: value ${(c.value_myr ?? 0) > 0 ? "RM" + (c.value_myr ?? 0).toLocaleString() : "not stated"}` });
   }
+  return carry(stages, previous);
+}
+
+/** Decisions already taken on a stage that is still required carry over by key. */
+function carry(stages: Omit<Stage, "status">[], previous: Stage[]): Stage[] {
   return stages.map((s) => {
     const prev = previous.find((p) => p.key === s.key);
     return prev && prev.status !== "pending" && prev.status !== "returned" && prev.status !== "not_cleared"
@@ -248,21 +268,25 @@ export const reviewsDone = (route: Stage[]) =>
 export const nextApproval = (route: Stage[]) => route.find((s) => s.kind === "approval" && s.status !== "approved");
 
 // ── status presentation ──────────────────────────────────────────────────────
+// Light tints only — a hint of colour, never a block of it.
 export const STATUS_META: Record<string, { label: string; tone: string }> = {
-  submitted:         { label: "Awaiting draft",     tone: "border-gray-300 text-gray-700" },
-  in_review:         { label: "In review",          tone: "border-blue-300 text-blue-800" },
-  pending_committee: { label: "Committee",          tone: "border-violet-300 text-violet-800" },
-  pending_approval:  { label: "Pending approval",   tone: "border-amber-300 text-amber-800" },
-  approved:          { label: "Approved",           tone: "border-emerald-300 text-emerald-800" },
-  returned:          { label: "Returned",           tone: "border-orange-300 text-orange-800" },
-  rejected:          { label: "Rejected",           tone: "border-red-300 text-red-800" },
-  signing:           { label: "Signing",            tone: "border-gray-300 text-gray-700" },
-  signed:            { label: "Signed — to stamp",  tone: "border-blue-300 text-blue-800" },
-  stamped:           { label: "Stamped",            tone: "border-blue-300 text-blue-800" },
-  stamping:          { label: "Stamping",           tone: "border-gray-300 text-gray-700" },
-  active:            { label: "Active",             tone: "border-emerald-300 text-emerald-800" },
-  closed:            { label: "Closed",             tone: "border-gray-300 text-gray-500" },
+  submitted:         { label: "Awaiting Draft",     tone: "border-gray-200 bg-gray-50 text-gray-700" },
+  in_review:         { label: "In Review",          tone: "border-sky-200 bg-sky-50/70 text-sky-800" },
+  pending_committee: { label: "Committee",          tone: "border-amber-200 bg-amber-50/70 text-amber-800" },
+  pending_approval:  { label: "Pending Approval",   tone: "border-amber-200 bg-amber-50/70 text-amber-800" },
+  approved:          { label: "Approved", tone: "border-sky-200 bg-sky-50/70 text-sky-800" },
+  returned:          { label: "Returned",           tone: "border-orange-200 bg-orange-50/70 text-orange-800" },
+  rejected:          { label: "Rejected",           tone: "border-gray-200 bg-gray-50 text-gray-500" },
+  signing:           { label: "Signing",            tone: "border-sky-200 bg-sky-50/70 text-sky-800" },
+  signed:            { label: "Pending Stamping",  tone: "border-sky-200 bg-sky-50/70 text-sky-800" },
+  stamped:           { label: "Stamped",            tone: "border-sky-200 bg-sky-50/70 text-sky-800" },
+  stamping:          { label: "Stamping",           tone: "border-sky-200 bg-sky-50/70 text-sky-800" },
+  active:            { label: "Active",             tone: "border-emerald-200 bg-emerald-50/70 text-emerald-800" },
+  closed:            { label: "Closed",             tone: "border-gray-200 bg-gray-50 text-gray-500" },
 };
+/** Status label, allowing for Lite (no stamping step, so "Signed" is just that). */
+export const statusLabel = (c: { status: string; contract_type?: string }) =>
+  c.status === "signed" && c.contract_type && flowOf(c as any) === "lite" ? "Pending Filing" : STATUS_META[c.status]?.label ?? c.status;
 export const OUTCOME_LABEL: Record<string, string> = {
   cleared: "Cleared", cleared_with_comments: "Cleared with comments", not_cleared: "Not cleared",
   approved: "Approved", returned: "Returned", rejected: "Rejected", pending: "Pending",
@@ -415,7 +439,7 @@ export function contractAlerts(c: any, today = new Date()): Alert[] {
     if (d <= 30) out.push({ kind: "expiry", days: d, severity: d <= 7 ? "high" : "medium",
       text: d < 0 ? `Expired ${-d} day${d === -1 ? "" : "s"} ago` : `Expires in ${d} day${d === 1 ? "" : "s"} — renew, renegotiate or let lapse` });
   }
-  if (c.signed_date && !c.stamping?.stamped_date) {
+  if (c.signed_date && !c.stamping?.stamped_date && flowOf(c) === "full") {
     const day = daysBetween(c.signed_date, today);
     if (day >= 14) out.push({ kind: "stamping", days: 30 - day, severity: day >= 25 ? "high" : "medium",
       text: day > 30 ? `Stamping overdue — ${day - 30} days past the 30-day window` : `Stamp by day 30 — ${30 - day} day${30 - day === 1 ? "" : "s"} left` });
@@ -439,9 +463,11 @@ export interface Milestone {
   detail?: string; date?: string | null;
 }
 
-/** Where a contract is, stage by stage, and the one thing to do next. */
+/** Where a contract is, stage by stage, and the one thing to do next. Lite
+ *  (template documents) stops at Legal's decision, signing and filing. */
 export function contractMilestones(c: any, docs: any[], events: any[], comparison?: any): { stages: Milestone[]; next: { text: string; role: CcmsRole | null } | null } {
   const client = c.side === "client";
+  const lite = flowOf(c) === "lite";
   const route: Stage[] = c.approval_route ?? [];
   const has = (role: string) => docs.some((d) => d.doc_role === role);
   const ev = (type: string) => events.filter((e) => e.event_type === type).at(-1)?.created_at ?? null;
@@ -455,29 +481,42 @@ export function contractMilestones(c: any, docs: any[], events: any[], compariso
   const secs: Security[] = c.securities ?? [];
   const secOk = secs.length > 0 && paymentReady(secs);
   const inRepo = c.status === "active" || c.status === "closed";
+  const generated = docs.some((d) => d.generated);
+  const theirDocs = docs.filter((d) => d.doc_role === "counterparty");
+  const asIs = ev("accepted_as_is");
   const items = (comparison?.items ?? []) as any[];
   const open = items.filter((i) => i.status !== "matches" && (i.decision ?? "pending") === "pending").length;
   const unconfirmed = items.filter((i) => i.decision === "confirm_with_client").length;
 
   const list: Omit<Milestone, "state">[] & { ok: boolean }[] = [] as any;
   const push = (key: string, label: string, ok: boolean, detail?: string, date?: string | null) => (list as any).push({ key, label, ok, detail, date });
-  push("request", client ? "Award logged" : "Request raised", true, undefined, c.created_at);
+  push("request", client ? "Award Logged" : "Request Raised", true, undefined, c.created_at);
   if (client) {
-    push("tender", "Tender attached", has("tender"));
-    push("compare", "Compared with tender", items.length > 0, items.length ? `${items.filter((i) => i.status !== "matches").length} difference(s)` : undefined);
-    push("differences", "Differences settled", items.length > 0 && open === 0 && unconfirmed === 0,
-      open ? `${open} to decide` : unconfirmed ? `${unconfirmed} awaiting client` : undefined);
+    push("tender", "Tender Attached", has("tender"));
+    push("compare", "Tender Comparison", items.length > 0, items.length ? `${items.filter((i) => i.status !== "matches").length} difference(s)` : undefined);
+    push("differences", "Differences Settled", items.length > 0 && open === 0 && unconfirmed === 0,
+      open ? `${open} pending` : unconfirmed ? `${unconfirmed} with client` : undefined);
   } else {
-    push("draft", "Draft ready", has("draft"), docs.find((d) => d.doc_role === "draft")?.generated ? "from the approved template" : undefined);
-    if (docs.some((d) => d.generated)) push("sent", "Sent to counterparty", !!ev("sent"), undefined, ev("sent"));
+    push("draft", "Draft Ready", has("draft"), docs.find((d) => d.doc_role === "draft")?.generated ? "Template" : undefined);
+    if (generated) {
+      push("sent", "Sent to Counterparty", !!ev("sent"), undefined, ev("sent"));
+      push("theirs", "Counterparty Revision", theirDocs.length > 0 || !!asIs || after,
+        theirDocs.length ? `v${theirDocs[0].version} · AI reviewed` : asIs ? "No changes" : undefined);
+    }
   }
-  push("review", "Reviews", reviewsOk, reviews.filter((s) => s.status === "pending").map((s) => s.label).join(", ") || undefined);
-  push("approval", "Approval", approvalsOk && after, approvals.map((s) => s.label).join(" → "));
+  if (lite) {
+    push("decision", "Legal Decision", reviewsOk && approvalsOk && after, c.status === "returned" ? "Returned" : undefined);
+  } else {
+    push("review", "Reviews", reviewsOk, reviews.filter((s) => s.status === "pending").map((s) => s.label).join(", ") || undefined);
+    push("approval", "Approval", approvalsOk && after, approvals.map((s) => s.label).join(" → "));
+  }
   push("signed", "Signed", signed, undefined, c.signed_date);
-  push("stamped", "Stamped", stamped, !stamped && signed ? `day ${daysBetween(c.signed_date, new Date())} of 30` : undefined, c.stamping?.stamped_date);
-  push("securities", "Bonds & insurance", secOk, secs.length ? (secOk ? "payment-ready" : "incomplete") : undefined);
-  push("repository", "In repository", inRepo, c.expiry_date ? `expires ${c.expiry_date}` : undefined);
-  push("closed", "Closed", c.status === "closed", c.closure?.retain_until ? `kept to ${c.closure.retain_until}` : undefined);
+  if (!lite) {
+    push("stamped", "Stamped", stamped, !stamped && signed ? `Day ${daysBetween(c.signed_date, new Date())} of 30` : undefined, c.stamping?.stamped_date);
+    push("securities", "Bonds & Insurance", secOk, secs.length ? (secOk ? "Payment-ready" : "Incomplete") : undefined);
+  }
+  push("repository", "Repository", inRepo, c.expiry_date ? `Expires ${c.expiry_date}` : undefined);
+  push("closed", "Closed", c.status === "closed", c.closure?.retain_until ? `Retained to ${c.closure.retain_until}` : undefined);
 
   let currentSet = false;
   const stages: Milestone[] = (list as any[]).map((m) => {
@@ -489,21 +528,171 @@ export function contractMilestones(c: any, docs: any[], events: any[], compariso
   const cur = stages.find((s) => s.state === "current")?.key;
   const pending = reviews.filter((s) => s.status === "pending");
   const appr = nextApproval(route);
+  const returned = c.status === "returned";
   const next: Record<string, { text: string; role: CcmsRole | null }> = {
-    tender: { text: "Attach our tender submission, so the award can be compared with it", role: "contract_executive" },
-    compare: { text: "Run the tender comparison on the client's award", role: "contract_manager" },
-    differences: { text: open ? "Decide each difference: accept it, or confirm it with the client" : "Record the client's reply to our confirmation letter", role: "contract_manager" },
-    draft: { text: "Generate the draft from the template, or upload one", role: "requestor" },
-    sent: { text: "Send the draft to the counterparty and mark it as sent", role: "requestor" },
-    review: { text: c.status === "returned" ? "Revise the draft and resubmit" : `Record the outcome: ${pending.map((s) => s.label).join(", ")}`, role: c.status === "returned" ? "requestor" : pending[0]?.role ?? null },
-    approval: { text: appr ? `Decision by ${appr.label}` : "Awaiting approval", role: appr?.role ?? "approver" },
-    signed: { text: "Upload the signed copy and record the signing date and signatories", role: "contract_executive" },
-    stamped: { text: "Record stamping — within 30 days of signing", role: "contract_executive" },
-    securities: { text: "Record the bond, insurance and levy (with amounts and expiry dates)", role: "finance" },
-    repository: { text: "Confirm the key terms the AI read from the signed copy and save to the repository", role: "contract_executive" },
-    closed: { text: "Before expiry: renew, renegotiate or let it end — then close it out (payments, retention, bonds, defects)", role: "contract_manager" },
+    tender: { text: "Awaiting tender submission", role: "contract_executive" },
+    compare: { text: "Awaiting tender comparison", role: "contract_manager" },
+    differences: { text: open ? "Differences pending decision" : "Awaiting client confirmation", role: "contract_manager" },
+    draft: { text: "Awaiting draft", role: "requestor" },
+    sent: { text: "Awaiting dispatch to counterparty", role: "requestor" },
+    theirs: { text: "Awaiting counterparty revision", role: "requestor" },
+    decision: { text: returned ? "Returned for revision" : "Awaiting Legal decision", role: returned ? "requestor" : "legal" },
+    review: { text: returned ? "Returned for revision" : `Awaiting ${pending.map((s) => stageTitle(s.label)).join(" and ")}`, role: returned ? "requestor" : pending[0]?.role ?? null },
+    approval: { text: appr ? `Awaiting ${appr.label} approval` : "Awaiting approval", role: appr?.role ?? "approver" },
+    signed: { text: "Awaiting signed copy", role: "contract_executive" },
+    stamped: { text: "Awaiting stamping — 30 days from signing", role: "contract_executive" },
+    securities: { text: "Awaiting bonds and insurance", role: "finance" },
+    repository: { text: "Awaiting repository filing", role: "contract_executive" },
+    closed: { text: "Active — renewal or close-out", role: "contract_manager" },
   };
   return { stages, next: c.status === "rejected" ? null : cur ? next[cur] ?? null : null };
+}
+
+// ── the action for the current stage ─────────────────────────────────────────
+// One to three buttons under the current milestone. Each opens a pop-up with
+// only that action in it (or goes to the review screen), and names who acts.
+
+export type ActionId =
+  | "generate" | "upload_draft" | "download" | "mark_sent" | "upload_theirs" | "accepted_as_is" | "upload_revised" | "resubmit"
+  | "review" | "decide" | "sign" | "stamp" | "securities" | "repository" | "renew" | "change" | "change_step" | "close"
+  | "attach_tender" | "upload_award" | "open_review" | "confirm_sent" | "confirm_reply";
+export interface NextAction {
+  id: ActionId; label: string; role: CcmsRole; primary?: boolean;
+  /** Review stage key, document or change the action is on. */
+  stage?: string; docId?: string; changeId?: string;
+}
+/** Stage names as the system shows them — also for routes stored before the
+ *  labels were title-cased. */
+export const stageTitle = (x: string) => x.replace(/(^|\s)([a-z])/g, (_m, a, b) => a + b.toUpperCase());
+
+/** Actions that navigate rather than open a pop-up. */
+export const LINK_ACTIONS: ActionId[] = ["review", "open_review", "download"];
+
+export function nextActions(c: any, docs: any[], events: any[], comparison?: any): NextAction[] {
+  if (["rejected", "closed"].includes(c.status)) return [];
+  const lite = flowOf(c) === "lite";
+  const route: Stage[] = c.approval_route ?? [];
+  const tpl = !!CONTRACT_TYPES[c.contract_type]?.templateId;
+  // docs are newest first; the one under review is the newest draft or markup.
+  const latest = docs.find((d) => d.doc_role === "draft" || d.doc_role === "counterparty");
+  const theirs = docs.some((d) => d.doc_role === "counterparty");
+
+  if (c.status === "returned") {
+    return [
+      { id: theirs ? "upload_theirs" : "upload_revised", label: "Upload Revision", role: "requestor" },
+      ...(tpl ? [{ id: "generate" as const, label: "Regenerate Draft", role: "requestor" as const }] : []),
+      { id: "resubmit", label: "Resubmit", role: "requestor", primary: true },
+    ];
+  }
+  const { stages } = contractMilestones(c, docs, events, comparison);
+  const cur = stages.find((s) => s.state === "current")?.key;
+  const decide = (): NextAction[] => {
+    const pending = route.filter((s) => s.kind === "review" && s.status === "pending");
+    if (pending.length) {
+      return pending.map((s, i) => ({ id: "review" as const, label: stageTitle(s.label), role: s.role, primary: i === 0, stage: s.key, docId: latest?.id }));
+    }
+    const appr = nextApproval(route);
+    return appr ? [{ id: "decide", label: `${stageTitle(appr.label)} Approval`, role: appr.role, primary: true, stage: appr.key }] : [];
+  };
+  switch (cur) {
+    case "tender": return [{ id: "attach_tender", label: "Attach Tender", role: "contract_executive", primary: true }];
+    case "compare": {
+      const award = docs.find((d) => d.doc_role === "counterparty");
+      return award
+        ? [{ id: "open_review", label: "Tender Comparison", role: "contract_manager", primary: true, docId: award.id }]
+        : [{ id: "upload_award", label: "Upload Client Award", role: "contract_executive", primary: true }];
+    }
+    case "differences": {
+      const award = docs.find((d) => d.comparison);
+      const items = (comparison?.items ?? []) as any[];
+      if (items.some((i) => i.status !== "matches" && (i.decision ?? "pending") === "pending")) {
+        return [{ id: "open_review", label: "Resolve Differences", role: "contract_manager", primary: true, docId: award?.id }];
+      }
+      return c.confirmation?.sent_date
+        ? [{ id: "confirm_reply", label: "Record Client Reply", role: "contract_manager", primary: true }]
+        : [{ id: "confirm_sent", label: "Confirmation Letter Sent", role: "contract_manager", primary: true }];
+    }
+    case "draft": return [
+      ...(tpl ? [{ id: "generate" as const, label: "Select Template", role: "requestor" as const, primary: true }] : []),
+      { id: "upload_draft", label: "Upload Draft", role: "contract_executive", primary: !tpl },
+    ];
+    case "sent": {
+      const draft = docs.find((d) => d.doc_role === "draft");
+      return [
+        { id: "download", label: "Download Draft", role: "requestor", docId: draft?.id },
+        { id: "mark_sent", label: "Mark as Sent", role: "requestor", primary: true, docId: draft?.id },
+      ];
+    }
+    case "theirs": return [
+      { id: "upload_theirs", label: "Upload Revision", role: "requestor", primary: true },
+      { id: "accepted_as_is", label: "Accepted Without Changes", role: "requestor" },
+    ];
+    case "review": case "decision": case "approval": return decide();
+    case "signed": return [{ id: "sign", label: "Upload Signed Copy", role: "contract_executive", primary: true }];
+    case "stamped": return [{ id: "stamp", label: "Record Stamping", role: "contract_executive", primary: true }];
+    case "securities": return [{ id: "securities", label: "Bonds & Insurance", role: "finance", primary: true }];
+    case "repository": return [{ id: "repository", label: "File to Repository", role: "contract_executive", primary: true }];
+    case "closed": {
+      const out: NextAction[] = [];
+      for (const x of (c.changes ?? []) as any[]) {
+        if (x.signed || x.approval === "rejected") continue;
+        if (x.legal === "pending") out.push({ id: "change_step", label: `${x.id} Legal Vetting`, role: "legal", changeId: x.id, stage: "legal" });
+        else if (x.approval === "pending") out.push({ id: "change_step", label: `${x.id} Approval`, role: "approver", changeId: x.id, stage: "approval" });
+        else if (x.approval === "approved") out.push({ id: "change_step", label: `${x.id} Signed Appendix`, role: "contract_executive", changeId: x.id, stage: "signed" });
+      }
+      const expiring = c.expiry_date && daysBetween(new Date(), c.expiry_date) <= 30;
+      out.push({ id: "renew", label: "Renewal", role: "contract_manager", primary: !!expiring && !out.length });
+      if (!lite) out.push({ id: "change", label: "Change Request", role: "contract_executive" });
+      out.push({ id: "close", label: lite ? "Close & Archive" : "Close-out", role: "contract_manager" });
+      if (out.length && !out.some((a) => a.primary)) out[0].primary = true;
+      return out;
+    }
+    default: return [];
+  }
+}
+
+// ── who is it waiting on, and how urgent ─────────────────────────────────────
+
+/** The stage a request is waiting on, and whether it is past its service level. */
+export function waitingOn(c: any): { label: string; overdue: boolean } | null {
+  const route: Stage[] = c.approval_route ?? [];
+  if (c.status === "submitted") return { label: "Draft", overdue: workingDaysSince(c.created_at) > SLA_DAYS.contract_executive };
+  if (c.status === "in_review") {
+    const open = route.filter((s) => s.kind === "review" && s.status === "pending");
+    const sla = Math.max(0, ...open.map((s) => s.sla_days));
+    return { label: open.map((s) => s.label).join(" · ") || "Review", overdue: workingDaysSince(c.stage_started_at) > sla };
+  }
+  if (c.status === "pending_committee" || c.status === "pending_approval") {
+    const s = nextApproval(route);
+    return s ? { label: s.label, overdue: workingDaysSince(c.stage_started_at) > s.sla_days } : null;
+  }
+  if (c.status === "returned") return { label: "Requestor revision", overdue: false };
+  return null;
+}
+
+/** 1 urgent · 2 needs a decision · 3 in progress · 4 active · 5 closed. Lists
+ *  sort by rank, then by whatever is due soonest. */
+export interface Priority { rank: 1 | 2 | 3 | 4 | 5; reason: string; due: number }
+export function priorityOf(c: any, today = new Date()): Priority {
+  if (["closed", "rejected"].includes(c.status)) return { rank: 5, reason: "", due: 99_999 };
+  const alerts = contractAlerts(c, today);
+  const soonest = alerts.length ? Math.min(...alerts.map((a) => a.days)) : 99_999;
+  const w = waitingOn(c);
+  const blocking = ((c.flags ?? []) as Flag[]).filter((f) => BLOCKING_FLAGS.includes(f.key));
+  const urgent = alerts.find((a) => a.severity === "high" || a.kind === "expiry");
+  if (w?.overdue) return { rank: 1, reason: `${w.label} overdue`, due: -1 };
+  if (blocking.length && c.status !== "active") return { rank: 1, reason: FLAG_META[blocking[0].key].label, due: 0 };
+  if (urgent) return { rank: 1, reason: urgent.text, due: soonest };
+  if (c.status === "returned") return { rank: 2, reason: "Returned for revision", due: 90_000 };
+  if (c.status === "pending_approval" || c.status === "pending_committee") return { rank: 2, reason: `Awaiting ${w?.label ?? "approval"}`, due: 90_000 };
+  if (alerts.length) return { rank: 2, reason: alerts[0].text, due: soonest };
+  if (blocking.length) return { rank: 2, reason: FLAG_META[blocking[0].key].label, due: 90_000 };
+  if (c.status === "active") return { rank: 4, reason: "", due: 99_999 };
+  return { rank: 3, reason: w?.label ? `Awaiting ${w.label}` : "", due: 95_000 };
+}
+export function byPriority(a: any, b: any): number {
+  const pa = priorityOf(a), pb = priorityOf(b);
+  return pa.rank - pb.rank || pa.due - pb.due || String(b.updated_at ?? b.created_at ?? "").localeCompare(String(a.updated_at ?? a.created_at ?? ""));
 }
 
 export const fmtMoneyPlain = (v: number | null | undefined) =>
