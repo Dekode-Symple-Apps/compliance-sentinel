@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useLocation } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
@@ -360,12 +360,14 @@ function OutcomeBar({ contract, role, openThreadsByRole, onDone }: { contract: a
   const pending = contract.status === "in_review" ? stages.filter((s) => s.status === "pending") : [];
   const [open, setOpen] = useState<Stage | null>(null);
   const start = (s: Stage) => { if (DEMO_SINGLE_USER && role !== s.role) setRole(s.role); setOpen(s); };
-  // Arriving from the milestone button (#decide-legal) opens that decision.
+  // Arriving with #decide-legal (the milestone or department button) opens that
+  // decision. Read from the router: a client-side link sets the hash after mount.
+  const { hash } = useLocation();
   useEffect(() => {
-    const key = window.location.hash.replace(/^#decide-/, "");
+    const key = (hash || window.location.hash).replace(/^#?decide-/, "");
     const s = pending.find((x) => x.key === key);
     if (s) { start(s); window.history.replaceState(null, "", window.location.pathname + window.location.search); }
-  }, [contract.id]);
+  }, [contract.id, hash]);
   return (
     <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-6 py-2.5 border-b border-gray-200">
       {stages.map((s) => <span key={s.key} className="text-sm text-gray-700">{stageTitle(s.label)}: <OutcomeText status={s.status} lite={lite} /></span>)}
