@@ -8,11 +8,13 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { CommentBody, ConfirmationRecord, ExecutionRecord, LifecycleRecord, Milestones } from "@/components/ccms-execution";
 import { ActionDialog } from "@/components/ccms-actions";
-import { getCcmsContract } from "@/lib/ccms.functions";
+import { getCcmsContract, setCcmsOwner } from "@/lib/ccms.functions";
+import { ObligationRows } from "@/components/ccms-obligations";
+import { toast } from "sonner";
 import {
   CcmsHeader, StatusBadge, OutcomeText, SlaText, Section, CostChip, SeverityIcon, CARD, TH, TD, fmtMoney, useCcmsRole, NoteText } from "@/components/ccms-widgets";
 import {
-  AI_ROLE, CCMS_ROLES, CONTRACT_TYPES, FLAG_META, BLOCKING_FLAGS, DEMO_SINGLE_USER, flowOf, nextApproval, stageTitle, roleLabel, templateById, displayName,
+  AI_ROLE, CCMS_ROLES, CONTRACT_TYPES, DEMO_PEOPLE, FLAG_META, BLOCKING_FLAGS, DEMO_SINGLE_USER, contractOwner, flowOf, nextApproval, normalizeObligations, obligationBucket, stageTitle, roleLabel, templateById, displayName,
   type Flag, type NextAction, type Stage,
 } from "@/lib/ccms";
 import { Loader2, FileText, ArrowLeft, MoreHorizontal } from "lucide-react";
@@ -150,6 +152,8 @@ function ContractDetail() {
 
           <Section title="Details" summary={`${fmtMoney(c.value, c.currency)} · ${c.start_date ?? "—"} to ${c.end_date ?? "—"} · ${c.counterparty_name ?? "—"}`}>
             <table className="w-full"><tbody>
+              <Row k="Entity" v={c.entity} />
+              <Row k="Contract owner" v={<OwnerEditor c={c} onDone={refresh} />} />
               <Row k="Side" v={c.side === "client" ? "Client contract — the Company is awarded the work (CMS-02)" : "Vendor contract — the Company awards the work (CMS-01)"} />
               <Row k="Value" v={<>{fmtMoney(c.value, c.currency)}{c.currency !== "MYR" && c.value_myr != null ? <span className="text-gray-600"> · ≈ {fmtMoney(c.value_myr)}</span> : null}</>} />
               <Row k="Period" v={`${c.start_date ?? "—"} to ${c.end_date ?? "—"}`} />
@@ -179,6 +183,17 @@ function ContractDetail() {
               <ExecutionRecord c={c} />
             </Section>
           )}
+
+          {c.repository && (() => {
+            const obl = normalizeObligations(c.repository.obligations, contractOwner(c));
+            const open = obl.filter((o) => o.status === "open");
+            const soon = open.filter((o) => ["overdue", "soon"].includes(obligationBucket(o))).length;
+            return (
+              <Section title="Obligations" defaultOpen={soon > 0} summary={`${open.length} open${soon ? ` · ${soon} due within 30 days` : ""} · ${obl.length - open.length} done`}>
+                <div className="-mx-4 -my-3"><ObligationRows rows={obl.map((o) => ({ o, c }))} onChanged={refresh} /></div>
+              </Section>
+            );
+          })()}
 
           {["signed", "stamped", "active", "closed"].includes(c.status) && ((c.changes ?? []).length > 0 || c.renewal) && (
             <Section title="Changes and renewals" summary={`${(c.changes ?? []).length} change${(c.changes ?? []).length === 1 ? "" : "s"}${c.renewal ? ` · ${c.renewal.decision}` : ""}`}>
@@ -253,5 +268,26 @@ function MoreMenu({ c, documents, onDone }: { c: any; documents: any[]; onDone: 
       </DropdownMenu>
       <ActionDialog action={open} c={c} documents={documents} onClose={() => setOpen(null)} onDone={onDone} />
     </>
+  );
+}
+
+/** The contract owner, changeable in place. */
+function OwnerEditor({ c, onDone }: { c: any; onDone: () => void }) {
+  const fn = useServerFn(setCcmsOwner);
+  const [role] = useCcmsRole();
+  const [edit, setEdit] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  if (edit === null) return <span>{contractOwner(c) || "—"} <button onClick={() => setEdit(contractOwner(c))} className="ml-2 text-sm text-blue-700 hover:underline">Change Owner</button></span>;
+  return (
+    <span className="inline-flex items-center gap-2">
+      <input list="owner-people" autoFocus value={edit} onChange={(e) => setEdit(e.target.value)} className="rounded-md border border-gray-300 px-2 py-1 text-sm" />
+      <datalist id="owner-people">{DEMO_PEOPLE.map((p) => <option key={p.name} value={p.name} />)}</datalist>
+      <Button size="sm" disabled={busy || edit.trim().length < 2} onClick={async () => {
+        setBusy(true);
+        try { await fn({ data: { contract_id: c.id, owner: edit.trim(), acting_role: role } }); toast.success("Owner changed"); setEdit(null); onDone(); }
+        catch (e: any) { toast.error(e?.message ?? "Failed"); } finally { setBusy(false); }
+      }}>Save</Button>
+      <button onClick={() => setEdit(null)} className="text-sm text-gray-500 hover:underline">Cancel</button>
+    </span>
   );
 }

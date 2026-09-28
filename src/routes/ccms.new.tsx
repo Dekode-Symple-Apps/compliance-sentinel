@@ -16,7 +16,7 @@ import { FillButton } from "@/components/ccms-actions";
 import { IntakeChat } from "@/components/ccms-intake-chat";
 import { recallForm, rememberForm } from "@/lib/ccms-prefill";
 import {
-  CONTRACT_TYPES, LSH_ENTITIES, FX_TO_MYR, TEMPLATES, fillNda, particularsFromRecords, templateById, toMyr,
+  CONTRACT_TYPES, DEMO_PEOPLE, LSH_ENTITIES, FX_TO_MYR, TEMPLATES, fillNda, particularsFromRecords, templateById, toMyr,
 } from "@/lib/ccms";
 import { Loader2, Upload, ArrowRight, Bot, ClipboardList } from "lucide-react";
 
@@ -43,7 +43,7 @@ function NewRequest() {
   const [f, setF] = useState<any>({
     contract_type: "letter_of_award", entity: LSH_ENTITIES[1], vendor_id: "", counterparty_name: "",
     title: "", project: "", job_number: "", award_reference: "", value: "", currency: "MYR",
-    start_date: "", end_date: "", scope_summary: "", personal_data_cross_border: false, requestor_department: "",
+    start_date: "", end_date: "", scope_summary: "", personal_data_cross_border: false, requestor_department: "", owner_name: "",
   });
   const set = (k: string, v: any) => setF((p: any) => ({ ...p, [k]: v }));
   const [file, setFile] = useState<File | null>(null);
@@ -109,7 +109,7 @@ function NewRequest() {
         ...f, acting_role: role,
         vendor_id: side === "vendor" ? f.vendor_id || null : null,
         counterparty_name: side === "client" ? f.counterparty_name : null,
-        value: valueNum, start_date: f.start_date || null, end_date: f.end_date || null,
+        value: valueNum, start_date: f.start_date || null, end_date: f.end_date || null, owner_name: f.owner_name?.trim() || null,
       } });
     } catch (e: any) { toast.error(friendlyError(e)); setPhase(null); return; }
     qc.invalidateQueries({ queryKey: ["ccms-contracts"] });
@@ -253,11 +253,15 @@ function NewRequest() {
             <div><label className={LABEL}>Scope summary</label><textarea className={INPUT + " min-h-24"} value={f.scope_summary} onChange={(e) => set("scope_summary", e.target.value)} /></div>
             <div className="grid grid-cols-2 gap-4">
               <div><label className={LABEL}>Requesting department</label><input className={INPUT} value={f.requestor_department} onChange={(e) => set("requestor_department", e.target.value)} /></div>
-              <label className="flex items-start gap-2 pt-6 text-sm text-gray-800">
-                <input type="checkbox" className="mt-0.5" checked={f.personal_data_cross_border} onChange={(e) => set("personal_data_cross_border", e.target.checked)} />
-                Personal data will be transferred outside Malaysia under this contract
-              </label>
+              <div><label className={LABEL}>Contract owner</label>
+                <input className={INPUT} list="ccms-people" value={f.owner_name} onChange={(e) => set("owner_name", e.target.value)} placeholder="You, unless someone else owns it" />
+                <datalist id="ccms-people">{DEMO_PEOPLE.map((p) => <option key={p.name} value={p.name} />)}</datalist>
+              </div>
             </div>
+            <label className="flex items-start gap-2 text-sm text-gray-800">
+              <input type="checkbox" className="mt-0.5" checked={f.personal_data_cross_border} onChange={(e) => set("personal_data_cross_border", e.target.checked)} />
+              Personal data will be transferred outside Malaysia under this contract
+            </label>
             <div>
               <label className={LABEL}>Draft</label>
               <div className="flex gap-2">

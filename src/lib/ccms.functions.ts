@@ -13,6 +13,7 @@ import {
   CONTRACT_TYPES, CCMS_ROLES, DEMO_SINGLE_USER, flowOf, LSH_ENTITIES, LOA_ITEMS, BLOCKING_FLAGS, AI_ROLE, roleLabel,
   buildRoute, computeFlags, nextApproval, reviewsDone, templateById, toMyr, fillNda, displayName,
   COMPARISON_AREAS, defaultSecurities, SECURITY_TYPES, APPROVAL_BANDS, type Security, type KeyTerms,
+  autoObligations, contractOwner, normalizeObligations,
   type CcmsRole, type Flag, type Stage, type VendorLite,
 } from "@/lib/ccms";
 
@@ -278,6 +279,7 @@ export const createCcmsContract = createServerFn({ method: "POST" })
     scope_summary: z.string().min(10),
     personal_data_cross_border: z.boolean().default(false),
     requestor_department: z.string().optional().nullable(),
+    owner_name: z.string().max(120).optional().nullable(),
     acting_role: roleSchema,
   }))
   .handler(async ({ data, context }) => {
@@ -305,7 +307,7 @@ export const createCcmsContract = createServerFn({ method: "POST" })
     const base = { ...data, value_myr };
     const flags = computeFlags({ ...base, review: null }, vendor);
     const route = buildRoute(base, flags);
-    const { acting_role, ...fields } = data;
+    const { acting_role, owner_name, ...fields } = data;
     const { data: row, error } = await sb.from("ccms_contracts").insert({
       ...fields,
       side: t.side,
@@ -318,6 +320,7 @@ export const createCcmsContract = createServerFn({ method: "POST" })
       tenant_id: tenantId,
     }).select().single();
     if (error) throw new Error(error.message);
+    await saveOwner(sb, row.id, owner_name?.trim() || userName);
     await logEvent(sb, {
       contract_id: row.id, event_type: "created", actor_id: userId, actor_name: userName, acting_role,
       detail: `${t.label} requested${flags.length ? ` — flags: ${flags.map((f) => f.key).join(", ")}` : ""}.`,
@@ -1141,7 +1144,8 @@ export async function runKeyTerms(fileName: string, text: string, pdfBase64?: st
 Return ONLY JSON:
 {"parties": "both parties' names, short", "value": <number or null>, "currency": "MYR", "start_date": "yyyy-mm-dd or null", "end_date": "yyyy-mm-dd or null (the date it expires; compute from a stated term if the start date is stated)",
  "notice_period": "e.g. 30 days' written notice, or empty", "renewal": "how it renews, at most 12 words, or empty", "governing_law": "short",
- "obligations": ["up to 6 key obligations of the Company or the counterparty with a date or trigger, each at most 15 words"]}`;
+ "obligations": [{"text": "the obligation, at most 15 words", "category": "finance" | "business" | "legal", "due_date": "yyyy-mm-dd when the contract fixes or lets you compute the date, else null", "trigger": "the event or timing it depends on, at most 10 words", "percent": <number or null>, "amount": <number or null>}]}
+Obligations: up to 8, of either party, that someone must act on. finance = paying, invoicing, deposits, retention, fees; legal = notices, stamping, confidentiality returns, data breaches, compliance; business = delivery, performance, reporting, renewal. A payment schedule gives one finance obligation per milestone, with its percent and amount (percent × contract value).`;
   const parts: any[] = [{ text: prompt }];
   if (text.trim()) parts.push({ text: `CONTRACT (${fileName}):\n${text.slice(0, 120_000)}` });
   if (pdfBase64) parts.push({ inlineData: { mimeType: "application/pdf", data: pdfBase64 } });
@@ -1163,17 +1167,32 @@ export const extractCcmsKeyTerms = createServerFn({ method: "POST" })
     const { out, res } = await runKeyTerms(doc.file_name, text, pdfBase64);
     const model = res.modelVersion ?? (await getDefaultModel());
     await sb.from("ccms_contracts").update({ cost_log: [...(contract.cost_log ?? []).slice(-49), costEntry("Key terms", res, model)] }).eq("id", contract.id);
+    const owner = contractOwner(contract);
+    const end_date = out.end_date || contract.end_date || null;
+    const value = typeof out.value === "number" ? out.value : contract.value ?? null;
+    const extracted = normalizeObligations((Array.isArray(out.obligations) ? out.obligations : []).slice(0, 10).map((o: any, i: number) => ({
+      ...(typeof o === "string" ? { text: o } : o), id: `o${i + 1}`,
+      amount: typeof o?.amount === "number" ? o.amount : typeof o?.percent === "number" && value ? Math.round((o.percent / 100) * value * 100) / 100 : null,
+    })), owner);
     const terms: KeyTerms = {
+      owner,
       parties: String(out.parties || `${contract.entity} / ${contract.counterparty_name ?? ""}`),
-      value: typeof out.value === "number" ? out.value : contract.value ?? null,
+      value,
       currency: String(out.currency || contract.currency || "MYR"),
       start_date: out.start_date || contract.start_date || null,
-      end_date: out.end_date || contract.end_date || null,
+      end_date,
       notice_period: String(out.notice_period ?? ""), renewal: String(out.renewal ?? ""), governing_law: String(out.governing_law ?? ""),
-      obligations: Array.isArray(out.obligations) ? out.obligations.map(String).slice(0, 8) : [],
+      obligations: [...extracted, ...autoObligations(contract, end_date, extracted, owner)],
     };
     return { terms, fromDocument: doc.file_name };
   });
+
+const obligationSchema = z.object({
+  id: z.string().max(40).optional(), text: z.string().min(2).max(400), category: z.enum(["finance", "business", "legal"]).optional(),
+  pic: z.string().max(120).optional(), due_date: z.string().nullable().optional(), trigger: z.string().max(200).optional(),
+  amount: z.number().nullable().optional(), percent: z.number().nullable().optional(), status: z.enum(["open", "done"]).optional(),
+  done_by: z.string().nullable().optional(), done_at: z.string().nullable().optional(), auto: z.string().optional(),
+});
 
 export const saveCcmsRepository = createServerFn({ method: "POST" })
   .middleware([requireCcms])
@@ -1183,7 +1202,8 @@ export const saveCcmsRepository = createServerFn({ method: "POST" })
       parties: z.string().min(2), value: z.number().nullable().optional(), currency: z.string().optional(),
       start_date: z.string().nullable().optional(), end_date: z.string().nullable().optional(),
       notice_period: z.string().optional(), renewal: z.string().optional(), governing_law: z.string().optional(),
-      obligations: z.array(z.string()).default([]),
+      obligations: z.array(z.union([z.string(), obligationSchema])).default([]),
+      owner: z.string().max(120).optional(),
     }),
     acting_role: roleSchema,
   }))
@@ -1194,10 +1214,64 @@ export const saveCcmsRepository = createServerFn({ method: "POST" })
     if (!contract.signed_date) throw new Error("Only a signed contract goes into the repository.");
     if (!contract.stamping?.stamped_date && flowOf(contract) === "full") throw new Error("Record stamping first — the repository holds the stamped contract.");
     if (!data.terms.end_date) throw new Error("Give the expiry date — it drives the 30-day alert.");
-    const repository = { ...data.terms, confirmed_by: userName, confirmed_at: new Date().toISOString() };
+    const owner = data.terms.owner?.trim() || contractOwner(contract);
+    const repository = { ...data.terms, owner, obligations: normalizeObligations(data.terms.obligations, owner), confirmed_by: userName, confirmed_at: new Date().toISOString() };
     await sb.from("ccms_contracts").update({ repository, expiry_date: data.terms.end_date, status: "active", updated_at: new Date().toISOString() }).eq("id", contract.id);
+    await saveOwner(sb, contract.id, owner);
     await logEvent(sb, { contract_id: contract.id, event_type: "repository", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
       detail: `Saved to the repository. Expires ${data.terms.end_date}; alert from 30 days before.` });
+    return { ok: true };
+  });
+
+
+/** The owner column is added by 20261001_contract_owner.sql; until it runs the
+ *  owner lives in the repository record only. */
+async function saveOwner(sb: any, id: string, owner: string) {
+  const { error } = await sb.from("ccms_contracts").update({ owner_name: owner || null }).eq("id", id);
+  if (error && !/owner_name|column/i.test(error.message)) throw new Error(error.message);
+}
+
+export const setCcmsOwner = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({ contract_id: z.string().uuid(), owner: z.string().min(2).max(120), acting_role: roleSchema }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await ccms(context);
+    const contract = await loadContract(sb, data.contract_id, tenantId);
+    const owner = data.owner.trim();
+    await saveOwner(sb, contract.id, owner);
+    if (contract.repository) {
+      // Business obligations follow the owner unless someone else was named.
+      const prev = contractOwner(contract);
+      const obligations = normalizeObligations(contract.repository.obligations, prev).map((o) => o.category === "business" && o.pic === prev ? { ...o, pic: owner } : o);
+      await sb.from("ccms_contracts").update({ repository: { ...contract.repository, owner, obligations } }).eq("id", contract.id);
+    }
+    await logEvent(sb, { contract_id: contract.id, event_type: "owner", actor_id: userId, actor_name: userName, acting_role: data.acting_role, detail: `Contract owner: ${owner}.` });
+    return { ok: true };
+  });
+
+/** Mark an obligation done (or reopen it), or change its PIC or due date. */
+export const updateCcmsObligation = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({
+    contract_id: z.string().uuid(), id: z.string().max(40),
+    status: z.enum(["open", "done"]).optional(), pic: z.string().max(120).optional(), due_date: z.string().nullable().optional(),
+  }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await ccms(context);
+    const contract = await loadContract(sb, data.contract_id, tenantId);
+    if (!contract.repository) throw new Error("This contract is not in the repository yet.");
+    const owner = contractOwner(contract);
+    const list = normalizeObligations(contract.repository.obligations, owner);
+    const o = list.find((x) => x.id === data.id);
+    if (!o) throw new Error("Obligation not found.");
+    const now = new Date().toISOString();
+    const next = list.map((x) => x.id !== data.id ? x : {
+      ...x, ...(data.pic ? { pic: data.pic } : {}), ...(data.due_date !== undefined ? { due_date: data.due_date } : {}),
+      ...(data.status ? { status: data.status, done_by: data.status === "done" ? userName : null, done_at: data.status === "done" ? now : null } : {}),
+    });
+    await sb.from("ccms_contracts").update({ repository: { ...contract.repository, obligations: next } }).eq("id", contract.id);
+    await logEvent(sb, { contract_id: contract.id, event_type: "obligation", actor_id: userId, actor_name: userName, acting_role: null,
+      detail: data.status ? `${data.status === "done" ? "Done" : "Reopened"}: ${o.text}` : `Obligation updated: ${o.text}${data.pic ? ` — PIC ${data.pic}` : ""}${data.due_date ? ` — due ${data.due_date}` : ""}` });
     return { ok: true };
   });
 

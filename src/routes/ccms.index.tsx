@@ -5,7 +5,7 @@ import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { listCcmsContracts } from "@/lib/ccms.functions";
 import { CcmsHeader, StatusBadge, FlagChips, CARD, TH, TD, fmtMoney, waitingOn, PRIORITY_TINT } from "@/components/ccms-widgets";
-import { CONTRACT_TYPES, contractAlerts, byPriority, priorityOf } from "@/lib/ccms";
+import { CONTRACT_TYPES, contractAlerts, byPriority, contractOwner, normalizeObligations, obligationBucket, priorityOf } from "@/lib/ccms";
 import { cn } from "@/lib/utils";
 import { Plus, Loader2 } from "lucide-react";
 
@@ -27,6 +27,7 @@ function CcmsDashboard() {
     { label: "Signing & stamping", value: rows.filter((c: any) => ["approved", "signed", "stamped"].includes(c.status)).length },
     { label: "Awaiting approval", value: rows.filter((c: any) => c.status === "pending_approval" || c.status === "pending_committee").length },
     { label: "Past service level", value: open.filter((c: any) => waitingOn(c)?.overdue).length, alert: true },
+    { label: "Obligations due in 30 days", value: rows.filter((c: any) => c.repository).flatMap((c: any) => normalizeObligations(c.repository.obligations, contractOwner(c))).filter((o) => ["overdue", "soon"].includes(obligationBucket(o))).length, to: "/ccms/obligations" },
     { label: "High-severity flags", value: open.filter((c: any) => (c.flags ?? []).some((f: any) => ["related_party", "deviation", "dd_expired", "vendor_not_approved", "loa_items_missing", "work_order_cap", "high_risk_vendor"].includes(f.key))).length, alert: true },
   ];
   // Highest priority first: past service level or blocked, then decisions due.
@@ -38,13 +39,14 @@ function CcmsDashboard() {
         action={<Button asChild className="gap-1.5"><Link to="/ccms/new"><Plus className="size-4" /> New request</Link></Button>} />
       <div className="p-6 space-y-6 bg-white min-h-full">
         {error && <p className="text-sm text-red-700">{(error as Error).message}</p>}
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-          {stat.map((s) => (
-            <div key={s.label} className={CARD + " p-4"}>
+        <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
+          {stat.map((s: any) => {
+            const body = <>
               <div className="text-sm text-gray-600">{s.label}</div>
               <div className={"mt-1 text-2xl font-semibold " + (s.alert && s.value ? "text-red-700" : "text-gray-900")}>{isLoading ? "…" : s.value}</div>
-            </div>
-          ))}
+            </>;
+            return s.to ? <Link key={s.label} to={s.to} className={CARD + " block p-4 hover:border-gray-400"}>{body}</Link> : <div key={s.label} className={CARD + " p-4"}>{body}</div>;
+          })}
         </div>
 
         {alerts.length > 0 && (

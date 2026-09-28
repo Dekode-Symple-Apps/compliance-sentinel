@@ -20,10 +20,11 @@ import {
   raiseCcmsChange, recordCcmsAcceptedAsIs, recordCcmsConfirmation, recordCcmsSentToCounterparty, recordCcmsSigned, recordCcmsStamping,
   resubmitCcmsContract, reviewCcmsDocument, saveCcmsRepository, saveCcmsSecurities, draftCcmsReturnNote } from "@/lib/ccms.functions";
 import {
-  BLOCKING_FLAGS, CCMS_ROLES, DEMO_SINGLE_USER, particularsFromRecords, LINK_ACTIONS, SECURITY_TYPES, fillNda, flowOf, nextActions, nextApproval, paymentReady,
+  BLOCKING_FLAGS, CCMS_ROLES, DEMO_SINGLE_USER, contractOwner, normalizeObligations, particularsFromRecords, LINK_ACTIONS, SECURITY_TYPES, fillNda, flowOf, nextActions, nextApproval, paymentReady,
   type Flag, type KeyTerms, type NextAction, type Security, type Stage,
 } from "@/lib/ccms";
 import { recall, recallForm, remember } from "@/lib/ccms-prefill";
+import { ObligationsEditor } from "@/components/ccms-obligations";
 import { cn } from "@/lib/utils";
 
 const INPUT = "w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gray-900";
@@ -168,7 +169,7 @@ export function ActionDialog({ action, c, documents, onClose, onDone }: { action
   })();
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className={cn("bg-white max-h-[90vh] overflow-y-auto", WIDE.has(action.id) ? "max-w-3xl" : "max-w-xl")}>
+      <DialogContent className={cn("bg-white max-h-[90vh] overflow-y-auto", action.id === "repository" ? "max-w-5xl" : WIDE.has(action.id) ? "max-w-3xl" : "max-w-xl")}>
         <DialogHeader>
           <DialogTitle>{action.label}</DialogTitle>
           <DialogDescription>{c.reference_number} · {c.title}</DialogDescription>
@@ -469,6 +470,8 @@ function RepositoryForm({ a, c, done }: FormProps) {
     return () => { live = false; };
   }, []);
   if (reading || !terms) return <p className="flex items-center gap-2 py-6 text-sm text-gray-600"><Loader2 className="size-4 animate-spin" /> Extracting key terms…</p>;
+  const owner = terms.owner ?? contractOwner(c);
+  const obligations = normalizeObligations(terms.obligations, owner);
   return (
     <div className="space-y-3">
       <p className="text-sm text-gray-600">Extracted by AI from the signed copy. Expiry date sets the 30-day alert.</p>
@@ -480,11 +483,15 @@ function RepositoryForm({ a, c, done }: FormProps) {
         <label className={LABEL}>Expiry <span className="text-red-700">*</span><input type="date" className={INPUT} value={terms.end_date ?? ""} onChange={(e) => set("end_date", e.target.value || null)} /></label>
         <label className={LABEL}>Notice period<input className={INPUT} value={terms.notice_period ?? ""} onChange={(e) => set("notice_period", e.target.value)} /></label>
         <label className={LABEL}>Renewal<input className={INPUT} value={terms.renewal ?? ""} onChange={(e) => set("renewal", e.target.value)} /></label>
-        <label className={LABEL + " col-span-2"}>Key obligations · one per line
-          <textarea className={INPUT + " min-h-24"} value={terms.obligations.join("\n")} onChange={(e) => set("obligations", e.target.value.split("\n").map((x) => x.trim()).filter(Boolean))} />
+        <label className={LABEL + " col-span-2"}>Contract owner
+          <input className={INPUT} list="obl-people" value={owner} onChange={(e) => set("owner", e.target.value)} />
         </label>
       </div>
-      <Footer><Go busy={busy} disabled={!terms.end_date} onClick={async () => { const [ok] = await run(() => saveFn({ data: { contract_id: c.id, terms: terms as any, acting_role: a.role } }), "Saved to the repository"); if (ok) done(); }}>File to Repository</Go></Footer>
+      <div>
+        <div className="mb-1 text-sm font-medium text-gray-800">Obligations · each with a person in charge and a due date</div>
+        <ObligationsEditor value={obligations} owner={owner} onChange={(v) => set("obligations", v)} />
+      </div>
+      <Footer><Go busy={busy} disabled={!terms.end_date} onClick={async () => { const [ok] = await run(() => saveFn({ data: { contract_id: c.id, terms: { ...terms, owner, obligations: obligations.filter((o) => o.text.trim()) } as any, acting_role: a.role } }), "Saved to the repository"); if (ok) done(); }}>File to Repository</Go></Footer>
     </div>
   );
 }

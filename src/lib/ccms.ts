@@ -339,7 +339,11 @@ export const OBLIGATION_CATEGORIES: Record<ObligationCategory, string> = { finan
 export const DEMO_PEOPLE: { name: string; team: ObligationCategory }[] = [
   { name: "Jeremy Teh", team: "business" }, { name: "Dabraj", team: "finance" }, { name: "Irwin", team: "legal" },
 ];
-export const contractOwner = (c: any): string => c?.owner_name || c?.repository?.owner || c?.requestor_name || "";
+/** A name, never an email address (older requests stored the requester's email). */
+export const contractOwner = (c: any): string => {
+  const v = c?.owner_name || c?.repository?.owner || c?.requestor_name || "";
+  return v && v.includes("@") ? displayName(v) : v;
+};
 /** Finance and Legal go to their teams; Business to the contract owner. */
 export const defaultPic = (cat: ObligationCategory, owner?: string) =>
   cat === "business" ? owner || DEMO_PEOPLE.find((p) => p.team === "business")!.name : DEMO_PEOPLE.find((p) => p.team === cat)!.name;

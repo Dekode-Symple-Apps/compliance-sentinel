@@ -5,7 +5,7 @@ import { useRole, ROLE_META, type UserRole } from "@/lib/role";
 import { useAuth, signOut, type AppRole } from "@/lib/auth";
 import { useWorkspace, WORKSPACES, type WorkspaceId } from "@/lib/workspace";
 import { useState, useRef, useEffect } from "react";
-import { Briefcase } from "lucide-react";
+import { Briefcase, ListChecks } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { getWorkspaceVisibility } from "@/lib/compliance.functions";
@@ -44,10 +44,11 @@ const COMMERCIAL_NAV: NavItem[] = [
     // The queue owns the request form, contract detail and document review.
     match: (p) =>
       p.startsWith("/ccms/contracts") || p === "/ccms/new" || p.startsWith("/ccms/review") ||
-      /^\/ccms\/(?!contracts|vendors|templates|repository|new|review)[^/]+/.test(p),
+      /^\/ccms\/(?!contracts|vendors|templates|repository|obligations|new|review)[^/]+/.test(p),
   },
   { to: "/ccms/vendors", label: "Vendors", icon: Building2, match: (p) => p.startsWith("/ccms/vendors") },
   { to: "/ccms/repository", label: "Repository", icon: Library, match: (p) => p.startsWith("/ccms/repository") },
+  { to: "/ccms/obligations", label: "Obligations", icon: ListChecks, match: (p) => p.startsWith("/ccms/obligations") },
   { to: "/ccms/templates", label: "Templates", icon: FileText, match: (p) => p.startsWith("/ccms/templates") },
 ];
 const VMS_NAV: NavItem[] = [
