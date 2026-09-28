@@ -270,7 +270,8 @@ function DocumentsSection({ r, documents, onDone }: { r: any; documents: any[]; 
         for (let i = 0; i < todo.length; i += 3) await Promise.all(todo.slice(i, i + 3).map((d) => readFn({ data: { document_id: d.id } }).catch(() => null)));
         toast.success(`Read ${todo.length} document${todo.length === 1 ? "" : "s"} — check each field, then Verify`); onDone();
       }} />}>
-      <div className="rounded-md border border-gray-200 p-3"><RequiredDocsChecklist category={r.category} documents={documents} /></div>
+      <div className="rounded-md border border-gray-200 p-3"><RequiredDocsChecklist category={r.category} documents={documents}
+        done={[...(r.submitted_by_vendor_at ? ["register_form", "abms_001", "abms_004", "abms_005", "abc_ack"] : []), ...(r.ctos ? ["ctos"] : []), ...(r.assessment ? ["prequal_form"] : [])]} /></div>
       {docs.length === 0 && <p className="text-gray-500">No documents uploaded.</p>}
       {docs.map((d) => {
         const t = DOC_TYPES.find((x) => x.id === d.doc_type);

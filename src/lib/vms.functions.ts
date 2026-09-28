@@ -681,9 +681,14 @@ export const listVmsVendors = createServerFn({ method: "GET" })
 
 /** What the file shows so far, for the AI to work from. */
 async function requestFacts(sb: any, r: any) {
-  const { data: docs } = await sb.from("vms_documents").select("doc_type,status,expiry_date,number,issuer,holder,extracted").eq("request_id", r.id);
+  const { data: docs, error } = await sb.from("vms_documents").select("doc_type,file_name,file_url,status,expiry_date,number,issuer,extracted").eq("request_id", r.id);
+  if (error) throw new Error(error.message);
   const have = new Set((docs ?? []).map((d: any) => d.doc_type));
   const missing = docsFor(r.category).filter((d) => d.level === "M" && !PORTAL_FORMS.has(d.id) && !have.has(d.id)).map((d) => d.label);
+  // The company profile says what the vendor does, since when, with whom.
+  const pd = (docs ?? []).find((d: any) => d.doc_type === "company_profile");
+  let profile = "";
+  if (pd) { try { profile = (await documentText(pd)).text.replace(/\s+/g, " ").slice(0, 2000); } catch { /* unreadable */ } }
   const yes = ABMS_QUESTIONS.filter((q) => r.abms?.answers?.[q.id] === "yes").map((q) => q.text);
   return [
     `Vendor: ${r.company_name} · ${VENDOR_CATEGORIES[r.category] ?? r.category} · ${r.kind}${r.trade ? ` · trade ${r.trade}` : ""}${r.project ? ` · project ${r.project}` : ""}`,
@@ -694,7 +699,12 @@ async function requestFacts(sb: any, r: any) {
     r.ctos ? `CTOS: score ${r.ctos.score ?? "—"}; ${[r.ctos.litigation && "litigation", r.ctos.winding_up && "winding-up", r.ctos.director_flags && "director flags"].filter(Boolean).join(", ") || "no adverse records"}` : "CTOS: not recorded",
     r.conflict_check?.accounts_decision ? `Conflict check: ${r.conflict_check.accounts_decision}${r.conflict_check.note ? ` (${r.conflict_check.note})` : ""}` : "",
     `Integrity questionnaire: ${yes.length ? `YES to: ${yes.join(" | ")}${r.abms?.details ? ` — details: ${r.abms.details}` : ""}` : r.abms?.answers ? "all No" : "not answered"}; declaration of interest: ${r.abms?.declaration_interest ?? "—"}${r.abms?.interest_details ? ` (${r.abms.interest_details})` : ""}; CTOS consent: ${r.abms?.ctos_consent ?? "—"}`,
-    `Documents: ${(docs ?? []).map((d: any) => `${DOC_TYPES.find((t) => t.id === d.doc_type)?.label ?? d.doc_type} (${d.status}${d.expiry_date ? `, expires ${d.expiry_date}` : ""})`).join("; ") || "none"}`,
+    `Documents uploaded: ${(docs ?? []).map((d: any) => {
+      const x = d.extracted ?? {};
+      const bits = [d.status, d.number || x.number, d.issuer || x.issuer, (d.expiry_date || x.expiry) && `expires ${d.expiry_date || x.expiry}`].filter(Boolean).join(", ");
+      return `${DOC_TYPES.find((t) => t.id === d.doc_type)?.label ?? d.doc_type} (${bits})`;
+    }).join("; ") || "none"}`,
+    profile ? `Company profile (text): ${profile}` : "",
     missing.length ? `Mandatory documents missing: ${missing.join("; ")}` : "All mandatory documents uploaded",
     r.assessment ? `Pre-qualification: ${r.assessment.total}% (${r.assessment.pass ? "pass" : "fail"})` : "",
     r.compliance ? `Compliance: ${r.compliance.decision}${r.compliance.conditions ? ` — conditions: ${r.compliance.conditions}` : ""}` : "",

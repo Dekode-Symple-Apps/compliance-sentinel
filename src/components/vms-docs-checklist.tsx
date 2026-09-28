@@ -8,18 +8,19 @@ import { cn } from "@/lib/utils";
 
 const TAG: Record<string, string> = { C: "If relevant", S: "Suggested" };
 
-export function RequiredDocsChecklist({ category, documents }: { category: string; documents?: any[] }) {
+export function RequiredDocsChecklist({ category, documents, done = [] }: { category: string; documents?: any[]; done?: string[] }) {
   const list = docsFor(category);
   const mandatory = list.filter((d) => d.level === "M");
   const optional = list.filter((d) => d.level !== "M");
   const stateOf = (id: string) => {
+    if (done.includes(id)) return "verified"; // completed on the portal's own forms, or recorded by Finance / the assessor
     const ds = (documents ?? []).filter((x) => x.doc_type === id);
     if (ds.some((x) => x.status === "verified")) return "verified";
     if (ds.some((x) => x.status === "uploaded")) return "uploaded";
     if (ds.some((x) => x.status === "rejected")) return "rejected";
     return "missing";
   };
-  const done = documents ? mandatory.filter((d) => stateOf(d.id) === "verified").length : null;
+  const verifiedCount = documents ? mandatory.filter((d) => stateOf(d.id) === "verified").length : null;
 
   const Row = ({ d }: { d: (typeof list)[number] }) => {
     const s = documents ? stateOf(d.id) : "missing";
@@ -46,7 +47,7 @@ export function RequiredDocsChecklist({ category, documents }: { category: strin
       <div>
         <div className="flex items-baseline justify-between text-xs font-semibold uppercase tracking-wide text-gray-500">
           <span>Mandatory</span>
-          <span className="normal-case tracking-normal font-normal">{done != null ? `${done} of ${mandatory.length} verified` : mandatory.length}</span>
+          <span className="normal-case tracking-normal font-normal">{verifiedCount != null ? `${verifiedCount} of ${mandatory.length} done` : mandatory.length}</span>
         </div>
         <ul className="mt-1 divide-y divide-gray-100">{mandatory.map((d) => <Row key={d.id} d={d} />)}</ul>
       </div>
