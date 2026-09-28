@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { createContext, useContext, useEffect, useState } from "react";
@@ -9,7 +9,7 @@ import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import {
   assessVmsRequest, complianceVmsDecision, decideVmsRequest, getVmsRequest, inviteVmsVendor, readVmsDocument,
-  deleteVmsDocument, readCtosReport, recordVmsConflictCheck, recordVmsCtos, screenVmsRequest, verifyVmsDocument, vmsAiAssist,
+  deleteVmsDocument, deleteVmsRequest, readCtosReport, recordVmsConflictCheck, recordVmsCtos, screenVmsRequest, verifyVmsDocument, vmsAiAssist,
 } from "@/lib/vms.functions";
 import { CcmsHeader, CARD, TD, StageBar, NoteText, friendlyError, useCcmsRole, uploadToStorage } from "@/components/ccms-widgets";
 import {
@@ -91,7 +91,10 @@ function VmsRequestPage() {
     <AppShell>
       <CcmsHeader title={`${r.reference_number} · ${r.company_name}`} subtitle={`${sub ? "Subcontractor pre-qualification" : "Vendor onboarding"} · ${VENDOR_CATEGORIES[r.category] ?? r.category} · ${r.entity ?? ""}`} />
       <div className="p-6 bg-white min-h-full space-y-5">
-        <Link to="/vms/requests" className="inline-flex items-center gap-1 text-sm text-gray-600 hover:underline"><ArrowLeft className="size-4" /> Requests</Link>
+        <div className="flex items-center">
+          <Link to="/vms/requests" className="inline-flex items-center gap-1 text-sm text-gray-600 hover:underline"><ArrowLeft className="size-4" /> Requests</Link>
+          {!["approved", "conditional"].includes(r.status) && <DeleteRequest r={r} />}
+        </div>
         <StageBar stages={ms.stages} next={ms.next} actions={acts.length ? acts.map((a, i) => (
           <Button key={a.id} size="sm" variant={i === 0 ? "default" : "outline"} onClick={() => act(a)}>{a.label}</Button>
         )) : undefined} />
@@ -562,5 +565,30 @@ function DecisionSection({ r, onDone }: { r: any; onDone: () => void }) {
         </div>
       )}
     </Section>
+  );
+}
+
+/** Deletes the request with its documents and history; a vendor record it
+ *  created and nothing else uses goes too, so the company can be raised again. */
+function DeleteRequest({ r }: { r: any }) {
+  const fn = useServerFn(deleteVmsRequest);
+  const [role, setRole] = useCcmsRole();
+  const nav = useNavigate();
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  return (
+    <button type="button" disabled={busy} className="ml-auto inline-flex items-center gap-1 text-sm text-gray-500 hover:text-red-700 disabled:opacity-60" onClick={async () => {
+      const typed = window.prompt(`Delete ${r.reference_number} (${r.company_name}) with its documents and history? This cannot be undone.\n\nType ${r.reference_number} to confirm.`);
+      if (typed?.trim().toUpperCase() !== r.reference_number) { if (typed != null) toast.error("Reference did not match — nothing deleted."); return; }
+      setBusy(true);
+      try {
+        const acting = ["purchasing_executive", "purchasing_manager", "contract_executive", "contract_manager"].includes(role) ? role : "purchasing_executive";
+        if (DEMO_SINGLE_USER && acting !== role) setRole(acting as any);
+        const res: any = await fn({ data: { request_id: r.id, acting_role: acting as any } });
+        toast.success(`${r.reference_number} deleted${res.vendorRemoved ? ` — ${r.company_name} can be raised again` : ""}`);
+        qc.invalidateQueries({ queryKey: ["vms-requests"] }); qc.invalidateQueries({ queryKey: ["vms-vendors"] });
+        nav({ to: "/vms/requests" });
+      } catch (e: any) { toast.error(friendlyError(e)); setBusy(false); }
+    }}>{busy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />} Delete Request</button>
   );
 }

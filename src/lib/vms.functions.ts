@@ -886,3 +886,36 @@ Return ONLY JSON.` },
     const o = parseJson(res.text ?? "") ?? {};
     return { number: String(o.number ?? ""), issuer: String(o.issuer ?? ""), holder: String(o.holder ?? ""), issued: o.issued || null, expiry: o.expiry || null };
   });
+
+/** Deletes a request with its documents and history. A vendor record that this
+ *  request created and nothing else uses (still pending, no other request, no
+ *  contract) goes too, so the same company can be raised again. */
+export const deleteVmsRequest = createServerFn({ method: "POST" })
+  .middleware([requireVms])
+  .inputValidator(z.object({ request_id: z.string().uuid(), acting_role: roleSchema }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId } = await vms(context);
+    requireRole(data.acting_role, ["purchasing_executive", "purchasing_manager", "contract_executive", "contract_manager"], "delete a request");
+    const r = await loadRequest(sb, data.request_id, tenantId);
+    if (["approved", "conditional"].includes(r.status)) throw new Error("An approved vendor's request is its due-diligence record and is kept. Deactivate the vendor instead.");
+    const { data: docs } = await sb.from("vms_documents").select("file_url").eq("request_id", r.id);
+    const { data: gone, error } = await sb.from("vms_requests").delete().eq("id", r.id).select("id");
+    if (error) throw new Error(error.message);
+    if (!gone?.length) throw new Error("The request could not be deleted.");
+    for (const d of docs ?? []) await removeStored(d.file_url);
+    let vendorRemoved = false;
+    if (r.vendor_id) {
+      const { data: v } = await sb.from("ccms_vendors").select("id,status").eq("id", r.vendor_id).single();
+      const [{ count: reqs }, { count: contracts }] = await Promise.all([
+        sb.from("vms_requests").select("id", { count: "exact", head: true }).eq("vendor_id", r.vendor_id),
+        sb.from("ccms_contracts").select("id", { count: "exact", head: true }).eq("vendor_id", r.vendor_id),
+      ]);
+      if (v?.status === "pending" && !reqs && !contracts) {
+        const { data: vdocs } = await sb.from("vms_documents").select("file_url").eq("vendor_id", r.vendor_id);
+        await sb.from("ccms_vendors").delete().eq("id", r.vendor_id);
+        for (const d of vdocs ?? []) await removeStored(d.file_url);
+        vendorRemoved = true;
+      }
+    }
+    return { ok: true, vendorRemoved };
+  });

@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { CommentBody, ConfirmationRecord, ExecutionRecord, LifecycleRecord, Milestones } from "@/components/ccms-execution";
 import { ActionDialog } from "@/components/ccms-actions";
-import { getCcmsContract, setCcmsOwner } from "@/lib/ccms.functions";
+import { deleteCcmsContract, getCcmsContract, setCcmsOwner } from "@/lib/ccms.functions";
 import { ObligationRows } from "@/components/ccms-obligations";
 import { toast } from "sonner";
 import {
@@ -17,7 +17,7 @@ import {
   AI_ROLE, CCMS_ROLES, CONTRACT_TYPES, DEMO_PEOPLE, FLAG_META, BLOCKING_FLAGS, DEMO_SINGLE_USER, contractOwner, flowOf, nextApproval, normalizeObligations, obligationBucket, stageTitle, roleLabel, templateById, displayName,
   type Flag, type NextAction, type Stage,
 } from "@/lib/ccms";
-import { Loader2, FileText, ArrowLeft, MoreHorizontal } from "lucide-react";
+import { Loader2, FileText, ArrowLeft, MoreHorizontal, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/ccms/$contractId")({
@@ -57,7 +57,7 @@ function ContractDetail() {
   return (
     <AppShell>
       <CcmsHeader title={`${c.reference_number} · ${c.title}`} subtitle={`${t?.label ?? c.contract_type} · ${c.entity} · ${c.counterparty_name ?? "—"}`}
-        action={<div className="flex items-center gap-2"><StatusBadge status={c.status} contract={c} /><CostChip log={c.cost_log ?? []} /></div>} />
+        action={<div className="flex items-center gap-2"><StatusBadge status={c.status} contract={c} /><CostChip log={c.cost_log ?? []} />{!["active", "closed"].includes(c.status) && <DeleteContract c={c} />}</div>} />
       <div className="p-6 bg-white min-h-full">
         <div className="mx-auto max-w-6xl space-y-4">
           <Link to="/ccms/contracts" className="inline-flex items-center gap-1 text-sm text-gray-600 hover:underline"><ArrowLeft className="size-4" /> Contracts</Link>
@@ -289,5 +289,29 @@ function OwnerEditor({ c, onDone }: { c: any; onDone: () => void }) {
       }}>Save</Button>
       <button onClick={() => setEdit(null)} className="text-sm text-gray-500 hover:underline">Cancel</button>
     </span>
+  );
+}
+
+/** Deletes a contract request (not a filed contract) after the reference is typed back. */
+function DeleteContract({ c }: { c: any }) {
+  const fn = useServerFn(deleteCcmsContract);
+  const [role, setRole] = useCcmsRole();
+  const nav = useNavigate();
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  return (
+    <Button size="sm" variant="ghost" title="Delete this request" disabled={busy} className="gap-1 text-gray-500 hover:text-red-700" onClick={async () => {
+      const typed = window.prompt(`Delete ${c.reference_number} with its documents, comments and history? This cannot be undone.\n\nType ${c.reference_number} to confirm.`);
+      if (typed?.trim().toUpperCase() !== c.reference_number) { if (typed != null) toast.error("Reference did not match — nothing deleted."); return; }
+      setBusy(true);
+      try {
+        const acting = ["requestor", "contract_executive", "legal", "contract_manager"].includes(role) ? role : "contract_executive";
+        if (DEMO_SINGLE_USER && acting !== role) setRole(acting as any);
+        await fn({ data: { contract_id: c.id, acting_role: acting as any } });
+        toast.success(`${c.reference_number} deleted`);
+        qc.invalidateQueries({ queryKey: ["ccms-contracts"] });
+        nav({ to: "/ccms/contracts" });
+      } catch (e: any) { toast.error(e?.message ?? "Could not delete"); setBusy(false); }
+    }}>{busy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />} Delete</Button>
   );
 }

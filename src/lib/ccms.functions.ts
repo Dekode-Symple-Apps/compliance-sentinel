@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireProduct } from "@/lib/feature-middleware";
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { generateWithFallback, getDefaultModel } from "@/lib/gemini";
 import { docxToText, escapeXml, looksLikeDocx } from "@/lib/docx-editor";
 import PizZip from "pizzip";
@@ -1534,4 +1535,23 @@ Return ONLY JSON: {"bullets": ["..."]}`;
     await sb.from("ccms_contracts").update({ cost_log: [...(contract.cost_log ?? []).slice(-49), costEntry("Return note", res, model)] }).eq("id", contract.id);
     const bullets = ((parseJson(res.text ?? "")?.bullets ?? []) as any[]).filter((b) => typeof b === "string" && b.trim()).map((b: string) => b.trim().replace(/^[-•*]\s*/, "")).slice(0, 8);
     return { note: bullets.map((b) => `- ${b}`).join("\n"), bullets };
+  });
+
+/** Deletes a contract request with its documents, comments, reviews and audit
+ *  trail. Filed contracts are kept — the repository is the record. */
+export const deleteCcmsContract = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({ contract_id: z.string().uuid(), acting_role: roleSchema }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId } = await ccms(context);
+    requireRole(data.acting_role, ["requestor", "contract_executive", "legal", "contract_manager"], "delete a contract request");
+    const contract = await loadContract(sb, data.contract_id, tenantId);
+    if (["active", "closed"].includes(contract.status)) throw new Error("A filed contract stays in the repository. Close it instead.");
+    const { data: docs } = await sb.from("ccms_documents").select("file_url").eq("contract_id", contract.id);
+    const { data: gone, error } = await sb.from("ccms_contracts").delete().eq("id", contract.id).select("id");
+    if (error) throw new Error(error.message);
+    if (!gone?.length) throw new Error("The contract could not be deleted.");
+    const paths = (docs ?? []).map((d: any) => decodeURIComponent(String(d.file_url ?? "").split("/policies/")[1] ?? "")).filter(Boolean);
+    if (paths.length) await (supabaseAdmin as any).storage.from("policies").remove(paths).then(() => null, () => null);
+    return { ok: true };
   });
