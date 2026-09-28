@@ -190,7 +190,7 @@ export const fmtMoney = (v: number | null | undefined, cur = "MYR") =>
   typeof v === "number" ? `${cur === "MYR" ? "RM" : cur + " "}${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : "—";
 
 /** A row of stages — done, current, to do, skipped — and the one next step. */
-export function StageBar({ stages, next }: { stages: { key: string; label: string; state: string; detail?: string }[]; next: { text: string; role: string } | null }) {
+export function StageBar({ stages, next, actions }: { stages: { key: string; label: string; state: string; detail?: string }[]; next: { text: string; role: string } | null; actions?: React.ReactNode }) {
   const [role] = useCcmsRole();
   return (
     <section className={CARD + " p-4 space-y-3"}>
@@ -213,7 +213,8 @@ export function StageBar({ stages, next }: { stages: { key: string; label: strin
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-blue-200 px-3 py-2 text-sm">
           <span className="font-semibold text-blue-800">Next:</span>
           <span className="text-gray-900">{next.text}</span>
-          <span className={cn("ml-auto rounded-full border px-2 py-0.5 text-xs", role === next.role ? "border-blue-300 text-blue-800" : "border-gray-300 text-gray-600")}>
+          {actions && <span className="ml-auto flex flex-wrap gap-2">{actions}</span>}
+          <span className={cn(!actions && "ml-auto", "rounded-full border px-2 py-0.5 text-xs", role === next.role ? "border-blue-300 text-blue-800" : "border-gray-300 text-gray-600")}>
             {next.role === "vendor" ? "Vendor" : (CCMS_ROLES as Record<string, string>)[next.role] ?? next.role}{role === next.role ? " · you" : ""}
           </span>
         </div>

@@ -4,9 +4,9 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { getVendorPortal, readVendorPortalDocuments, saveVendorPortal, uploadVendorPortalAuto, uploadVendorPortalDocument } from "@/lib/vms.functions";
+import { deleteVendorPortalDocument, getVendorPortal, readVendorPortalDocuments, saveVendorPortal, uploadVendorPortalAuto, uploadVendorPortalDocument } from "@/lib/vms.functions";
 import { PORTAL_FORMS } from "@/lib/vms";
-import { Check, Clock, Files, Loader2, Sparkles, Star, TriangleAlert, Upload } from "lucide-react";
+import { Check, Clock, FileText, Files, Loader2, Sparkles, Star, Trash2, TriangleAlert, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // The vendor's own page: no account, reached from the invitation link. Every
@@ -27,6 +27,7 @@ function VendorPortal() {
   const uploadFn = useServerFn(uploadVendorPortalDocument);
   const autoFn = useServerFn(uploadVendorPortalAuto);
   const readFn = useServerFn(readVendorPortalDocuments);
+  const deleteFn = useServerFn(deleteVendorPortalDocument);
   const [bulk, setBulk] = useState<{ name: string; state: "working" | "done" | "unknown" | "error"; label?: string; note?: string }[]>([]);
   const [drag, setDrag] = useState(false);
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ["vendor-portal", token], queryFn: () => getFn({ data: { token } }), retry: false });
@@ -54,8 +55,10 @@ function VendorPortal() {
     setBusy(docType);
     try {
       const b64 = await new Promise<string>((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(",")[1] ?? ""); fr.onerror = rej; fr.readAsDataURL(file); });
+      const previous = (data?.documents ?? []).filter((x: any) => x.doc_type === docType && x.status !== "verified");
       await uploadFn({ data: { token, doc_type: docType, file_name: file.name, mime_type: file.type || "application/octet-stream", base64: b64 } });
-      toast.success("Uploaded"); refetch();
+      for (const p of previous) await deleteFn({ data: { token, document_id: p.id } }).catch(() => null); // Replace = the new file only
+      toast.success(previous.length ? "Replaced" : "Uploaded"); refetch();
     } catch (e: any) { toast.error(e?.message ?? "Upload failed"); } finally { setBusy(null); }
   }
   const toB64 = (file: File) => new Promise<string>((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(",")[1] ?? ""); fr.onerror = rej; fr.readAsDataURL(file); });
@@ -96,6 +99,12 @@ function VendorPortal() {
       toast.success(`Filled from ${read.join(", ")} — please check each field.`);
     } catch (e: any) { if (!quiet) toast.error(e?.message ?? "Could not read the documents"); } finally { setBusy(null); }
   }
+  async function remove(doc: any) {
+    if (!window.confirm(`Remove ${doc.file_name}?`)) return;
+    setBusy(doc.id);
+    try { await deleteFn({ data: { token, document_id: doc.id } }); toast.success("Removed"); refetch(); }
+    catch (e: any) { toast.error(e?.message ?? "Could not remove it"); } finally { setBusy(null); }
+  }
   async function save(submit: boolean) {
     setBusy(submit ? "submit" : "save");
     try { await saveFn({ data: { token, register: reg, abms: ab, submit } }); toast.success(submit ? "Submitted — thank you" : "Saved"); refetch(); }
@@ -105,6 +114,12 @@ function VendorPortal() {
   if (!d.open) return (
     <Shell ref_={d.reference} company={d.company}>
       <div className={CARD + " p-6 text-sm"}><Check className="size-6 text-emerald-600" /><p className="mt-2 font-semibold text-gray-900">Submission received.</p><p className="text-gray-600">We will contact you if anything else is needed.</p></div>
+      {d.reviewId && (
+        <div className="flex items-center gap-3 rounded-md border border-dashed border-blue-300 px-4 py-3 text-sm">
+          <span className="flex-1 text-gray-600">Demo: the vendor's part is done. The reviewer now checks what was submitted against the documents.</span>
+          <a href={`/vms/${d.reviewId}`} className="inline-flex items-center gap-1 rounded-md bg-gray-900 px-3 py-1.5 font-medium text-white hover:bg-gray-800">Continue as Reviewer →</a>
+        </div>
+      )}
     </Shell>
   );
 
@@ -177,7 +192,18 @@ function VendorPortal() {
             <span className={cn("grid size-4 shrink-0 place-items-center rounded border", have.has(x.id) ? "border-emerald-600 bg-emerald-600 text-white" : "border-gray-300")}>
               {have.has(x.id) && <Check className="size-3" strokeWidth={3} />}
             </span>
-            <span className={cn("text-sm flex-1", x.level === "M" ? "text-gray-900" : "text-gray-600")}>{x.label}</span>
+            <span className={cn("min-w-0 flex-1 text-sm", x.level === "M" ? "text-gray-900" : "text-gray-600")}>{x.label}
+              {d.documents.filter((f: any) => f.doc_type === x.id).map((f: any) => (
+                <span key={f.id} className="mt-0.5 flex items-center gap-1.5 text-xs text-gray-500">
+                  <FileText className="size-3.5 shrink-0" /><span className="truncate">{f.file_name}</span>
+                  {f.status !== "verified" && (
+                    <button type="button" title="Remove this file" disabled={busy === f.id} onClick={() => remove(f)} className="shrink-0 rounded p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-600">
+                      {busy === f.id ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                    </button>
+                  )}
+                </span>
+              ))}
+            </span>
             {x.expires && <span title="Expiry tracked"><Clock className="size-3.5 text-gray-400" aria-label="Expiry tracked" /></span>}
             {x.level === "M"
               ? <span title="Mandatory"><Star className="size-3.5 fill-amber-400 text-amber-400" aria-label="Mandatory" /></span>

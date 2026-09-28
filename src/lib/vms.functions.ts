@@ -6,7 +6,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { generateWithFallback } from "@/lib/gemini";
 import { documentText, parseJson } from "@/lib/ccms.functions";
 import { actorOf, assertTenant, requireRole, selfApproval } from "@/lib/actor";
-import { CCMS_ROLES, type CcmsRole } from "@/lib/ccms";
+import { CCMS_ROLES, DEMO_SINGLE_USER, type CcmsRole } from "@/lib/ccms";
 import {
   ABMS_QUESTIONS, DOC_TYPES, PASS_MARK, PORTAL_FORMS, PREQUAL_AREAS, VENDOR_CATEGORIES, addMonths, coiDates, daysTo, ddMonths, docTypeFromName, docsFor,
   needsCompliance, prequalScore, screen,
@@ -153,6 +153,8 @@ export const getVendorPortal = createServerFn({ method: "GET" })
       required: docsFor(r.category).map((d) => ({ id: d.id, label: d.label, level: d.level, expires: d.expires })),
       documents: docs ?? [], questions: ABMS_QUESTIONS,
       // What the requester already gave us, so the vendor does not retype it.
+      // Single-user demo only: lets the presenter jump from the vendor's side to the reviewer's.
+      reviewId: DEMO_SINGLE_USER ? r.id : null,
       known: { company_name: r.company_name ?? "", registration_no: r.registration_no ?? "", contact_name: r.contact_name ?? "", contact_email: r.contact_email ?? "" },
     };
   });
@@ -391,6 +393,49 @@ Return ONLY JSON.` }];
     const extracted = { number: String(out.number ?? ""), issuer: String(out.issuer ?? ""), holder: String(out.holder ?? ""), issued: out.issued || null, expiry: out.expiry || null };
     await sb.from("vms_documents").update({ extracted }).eq("id", doc.id);
     return extracted;
+  });
+
+/** Removes the stored file behind a document URL (best effort). */
+async function removeStored(url: string) {
+  const path = decodeURIComponent(String(url).split("/policies/")[1] ?? "");
+  if (path) await admin().storage.from("policies").remove([path]).catch(() => null);
+}
+
+/** The vendor removes an upload while the submission is open (a wrong file, a
+ *  duplicate). Only uploaded or rejected documents of this request. */
+export const deleteVendorPortalDocument = createServerFn({ method: "POST" })
+  .inputValidator(z.object({ token: z.string(), document_id: z.string().uuid() }))
+  .handler(async ({ data }) => {
+    const r = await portalRequest(data.token);
+    if (!portalOpen(r)) throw new Error("This submission is closed.");
+    const { data: doc } = await admin().from("vms_documents").select("id,request_id,status,file_url").eq("id", data.document_id).single();
+    if (!doc || doc.request_id !== r.id) throw new Error("Document not found.");
+    if (!["uploaded", "rejected"].includes(doc.status)) throw new Error("A verified document cannot be removed.");
+    const { error } = await admin().from("vms_documents").delete().eq("id", doc.id);
+    if (error) throw new Error(error.message);
+    await removeStored(doc.file_url);
+    return { ok: true };
+  });
+
+/** The reviewer removes a wrong or duplicate upload. Verified documents stay —
+ *  reject them instead, so the record shows why. */
+export const deleteVmsDocument = createServerFn({ method: "POST" })
+  .middleware([requireVms])
+  .inputValidator(z.object({ document_id: z.string().uuid(), acting_role: roleSchema }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userName } = await vms(context);
+    requireRole(data.acting_role, ["purchasing_executive", "contract_executive", "contract_manager"], "remove vendor documents");
+    const { data: doc } = await sb.from("vms_documents").select("*").eq("id", data.document_id).single();
+    if (!doc) throw new Error("Document not found.");
+    const { data: v } = await sb.from("ccms_vendors").select("tenant_id").eq("id", doc.vendor_id).single();
+    assertTenant(v?.tenant_id, tenantId);
+    if (!["uploaded", "rejected"].includes(doc.status)) throw new Error("A verified document cannot be removed — reject it instead.");
+    const { error } = await sb.from("vms_documents").delete().eq("id", doc.id);
+    if (error) throw new Error(error.message);
+    await removeStored(doc.file_url);
+    await log(sb, { request_id: doc.request_id, vendor_id: doc.vendor_id, event_type: "document_removed", actor_name: userName, acting_role: data.acting_role,
+      detail: `Removed ${DOC_TYPES.find((t) => t.id === doc.doc_type)?.label ?? doc.doc_type}: ${doc.file_name}.` });
+    return { ok: true };
   });
 
 export const verifyVmsDocument = createServerFn({ method: "POST" })

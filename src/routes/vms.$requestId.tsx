@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { RequiredDocsChecklist } from "@/components/vms-docs-checklist";
@@ -9,14 +9,14 @@ import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import {
   assessVmsRequest, complianceVmsDecision, decideVmsRequest, getVmsRequest, inviteVmsVendor, readVmsDocument,
-  readCtosReport, recordVmsConflictCheck, recordVmsCtos, screenVmsRequest, verifyVmsDocument, vmsAiAssist,
+  deleteVmsDocument, readCtosReport, recordVmsConflictCheck, recordVmsCtos, screenVmsRequest, verifyVmsDocument, vmsAiAssist,
 } from "@/lib/vms.functions";
 import { CcmsHeader, CARD, TD, StageBar, NoteText, friendlyError, useCcmsRole, uploadToStorage } from "@/components/ccms-widgets";
 import {
-  ABMS_QUESTIONS, DOC_TYPES, PASS_MARK, PREQUAL_AREAS, VENDOR_CATEGORIES, VMS_STATUS, docsFor, prequalScore, requestMilestones,
+  ABMS_QUESTIONS, DOC_TYPES, PASS_MARK, PREQUAL_AREAS, VENDOR_CATEGORIES, VMS_STATUS, docsFor, prequalScore, requestMilestones, vmsActions, type VmsAction,
 } from "@/lib/vms";
-import { CCMS_ROLES, displayName, fmtMoneyPlain } from "@/lib/ccms";
-import { ArrowLeft, Copy, Loader2, Sparkles, Star, Upload } from "lucide-react";
+import { CCMS_ROLES, DEMO_SINGLE_USER, displayName, fmtMoneyPlain } from "@/lib/ccms";
+import { ArrowLeft, ChevronRight, Copy, Loader2, Sparkles, Star, Trash2, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/vms/$requestId")({
@@ -37,14 +37,21 @@ function useRun(onDone: () => void) {
   };
 }
 
-function Section({ title, sub, children, right }: { title: string; sub?: string; children: React.ReactNode; right?: React.ReactNode }) {
+/** Which sections are open: the one for the current step, plus any the reviewer opens. */
+const SectionCtx = createContext<{ isOpen: (k: string) => boolean; toggle: (k: string) => void }>({ isOpen: () => true, toggle: () => {} });
+function Section({ k, title, sub, children, right }: { k: string; title: string; sub?: string; children: React.ReactNode; right?: React.ReactNode }) {
+  const { isOpen, toggle } = useContext(SectionCtx);
+  const open = isOpen(k);
   return (
-    <section className={CARD}>
-      <div className="px-4 py-3 border-b border-gray-200 flex items-start gap-3">
-        <div><h2 className="text-sm font-semibold text-gray-900">{title}</h2>{sub && <p className="text-sm text-gray-600">{sub}</p>}</div>
-        {right && <div className="ml-auto">{right}</div>}
+    <section id={`sec-${k}`} className={CARD + " scroll-mt-4"}>
+      <div className={cn("flex items-start gap-3 px-4 py-3", open && "border-b border-gray-200")}>
+        <button type="button" onClick={() => toggle(k)} className="flex min-w-0 flex-1 items-start gap-2 text-left">
+          <ChevronRight className={cn("mt-0.5 size-4 shrink-0 text-gray-400 transition-transform", open && "rotate-90")} />
+          <div className="min-w-0"><h2 className="text-sm font-semibold text-gray-900">{title}</h2>{sub && open && <p className="text-sm text-gray-600">{sub}</p>}</div>
+        </button>
+        {right && open && <div className="ml-auto">{right}</div>}
       </div>
-      <div className="px-4 py-3 text-sm space-y-2">{children}</div>
+      {open && <div className="space-y-2 px-4 py-3 text-sm">{children}</div>}
     </section>
   );
 }
@@ -56,19 +63,39 @@ function VmsRequestPage() {
   const qc = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ["vms-request", requestId], queryFn: () => getFn({ data: { id: requestId } }) });
   const refresh = () => { qc.invalidateQueries({ queryKey: ["vms-request", requestId] }); qc.invalidateQueries({ queryKey: ["vms-requests"] }); };
+  const [, setRole] = useCcmsRole();
+  const [focus, setFocus] = useState<string | null>(null);
+  const [manual, setManual] = useState<Record<string, boolean>>({});
+  useEffect(() => { setManual({}); }, [focus]);
   if (isLoading) return <AppShell><div className="p-10 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="size-4 animate-spin" /> Loading…</div></AppShell>;
   if (error || !data) return <AppShell><div className="p-10 text-sm text-red-700">{(error as Error)?.message ?? "Not found"}</div></AppShell>;
   const { request: r, token, vendor, documents, events } = data as any;
   const sub = r.kind === "subcontractor";
   const ms = requestMilestones({ ...r, invite_token: token }, documents);
   const closed = ["approved", "conditional", "rejected"].includes(r.status);
+  // The current step's section is open; the rest are one click away.
+  const acts = vmsActions({ ...r, invite_token: token }, documents);
+  const focusKey = focus ?? acts[0]?.section ?? null;
+  const reviewing = ["screening", "ctos", "documents", "assessment", "compliance", "decision"].includes(focusKey ?? "");
+  const isOpen = (k: string) => manual[k] ?? (!focusKey || k === focusKey || (k === "validation" && reviewing));
+  const toggle = (k: string) => setManual((m) => ({ ...m, [k]: !isOpen(k) }));
+  const portalUrl = token && typeof window !== "undefined" ? `${window.location.origin}/vendor-portal/${token}` : null;
+  const act = (a: VmsAction) => {
+    if (a.id === "portal") { if (portalUrl) window.open(portalUrl, "_blank"); return; }
+    if (DEMO_SINGLE_USER && a.role !== "vendor") setRole(a.role as any);
+    setFocus(a.section);
+    setTimeout(() => document.getElementById(`sec-${a.section}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+  };
 
   return (
     <AppShell>
       <CcmsHeader title={`${r.reference_number} · ${r.company_name}`} subtitle={`${sub ? "Subcontractor pre-qualification" : "Vendor onboarding"} · ${VENDOR_CATEGORIES[r.category] ?? r.category} · ${r.entity ?? ""}`} />
       <div className="p-6 bg-white min-h-full space-y-5">
         <Link to="/vms/requests" className="inline-flex items-center gap-1 text-sm text-gray-600 hover:underline"><ArrowLeft className="size-4" /> Requests</Link>
-        <StageBar stages={ms.stages} next={ms.next} />
+        <StageBar stages={ms.stages} next={ms.next} actions={acts.length ? acts.map((a, i) => (
+          <Button key={a.id} size="sm" variant={i === 0 ? "default" : "outline"} onClick={() => act(a)}>{a.label}</Button>
+        )) : undefined} />
+        <SectionCtx.Provider value={{ isOpen, toggle }}>
         <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-5">
           <div className="space-y-5 min-w-0">
             {r.status === "returned" && <p className="rounded-md border border-orange-300 px-3 py-2 text-sm text-orange-800">Returned to the vendor: {r.return_reason}</p>}
@@ -103,6 +130,7 @@ function VmsRequestPage() {
             </section>
           </aside>
         </div>
+        </SectionCtx.Provider>
         {closed && <p className="text-sm text-gray-500">This request is {r.status}.</p>}
       </div>
     </AppShell>
@@ -118,7 +146,7 @@ function InviteSection({ r, token, onDone }: { r: any; token: string | null; onD
   const can = ["purchasing_executive", "contract_executive", "contract_manager"].includes(role);
   if (["approved", "conditional", "rejected"].includes(r.status)) return null;
   return (
-    <Section title="Vendor portal" sub="The vendor completes the register form, uploads documents and signs the integrity forms. The link is valid 14 days.">
+    <Section k="portal" title="Vendor portal" sub="The vendor completes the register form, uploads documents and signs the integrity forms. The link is valid 14 days.">
       {url ? (
         <>
           <div className="flex items-center gap-2">
@@ -143,7 +171,7 @@ function SubmissionSection({ r }: { r: any }) {
   const reg = r.register ?? {}, ab = r.abms ?? {};
   const yes = ABMS_QUESTIONS.filter((q) => ab.answers?.[q.id] === "yes");
   return (
-    <Section title="What the vendor submitted" sub={`Signed by ${ab.signatory ?? "—"} (${ab.designation ?? "—"}) on ${ab.signed_date ?? "—"}`}>
+    <Section k="validation" title="What the vendor submitted" sub={`Signed by ${ab.signatory ?? "—"} (${ab.designation ?? "—"}) on ${ab.signed_date ?? "—"}`}>
       <ul className="space-y-0.5">
         <li><span className="text-gray-500">Company:</span> {reg.company_name} · SSM {reg.registration_no} · TIN {reg.tin}</li>
         <li><span className="text-gray-500">Directors:</span> {(reg.directors ?? []).map((d: any) => d.name).join(", ") || "—"}</li>
@@ -170,7 +198,7 @@ function ScreeningSection({ r, onDone }: { r: any; onDone: () => void }) {
   const { busy, run } = useRun(onDone);
   const s = r.screening;
   return (
-    <Section title="Screening" sub="Duplicates (SSM, TIN, bank account, directors), related parties, blacklist and red flags. A blacklist hit rejects automatically."
+    <Section k="screening" title="Screening" sub="Duplicates (SSM, TIN, bank account, directors), related parties, blacklist and red flags. A blacklist hit rejects automatically."
       right={["purchasing_executive", "contract_executive", "contract_manager"].includes(role) && !["approved", "conditional", "rejected"].includes(r.status) &&
         <Button size="sm" variant="outline" disabled={busy} onClick={() => run(() => screenFn({ data: { request_id: r.id, acting_role: role } }), "Screened")}>{s ? "Re-run" : "Run screening"}</Button>}>
       {s ? (
@@ -201,10 +229,10 @@ function CtosSection({ r, onDone }: { r: any; onDone: () => void }) {
     } catch (e) { toast.error(friendlyError(e)); } finally { setReading(false); }
   }
   if (r.ctos) return (
-    <Section title="CTOS report"><p>Score {r.ctos.score ?? "—"} · {[r.ctos.litigation && "litigation", r.ctos.winding_up && "winding-up", r.ctos.director_flags && "director flags"].filter(Boolean).join(", ") || "no adverse records"} · {displayName(r.ctos.by)}{r.ctos.note ? ` — ${r.ctos.note}` : ""}</p></Section>
+    <Section k="ctos" title="CTOS report"><p>Score {r.ctos.score ?? "—"} · {[r.ctos.litigation && "litigation", r.ctos.winding_up && "winding-up", r.ctos.director_flags && "director flags"].filter(Boolean).join(", ") || "no adverse records"} · {displayName(r.ctos.by)}{r.ctos.note ? ` — ${r.ctos.note}` : ""}</p></Section>
   );
   return (
-    <Section title="CTOS report" sub={`Finance — whether or not consent was given (vendor: ${r.abms?.ctos_consent ?? "—"}). Pre-qualification cannot be approved without it.`}>
+    <Section k="ctos" title="CTOS report" sub={`Finance — whether or not consent was given (vendor: ${r.abms?.ctos_consent ?? "—"}). Pre-qualification cannot be approved without it.`}>
       {role !== "finance" ? <Hint role="Finance" /> : (
         <div className="flex flex-wrap items-center gap-2">
           <input className={INPUT + " w-24"} placeholder="Score" value={f.score} onChange={(e) => setF({ ...f, score: e.target.value })} />
@@ -228,7 +256,7 @@ function ConflictSection({ r, onDone }: { r: any; onDone: () => void }) {
   const [note, setNote] = useState("");
   const c = r.conflict_check;
   return (
-    <Section title="CTOS conflict check" sub="Directors and shareholders screened against the related-party list and the employee conflict register. Must clear before selection.">
+    <Section k="ctos" title="CTOS conflict check" sub="Directors and shareholders screened against the related-party list and the employee conflict register. Must clear before selection.">
       {c?.accounts_decision ? <p>Accounts: <span className={c.accounts_decision === "cleared" ? "text-emerald-700 font-semibold" : "text-red-700 font-semibold"}>{c.accounts_decision === "cleared" ? "cleared" : "red flag"}</span> · {displayName(c.by)}{c.note ? ` — ${c.note}` : ""}</p>
         : role !== "accounts" ? <Hint role="Accounts" /> : (
           <div className="flex gap-2"><div className="flex-1"><input className={INPUT + " w-full"} placeholder="Note (required for a red flag)" value={note} onChange={(e) => setNote(e.target.value)} />
@@ -256,6 +284,7 @@ function DocumentsSection({ r, documents, onDone }: { r: any; documents: any[]; 
   const [role] = useCcmsRole();
   const readFn = useServerFn(readVmsDocument);
   const verifyFn = useServerFn(verifyVmsDocument);
+  const deleteFn = useServerFn(deleteVmsDocument);
   const { busy, run } = useRun(onDone);
   const [edit, setEdit] = useState<Record<string, any>>({});
   const can = ["purchasing_executive", "contract_executive", "contract_manager"].includes(role);
@@ -264,7 +293,7 @@ function DocumentsSection({ r, documents, onDone }: { r: any; documents: any[]; 
   const set = (d: any, k: string, v: string) => setEdit((e) => ({ ...e, [d.id]: { ...(e[d.id] ?? {}), [k]: v } }));
   const docs = documents.filter((d) => d.doc_type !== "ctos");
   return (
-    <Section title="Documents" sub="The AI reads each certificate; the person verifying confirms every field. A name that does not match the company blocks verification."
+    <Section k="documents" title="Documents" sub="The AI reads each certificate; the person verifying confirms every field. A name that does not match the company blocks verification."
       right={can && docs.some((d) => d.status === "uploaded" && !d.extracted) && <AiLink label="Read All with AI" run={async () => {
         const todo = docs.filter((d) => d.status === "uploaded" && !d.extracted);
         for (let i = 0; i < todo.length; i += 3) await Promise.all(todo.slice(i, i + 3).map((d) => readFn({ data: { document_id: d.id } }).catch(() => null)));
@@ -283,6 +312,11 @@ function DocumentsSection({ r, documents, onDone }: { r: any; documents: any[]; 
               {lvl === "M" && <span title="Mandatory"><Star className="size-3.5 fill-amber-400 text-amber-400" aria-label="Mandatory" /></span>}
               <a href={d.file_url} target="_blank" rel="noreferrer" className="text-blue-700 hover:underline truncate max-w-64">{d.file_name}</a>
               <span className={cn("ml-auto text-xs font-semibold", d.status === "verified" ? "text-emerald-700" : d.status === "rejected" ? "text-red-700" : "text-amber-700")}>{d.status}{d.verified_by ? ` · ${displayName(d.verified_by)}` : ""}</span>
+              {can && ["uploaded", "rejected"].includes(d.status) && (
+                <button type="button" title="Delete this document" disabled={busy}
+                  onClick={() => { if (window.confirm(`Delete ${d.file_name}?`)) run(() => deleteFn({ data: { document_id: d.id, acting_role: role } }), "Deleted"); }}
+                  className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"><Trash2 className="size-4" /></button>
+              )}
             </div>
             {d.status === "uploaded" && can ? (
               <div className="flex flex-wrap items-center gap-2">
@@ -316,12 +350,12 @@ function AssessmentSection({ r, onDone }: { r: any; onDone: () => void }) {
   const total = prequalScore(areas);
   const who = sub ? "contract_manager" : "purchasing_executive";
   if (r.assessment) return (
-    <Section title={sub ? "Contract Manager review" : "Pre-qualification assessment"}>
+    <Section k="assessment" title={sub ? "Contract Manager review" : "Pre-qualification assessment"}>
       <p>Score <span className={cn("font-semibold", r.assessment.pass ? "text-emerald-700" : "text-red-700")}>{r.assessment.total}%</span> (pass {PASS_MARK}%) · {displayName(r.assessment.by)} · assessor's own conflict: {r.assessment.own_conflict}{r.assessment.scope_fit ? ` · scope fit: ${r.assessment.scope_fit}` : ""}</p>
     </Section>
   );
   return (
-    <Section title={sub ? "Contract Manager review" : "Pre-qualification assessment"} sub={`Nine areas, 0–5 each; pass mark ${PASS_MARK}%. Every document must be verified first.`}>
+    <Section k="assessment" title={sub ? "Contract Manager review" : "Pre-qualification assessment"} sub={`Nine areas, 0–5 each; pass mark ${PASS_MARK}%. Every document must be verified first.`}>
       {role !== who ? <Hint role={CCMS_ROLES[who as keyof typeof CCMS_ROLES]} /> : (
         <>
           <div className="flex justify-end"><AiLink label="Suggest Scores with AI" run={async () => {
@@ -362,10 +396,10 @@ function ComplianceSection({ r, onDone }: { r: any; onDone: () => void }) {
   const [f, setF] = useState({ decision: "approve", conditions: "", due: "", rationale: "" });
   const sub = r.kind === "subcontractor";
   if (r.compliance) return (
-    <Section title="Compliance"><p><span className="font-semibold">{r.compliance.decision}</span> · {displayName(r.compliance.by)}{r.compliance.conditions ? ` · conditions: ${r.compliance.conditions} (due ${r.compliance.due})` : ""}</p><NoteText text={r.compliance.rationale} className="text-gray-700" /></Section>
+    <Section k="compliance" title="Compliance"><p><span className="font-semibold">{r.compliance.decision}</span> · {displayName(r.compliance.by)}{r.compliance.conditions ? ` · conditions: ${r.compliance.conditions} (due ${r.compliance.due})` : ""}</p><NoteText text={r.compliance.rationale} className="text-gray-700" /></Section>
   );
   return (
-    <Section title="Compliance" sub={sub ? "Clear, clear with safeguards, or not accepted. Safeguards stay on the vendor record." : "Extended due diligence. Approve, conditional (with conditions and a due date), or reject. Due diligence is valid 24 months, 12 for High risk."}>
+    <Section k="compliance" title="Compliance" sub={sub ? "Clear, clear with safeguards, or not accepted. Safeguards stay on the vendor record." : "Extended due diligence. Approve, conditional (with conditions and a due date), or reject. Due diligence is valid 24 months, 12 for High risk."}>
       {role !== "compliance" ? <Hint role="Compliance" /> : (
         <div className="space-y-2">
           <div className="flex flex-wrap gap-3">
@@ -395,10 +429,10 @@ function DecisionSection({ r, onDone }: { r: any; onDone: () => void }) {
   const sub = r.kind === "subcontractor";
   const who = sub ? "head_contracts" : "purchasing_manager";
   if (r.decision) return (
-    <Section title={sub ? "Head of Contracts & Procurement" : "Purchasing Manager"}><p><span className="font-semibold">{r.decision.outcome}</span> · {displayName(r.decision.by)}</p><NoteText text={r.decision.reason} className="text-gray-700" /></Section>
+    <Section k="decision" title={sub ? "Head of Contracts & Procurement" : "Purchasing Manager"}><p><span className="font-semibold">{r.decision.outcome}</span> · {displayName(r.decision.by)}</p><NoteText text={r.decision.reason} className="text-gray-700" /></Section>
   );
   return (
-    <Section title={sub ? "Head of Contracts & Procurement" : "Purchasing Manager"} sub={sub ? "Adds the subcontractor to the Master Sub-Contractor List. Nobody approves their own submission." : "Signs off the register and pre-qualification forms. Conditional only with Compliance's concurrence; nobody approves their own submission."}>
+    <Section k="decision" title={sub ? "Head of Contracts & Procurement" : "Purchasing Manager"} sub={sub ? "Adds the subcontractor to the Master Sub-Contractor List. Nobody approves their own submission." : "Signs off the register and pre-qualification forms. Conditional only with Compliance's concurrence; nobody approves their own submission."}>
       {role !== who ? <Hint role={CCMS_ROLES[who as keyof typeof CCMS_ROLES]} /> : (
         <div className="space-y-2">
           <div className="flex justify-end"><AiLink label="Draft with AI" run={async () => {

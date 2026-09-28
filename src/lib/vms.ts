@@ -187,6 +187,33 @@ export function requestMilestones(r: any, docs: any[]): { stages: VmsStage[]; ne
   return { stages, next: r.status === "rejected" || r.status === "approved" || r.status === "conditional" ? null : cur ? next[cur] ?? null : null };
 }
 
+/** What to do next on a request, as buttons: each opens its section and, in
+ *  the single-user demo, acts as the role that does it. */
+export interface VmsAction { id: string; label: string; role: string; section: string }
+export function vmsActions(r: any, docs: any[]): VmsAction[] {
+  if (["approved", "conditional", "rejected"].includes(r.status)) return [];
+  const { stages } = requestMilestones(r, docs);
+  const cur = stages.find((s) => s.state === "current")?.key;
+  const sub = r.kind === "subcontractor";
+  const assessor = sub ? "contract_manager" : "purchasing_executive";
+  switch (cur) {
+    case "invite": return [{ id: "invite", label: "Invite Vendor", role: "purchasing_executive", section: "portal" }];
+    case "register": return [{ id: "portal", label: "Open Vendor Portal", role: "vendor", section: "portal" }];
+    case "screen": return [{ id: "screen", label: "Review & Run Screening", role: "purchasing_executive", section: "screening" }];
+    case "ctos": return [sub ? { id: "conflict", label: "Conflict Check", role: "accounts", section: "ctos" } : { id: "ctos", label: "Upload CTOS Report", role: "finance", section: "ctos" }];
+    case "assess": return [
+      ...(docs.some((d) => d.status === "uploaded") ? [{ id: "verify", label: "Verify Documents", role: assessor, section: "documents" }] : []),
+      ...(!r.assessment ? [{ id: "score", label: "Score Pre-qualification", role: assessor, section: "assessment" }] : []),
+    ];
+    case "compliance": return [{ id: "compliance", label: "Compliance Decision", role: "compliance", section: "compliance" }];
+    case "decision": return [{ id: "decision", label: sub ? "Add to Master List" : "Approve or Return", role: sub ? "head_contracts" : "purchasing_manager", section: "decision" }];
+    default: return [];
+  }
+}
+/** Priority for the Requests list: the reviewer's turn first, then waiting on the vendor, then done. */
+export const vmsPriority = (r: any) =>
+  ["approved", "conditional", "rejected"].includes(r.status) ? 4 : !r.submitted_by_vendor_at ? 3 : r.status === "returned" ? 3 : 1;
+
 // ── credential monitoring (VMS-03) ───────────────────────────────────────────
 export const ALERT_DAYS = [60, 30, 7];
 export const daysTo = (iso: string, today = new Date()) =>
