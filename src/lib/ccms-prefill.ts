@@ -71,8 +71,18 @@ const SEED_FORMS: Record<string, () => Record<string, any>> = {
   }),
 };
 
+/** A saved form with its dates moved to today: a request is dated the day it
+ *  is raised, so yesterday's dates are never refilled. */
 export function recallForm(form: string): Record<string, any> | null {
-  return read<Record<string, any>>(FORM(form)) ?? SEED_FORMS[form]?.() ?? null;
+  const seed = SEED_FORMS[form]?.() ?? null;
+  const saved = read<Record<string, any>>(FORM(form));
+  if (!saved) return seed;
+  const today = iso(new Date());
+  return {
+    ...saved,
+    f: { ...saved.f, start_date: seed?.f?.start_date ?? today, end_date: seed?.f?.end_date ?? saved.f?.end_date ?? "" },
+    ...(saved.tf ? { tf: { ...saved.tf, date: today } } : {}),
+  };
 }
 export function rememberForm(form: string, values: Record<string, any>) {
   write(FORM(form), values);
