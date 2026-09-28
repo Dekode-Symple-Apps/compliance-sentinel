@@ -7,7 +7,7 @@ import { format } from "date-fns";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { PdfViewer } from "@/components/pdf-viewer";
-import { CostChip, SeverityIcon, friendlyError } from "@/components/ccms-widgets";
+import { CostChip, SeverityIcon, friendlyError, NoteText } from "@/components/ccms-widgets";
 import {
   BrandHeader, BrandStatusBadge, DecisionDialog, ImageBoxViewer, RevisionDialog, RiskBadge, useBrandRole,
 } from "@/components/brand-widgets";
@@ -123,7 +123,7 @@ function BrandSubmission() {
             </div>
           )}
           {sub.status === "returned" && sub.decision && (
-            <div className="mt-3 rounded-md border border-orange-200 bg-orange-50/50 px-3 py-2 text-sm text-orange-900">Returned by {displayName(sub.decision.by)}: {sub.decision.note}</div>
+            <div className="mt-3 rounded-md border border-orange-200 bg-orange-50/50 px-3 py-2 text-sm text-orange-900">Returned by {displayName(sub.decision.by)}<NoteText text={sub.decision.note} className="mt-1" /></div>
           )}
           {latest?.review_status === "failed" && <div className="mt-3 rounded-md border border-red-200 bg-red-50/50 px-3 py-2 text-sm text-red-800">AI review failed: {latest.error}</div>}
         </section>
@@ -228,7 +228,7 @@ function BrandSubmission() {
                     {[...(sub.events ?? [])].reverse().map((e: any, i: number) => (
                       <div key={i} className="border-b border-gray-100 py-1.5 last:border-0">
                         <div className="text-xs text-gray-500">{format(new Date(e.at), "d MMM yyyy, HH:mm")} · {e.role === "ai" ? "AI Reviewer" : `${displayName(e.by)} · ${BRAND_ROLES[e.role as keyof typeof BRAND_ROLES] ?? ""}`}</div>
-                        <div className="text-gray-900">{e.detail}</div>
+                        <NoteText text={e.detail} className="text-gray-900" />
                       </div>
                     ))}
                   </div>

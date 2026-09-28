@@ -287,9 +287,35 @@ export const decideBrandSubmission = createServerFn({ method: "POST" })
     }
     brand.decision = { outcome: data.outcome, by: userName, at: now, note: data.note ?? null, clearance_ref, version: brand.versions.at(-1)?.v };
     brand.events = [...brand.events, event(userName, "ukas", data.outcome === "clear" ? "cleared" : "returned",
-      data.outcome === "clear" ? `Cleared for public use — ${clearance_ref}${data.note ? ` (${data.note})` : ""}.` : `Returned — ${data.note}.`)];
+      data.outcome === "clear" ? `Cleared for public use — ${clearance_ref}${data.note ? ` (${data.note})` : ""}.` : data.note?.includes("\n") ? `Returned:\n${data.note}` : `Returned — ${data.note}.`)];
     await save(sb, row, brand, data.outcome === "clear" ? "cleared" : "returned");
     return { clearance_ref };
   });
 
 export const BRAND_AGENCIES = AGENCIES;
+
+/** The return note, drafted from the latest review's findings: what the agency
+ *  must change, as short bullets with the page, most serious first. */
+export const draftBrandReturnNote = createServerFn({ method: "POST" })
+  .middleware([requireBrand])
+  .inputValidator(z.object({ id: z.string().uuid() }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId } = who(context);
+    const row = await load(sb, data.id, tenantId);
+    const brand = row.summary_json.brand;
+    const findings = (latestReview(brand)?.findings ?? []).filter((f) => f.severity !== "info")
+      .sort((a, b) => (a.severity === "red_flag" ? 0 : 1) - (b.severity === "red_flag" ? 0 : 1));
+    if (!findings.length) return { note: "", bullets: [] as string[] };
+    const prompt = `You write a brand officer's note returning material to a government agency for revision.
+Summarise the findings below into 3–6 bullets, most serious first. Each bullet: what to change, in the imperative, at most 16 words, ending with the page, e.g. "(p. 2)". Merge duplicates. No preamble.
+FINDINGS:
+${findings.map((f) => `[${f.severity === "red_flag" ? "RED FLAG" : "CAUTION"}] ${f.rule_id} p.${f.page}: ${f.issue}${f.fix ? ` Fix: ${f.fix}` : ""}`).join("\n")}
+Return ONLY JSON: {"bullets": ["..."]}`;
+    const res: any = await generateWithFallback({ contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: { responseMimeType: "application/json", maxOutputTokens: 1024, temperature: 0.2 } }, { tier: "fast" });
+    const model = res.modelVersion ?? (await getDefaultModel());
+    brand.cost_log = [...(brand.cost_log ?? []).slice(-49), costEntry("Return note", res, model)];
+    await save(sb, row, brand);
+    const bullets = ((parseJson(res.text ?? "")?.bullets ?? []) as any[]).filter((b) => typeof b === "string" && b.trim()).map((b: string) => b.trim().replace(/^[-•*]\s*/, "")).slice(0, 8);
+    return { note: bullets.map((b) => `- ${b}`).join("\n"), bullets };
+  });

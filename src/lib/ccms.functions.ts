@@ -17,6 +17,10 @@ import {
 } from "@/lib/ccms";
 
 /** One cost-log line: exact token counts from the API, priced from the table. */
+/** "Head — note." for a one-line note; a bulleted note keeps its own lines. */
+const withNote = (head: string, note?: string | null) =>
+  !note?.trim() ? `${head}.` : note.includes("\n") ? `${head}:\n${note.trim()}` : `${head} — ${note.trim()}.`;
+
 function costEntry(op: string, res: any, model: string) {
   const u = res.usageMetadata ?? {};
   const tokens = { input: u.promptTokenCount ?? 0, thinking: u.thoughtsTokenCount ?? 0, output: u.candidatesTokenCount ?? 0 };
@@ -683,7 +687,7 @@ export const recordCcmsReview = createServerFn({ method: "POST" })
       stage_started_at: status !== contract.status ? now : contract.stage_started_at, updated_at: now,
     }).eq("id", contract.id);
     await logEvent(sb, { contract_id: contract.id, event_type: "review", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
-      detail: `${stage.label}: ${data.outcome.replace(/_/g, " ")}${data.note ? ` — ${data.note}` : ""}.` });
+      detail: withNote(`${stage.label}: ${data.outcome.replace(/_/g, " ")}`, data.note) });
     return { status };
   });
 
@@ -716,7 +720,7 @@ export const decideCcmsApproval = createServerFn({ method: "POST" })
     const status = data.decision === "approved" ? statusFor(nextRoute, true) : data.decision;
     await sb.from("ccms_contracts").update({ approval_route: nextRoute, status, stage_started_at: now, updated_at: now }).eq("id", contract.id);
     await logEvent(sb, { contract_id: contract.id, event_type: "approval", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
-      detail: `${stage.label}: ${data.decision}${data.note ? ` — ${data.note}` : ""}.` +
+      detail: withNote(`${stage.label}: ${data.decision}`, data.note) +
         (selfApproval ? " Self-approval — permitted only because the sandbox runs in single-user demo mode." : "") });
     return { status };
   });
@@ -1416,4 +1420,44 @@ export const ccmsIntakeChat = createServerFn({ method: "POST" })
       return { reply: out.reply, ask: ok ? null : intakeAsk(out.ask, vendors ?? []), action: ok ? { type: "propose_request", draft: d } : null };
     }
     return { reply: text || "Sorry — could you say a bit more about the contract you need?", ask: null, action: null };
+  });
+
+/** The return note, drafted from what the review found: the latest draft's
+ *  red flags and cautions, the open comment threads and any blocking flags,
+ *  as short bullets (most serious first). The reviewer edits it before returning. */
+export const draftCcmsReturnNote = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({ contract_id: z.string().uuid() }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId } = await ccms(context);
+    const contract = await loadContract(sb, data.contract_id, tenantId);
+    const [{ data: docs }, { data: threads }] = await Promise.all([
+      sb.from("ccms_documents").select("id,file_name,version,ai_review,deviation").eq("contract_id", contract.id).neq("doc_role", "executed")
+        .not("ai_review", "is", null).order("created_at", { ascending: false }).limit(1),
+      sb.from("ccms_comments").select("anchor_ref,body,status,parent_id,acting_role").eq("contract_id", contract.id).is("parent_id", null).eq("status", "open"),
+    ]);
+    const doc = docs?.[0];
+    const findings = ((doc?.ai_review?.findings ?? []) as any[]).filter((f) => f.severity !== "info")
+      .sort((a, b) => (a.severity === "red_flag" ? 0 : 1) - (b.severity === "red_flag" ? 0 : 1));
+    const locked = ((doc?.deviation?.clauses ?? []) as any[]).filter((c) => c.locked && c.status !== "same");
+    const blocks = ((contract.flags ?? []) as any[]).filter((f) => BLOCKING_FLAGS.includes(f.key));
+    const input = [
+      ...findings.map((f) => `[${f.severity === "red_flag" ? "RED FLAG" : "CAUTION"}] ${f.ref}: ${f.issue}${f.whyItMatters ? ` (${f.whyItMatters})` : ""}`),
+      ...locked.map((c) => `[LOCKED CLAUSE] Clause ${c.number} ${c.title}: ${c.change || c.status}`),
+      // The AI's own threads repeat its findings; people's comments are added.
+      ...(threads ?? []).filter((t: any) => t.acting_role !== AI_ROLE).map((t: any) => `[COMMENT] ${t.anchor_ref ?? "General"}: ${String(t.body ?? "").slice(0, 300)}`),
+      ...blocks.map((f) => `[BLOCKING] ${f.detail}`),
+    ];
+    if (!input.length) return { note: "", bullets: [] as string[] };
+    const prompt = `You write the note returning a contract draft for amendment (${CONTRACT_TYPES[contract.contract_type]?.label ?? "contract"} with ${contract.counterparty_name ?? "the counterparty"}).
+Summarise the issues below into 3–6 bullets, most serious first. Each bullet: what must change, in the imperative, at most 16 words, naming the clause where known. Merge duplicates. No preamble, no legal advice beyond the issues given.
+ISSUES:
+${input.join("\n")}
+Return ONLY JSON: {"bullets": ["..."]}`;
+    const res: any = await generateWithFallback({ contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: { responseMimeType: "application/json", maxOutputTokens: 1024, temperature: 0.2 } }, { tier: "fast" });
+    const model = res.modelVersion ?? (await getDefaultModel());
+    await sb.from("ccms_contracts").update({ cost_log: [...(contract.cost_log ?? []).slice(-49), costEntry("Return note", res, model)] }).eq("id", contract.id);
+    const bullets = ((parseJson(res.text ?? "")?.bullets ?? []) as any[]).filter((b) => typeof b === "string" && b.trim()).map((b: string) => b.trim().replace(/^[-•*]\s*/, "")).slice(0, 8);
+    return { note: bullets.map((b) => `- ${b}`).join("\n"), bullets };
   });

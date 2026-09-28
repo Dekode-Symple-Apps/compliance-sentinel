@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Briefcase, ChevronRight, Info, OctagonAlert, Sparkles, TriangleAlert, UserCog } from "lucide-react";
+import { Briefcase, ChevronRight, Info, Loader2, OctagonAlert, Sparkles, TriangleAlert, UserCog } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -248,4 +249,41 @@ export async function uploadToStorage(prefix: string, file: File): Promise<strin
   const up = await supabase.storage.from("policies").upload(path, file, { upsert: false, contentType: file.type || "application/octet-stream" });
   if (up.error) throw new Error(up.error.message);
   return supabase.storage.from("policies").getPublicUrl(path).data.publicUrl;
+}
+
+/** A note as written: "- " lines show as a bulleted list, other lines as text. */
+export function NoteText({ text, className }: { text?: string | null; className?: string }) {
+  if (!text?.trim()) return null;
+  const blocks: { list: boolean; lines: string[] }[] = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const bullet = /^[-•*]\s+/.test(line);
+    const last = blocks.at(-1);
+    if (last && last.list === bullet) last.lines.push(line.replace(/^[-•*]\s+/, ""));
+    else blocks.push({ list: bullet, lines: [line.replace(/^[-•*]\s+/, "")] });
+  }
+  return (
+    <div className={cn("space-y-1 text-sm", className)}>
+      {blocks.map((b, i) => b.list
+        ? <ul key={i} className="list-disc space-y-0.5 pl-5">{b.lines.map((l, j) => <li key={j}>{l}</li>)}</ul>
+        : b.lines.map((l, j) => <p key={`${i}-${j}`}>{l}</p>))}
+    </div>
+  );
+}
+
+/** Drafts a note with AI from what the review found; the text lands in the
+ *  box for the person to edit before it is sent. */
+export function AiDraftButton({ run, onText }: { run: () => Promise<{ note: string }>; onText: (t: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button type="button" disabled={busy} className="inline-flex shrink-0 items-center gap-1 text-sm text-blue-700 hover:underline disabled:opacity-60"
+      onClick={async () => {
+        setBusy(true);
+        try { const r = await run(); if (r.note) onText(r.note); else toast.message("Nothing in the review to summarise — write the note."); }
+        catch (e) { toast.error(friendlyError(e)); } finally { setBusy(false); }
+      }}>
+      {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} {busy ? "Drafting…" : "Draft with AI"}
+    </button>
+  );
 }

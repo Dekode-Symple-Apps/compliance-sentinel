@@ -9,9 +9,8 @@ import { Button } from "@/components/ui/button";
 import { DocViewer, type DocHighlight } from "@/components/doc-viewer";
 import { PdfViewer } from "@/components/pdf-viewer";
 import {
-  addCcmsComment, compareCcmsAward, decideCcmsDifference, exportCcmsDocumentWithComments, getCcmsDocument, recordCcmsReview, reviewCcmsDocument, setCcmsCommentStatus,
-} from "@/lib/ccms.functions";
-import { CcmsHeader, StatusBadge, OutcomeText, CARD, useCcmsRole, SeverityIcon, CostChip } from "@/components/ccms-widgets";
+  addCcmsComment, compareCcmsAward, decideCcmsDifference, exportCcmsDocumentWithComments, getCcmsDocument, recordCcmsReview, reviewCcmsDocument, setCcmsCommentStatus, draftCcmsReturnNote } from "@/lib/ccms.functions";
+import { CcmsHeader, StatusBadge, OutcomeText, CARD, useCcmsRole, SeverityIcon, CostChip, AiDraftButton } from "@/components/ccms-widgets";
 import { friendlyError } from "@/components/ccms-widgets";
 import { AI_ROLE, CCMS_ROLES, COMPARISON_AREAS, CONTRACT_TYPES, DECISION_LABEL, DEMO_SINGLE_USER, displayName, flowOf, stageTitle, roleLabel, templateById, type CcmsRole, type Decision, type Stage } from "@/lib/ccms";
 import { CommentBody } from "@/components/ccms-execution";
@@ -387,6 +386,7 @@ function OutcomeBar({ contract, role, openThreadsByRole, onDone }: { contract: a
 
 function OutcomeDialog({ stage, contract, lite, openThreads, onClose, onDone }: { stage: Stage; contract: any; lite: boolean; openThreads: any[]; onClose: () => void; onDone: () => void }) {
   const recordFn = useServerFn(recordCcmsReview);
+  const draftFn = useServerFn(draftCcmsReturnNote);
   const mineOpen = openThreads.filter((t) => t.acting_role === stage.role || t.acting_role === AI_ROLE).length;
   const [outcome, setOutcome] = useState<"cleared" | "cleared_with_comments" | "not_cleared">(mineOpen ? "cleared_with_comments" : "cleared");
   const [note, setNote] = useState("");
@@ -417,7 +417,9 @@ function OutcomeDialog({ stage, contract, lite, openThreads, onClose, onDone }: 
               ))}
             </div>
           )}
-          <label className="block text-sm text-gray-700">{lite ? "Note · required to return" : outcome === "cleared" ? "Note · optional" : "Reason"}
+          <label className="block text-sm text-gray-700">
+            <span className="flex items-center gap-2"><span className="flex-1">{lite ? "Note · required to return" : outcome === "cleared" ? "Note · optional" : "Reason"}</span>
+              {(lite || outcome === "not_cleared") && <AiDraftButton run={() => draftFn({ data: { contract_id: contract.id } })} onText={setNote} />}</span>
             <RememberedTextarea field={lite || outcome === "not_cleared" ? "return_note" : "approve_note"} value={note} onChange={setNote} />
           </label>
           <div className="flex gap-2 pt-1">

@@ -6,10 +6,10 @@ import { toast } from "sonner";
 import { FileText, Loader2, Palette, Upload, UserCog } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { SeverityIcon, friendlyError, uploadToStorage } from "@/components/ccms-widgets";
+import { SeverityIcon, friendlyError, uploadToStorage, AiDraftButton } from "@/components/ccms-widgets";
 import { FillButton, RememberedInput, RememberedTextarea } from "@/components/ccms-actions";
 import { recallForm, remember, rememberForm } from "@/lib/ccms-prefill";
-import { createBrandSubmission, decideBrandSubmission, reviseBrandSubmission } from "@/lib/brand.functions";
+import { createBrandSubmission, decideBrandSubmission, reviseBrandSubmission, draftBrandReturnNote } from "@/lib/brand.functions";
 import {
   AGENCIES, BRAND_ROLES, CHANNELS, MATERIAL_TYPES, STATUS_META, VERDICT_LABEL, boxToPixels,
   type BrandFinding, type BrandRole, type BrandStatus, type Verdict,
@@ -148,6 +148,7 @@ export function NewSubmissionDialog({ open, onClose }: { open: boolean; onClose:
 // ── the officer's decision and the agency's revision ────────────────────────
 export function DecisionDialog({ id, outcome, redFlags, onClose, onDone }: { id: string; outcome: "clear" | "return"; redFlags: number; onClose: () => void; onDone: () => void }) {
   const fn = useServerFn(decideBrandSubmission);
+  const draftFn = useServerFn(draftBrandReturnNote);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const needNote = outcome === "return" || redFlags > 0;
@@ -167,7 +168,9 @@ export function DecisionDialog({ id, outcome, redFlags, onClose, onDone }: { id:
           <DialogDescription>{outcome === "clear" ? "Issues a UKAS clearance reference." : "The agency uploads a revision, which is reviewed again."}</DialogDescription></DialogHeader>
         <div className="space-y-3">
           {outcome === "clear" && redFlags > 0 && <p className="flex gap-1.5 text-sm text-red-800"><SeverityIcon severity="red_flag" className="mt-0.5" /> {redFlags} red-flag finding{redFlags === 1 ? "" : "s"} open. Clearing needs a reason.</p>}
-          <label className={LABEL}>{outcome === "clear" ? (redFlags ? "Reason for clearing" : "Note · optional") : "What needs to change"}
+          <label className={LABEL}>
+            <span className="flex items-center gap-2"><span className="flex-1">{outcome === "clear" ? (redFlags ? "Reason for clearing" : "Note · optional") : "What needs to change"}</span>
+              {outcome === "return" && <AiDraftButton run={() => draftFn({ data: { id } })} onText={setNote} />}</span>
             <RememberedTextarea field={outcome === "return" ? "brand_return_note" : "brand_clear_note"} value={note} onChange={setNote} />
           </label>
           <Button disabled={busy || (needNote && !note.trim())} onClick={go}>{busy ? <Loader2 className="size-4 animate-spin" /> : outcome === "clear" ? "Clear for Public Use" : "Return"}</Button>

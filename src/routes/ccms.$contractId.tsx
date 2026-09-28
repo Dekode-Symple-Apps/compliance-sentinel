@@ -10,8 +10,7 @@ import { CommentBody, ConfirmationRecord, ExecutionRecord, LifecycleRecord, Mile
 import { ActionDialog } from "@/components/ccms-actions";
 import { getCcmsContract } from "@/lib/ccms.functions";
 import {
-  CcmsHeader, StatusBadge, OutcomeText, SlaText, Section, CostChip, SeverityIcon, CARD, TH, TD, fmtMoney, useCcmsRole,
-} from "@/components/ccms-widgets";
+  CcmsHeader, StatusBadge, OutcomeText, SlaText, Section, CostChip, SeverityIcon, CARD, TH, TD, fmtMoney, useCcmsRole, NoteText } from "@/components/ccms-widgets";
 import {
   AI_ROLE, CCMS_ROLES, CONTRACT_TYPES, FLAG_META, BLOCKING_FLAGS, DEMO_SINGLE_USER, flowOf, nextApproval, stageTitle, roleLabel, templateById, displayName,
   type Flag, type NextAction, type Stage,
@@ -140,7 +139,7 @@ function ContractDetail() {
                     <tr key={s.key} className={cn("border-b border-gray-100 last:border-0", now && "bg-sky-50/40")}>
                       <td className={TD}><div className="font-medium">{stageTitle(s.label)}</div><div className="text-sm text-gray-600">{CCMS_ROLES[s.role]} · {s.kind}</div></td>
                       <td className={TD + " text-gray-700"}>{s.reason}</td>
-                      <td className={TD}><OutcomeText status={s.status} lite={flowOf(c) === "lite" && s.key === "legal"} />{s.decided_by && <div className="text-sm text-gray-600">{displayName(s.decided_by)} · {s.decided_at ? format(new Date(s.decided_at), "d MMM") : ""}</div>}{s.note && <div className="text-sm text-gray-700 mt-0.5">{s.note}</div>}</td>
+                      <td className={TD}><OutcomeText status={s.status} lite={flowOf(c) === "lite" && s.key === "legal"} />{s.decided_by && <div className="text-sm text-gray-600">{displayName(s.decided_by)} · {s.decided_at ? format(new Date(s.decided_at), "d MMM") : ""}</div>}<NoteText text={s.note} className="mt-0.5 text-gray-700" /></td>
                       <td className={TD}>{now ? <SlaText since={c.stage_started_at} days={s.sla_days} /> : <span className="text-sm text-gray-500">{s.sla_days} working days</span>}</td>
                     </tr>
                   );
@@ -193,7 +192,7 @@ function ContractDetail() {
                 <tr key={e.id} className="border-b border-gray-100 last:border-0">
                   <td className={TD + " w-40 text-gray-600 whitespace-nowrap"}>{format(new Date(e.created_at), "d MMM yyyy, HH:mm")}</td>
                   <td className={TD + " w-48"}>{displayName(e.actor_name)}<div className="text-sm text-gray-600">{CCMS_ROLES[e.acting_role as keyof typeof CCMS_ROLES] ?? ""}</div></td>
-                  <td className={TD}>{e.detail}</td>
+                  <td className={TD}><NoteText text={e.detail} /></td>
                 </tr>
               ))}
             </tbody></table>

@@ -13,13 +13,12 @@ import { Loader2, Upload, Wand2, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TemplateFieldsForm } from "@/components/ccms-template-form";
-import { SeverityIcon, fmtMoney, uploadToStorage, useCcmsRole } from "@/components/ccms-widgets";
+import { AiDraftButton, NoteText, SeverityIcon, fmtMoney, uploadToStorage, useCcmsRole } from "@/components/ccms-widgets";
 import { friendlyError } from "@/components/ccms-widgets";
 import {
   attachCcmsDocument, closeCcmsContract, decideCcmsApproval, decideCcmsChange, decideCcmsRenewal, extractCcmsKeyTerms, generateCcmsDraft,
   raiseCcmsChange, recordCcmsAcceptedAsIs, recordCcmsConfirmation, recordCcmsSentToCounterparty, recordCcmsSigned, recordCcmsStamping,
-  resubmitCcmsContract, reviewCcmsDocument, saveCcmsRepository, saveCcmsSecurities,
-} from "@/lib/ccms.functions";
+  resubmitCcmsContract, reviewCcmsDocument, saveCcmsRepository, saveCcmsSecurities, draftCcmsReturnNote } from "@/lib/ccms.functions";
 import {
   BLOCKING_FLAGS, CCMS_ROLES, DEMO_SINGLE_USER, particularsFromRecords, LINK_ACTIONS, SECURITY_TYPES, fillNda, flowOf, nextActions, nextApproval, paymentReady,
   type Flag, type KeyTerms, type NextAction, type Security, type Stage,
@@ -310,6 +309,7 @@ function ResubmitForm({ a, c, done }: FormProps) {
 
 function DecideForm({ a, c, done }: FormProps) {
   const fn = useServerFn(decideCcmsApproval);
+  const draftFn = useServerFn(draftCcmsReturnNote);
   const { busy, run } = useRun();
   const [note, setNote] = useState("");
   const route: Stage[] = c.approval_route ?? [];
@@ -323,10 +323,10 @@ function DecideForm({ a, c, done }: FormProps) {
     <div className="space-y-3">
       <p className="text-sm text-gray-700">{stage?.reason}.</p>
       <ul className="space-y-1 text-sm">
-        {route.filter((s) => s.kind === "review").map((s) => <li key={s.key} className="text-gray-700">{s.label}: <b>{s.status.replace(/_/g, " ")}</b>{s.note ? ` — ${s.note}` : ""}</li>)}
+        {route.filter((s) => s.kind === "review").map((s) => <li key={s.key} className="text-gray-700">{s.label}: <b>{s.status.replace(/_/g, " ")}</b><NoteText text={s.note} className="mt-0.5" /></li>)}
       </ul>
       {blocking.length > 0 && <p className="flex gap-1.5 text-sm text-red-700"><SeverityIcon severity="red_flag" className="mt-0.5" /> Cannot be approved until cleared: {blocking.map((f) => f.detail).join(" ")}</p>}
-      <label className={LABEL}>Note · required to return or reject<RememberedTextarea field="approve_note" value={note} onChange={setNote} /></label>
+      <label className={LABEL}><span className="flex items-center gap-2"><span className="flex-1">Note · required to return or reject</span><AiDraftButton run={() => draftFn({ data: { contract_id: c.id } })} onText={setNote} /></span><RememberedTextarea field="approve_note" value={note} onChange={setNote} /></label>
       <Footer>
         <Go busy={busy} disabled={blocking.length > 0} onClick={() => decide("approved", "Approved")}>Approve</Go>
         <Button variant="outline" disabled={busy} onClick={() => decide("returned", "Returned for amendment")}>Return</Button>
