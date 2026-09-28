@@ -702,7 +702,7 @@ async function requestFacts(sb: any, r: any) {
     `Documents uploaded: ${(docs ?? []).map((d: any) => {
       const x = d.extracted ?? {};
       const bits = [d.status, d.number || x.number, d.issuer || x.issuer, (d.expiry_date || x.expiry) && `expires ${d.expiry_date || x.expiry}`].filter(Boolean).join(", ");
-      return `${DOC_TYPES.find((t) => t.id === d.doc_type)?.label ?? d.doc_type} (${bits})`;
+      return `${DOC_TYPES.find((t) => t.id === d.doc_type)?.label ?? d.doc_type}: file "${d.file_name}" (${bits})`;
     }).join("; ") || "none"}`,
     profile ? `Company profile (text): ${profile}` : "",
     missing.length ? `Mandatory documents missing: ${missing.join("; ")}` : "All mandatory documents uploaded",
@@ -724,7 +724,7 @@ Return ONLY JSON: {"decision": "approve" | "conditional" | "reject", "conditions
       : data.kind === "decision"
       ? `You are the Purchasing Manager signing off. Write the reason for the decision. If anything is missing or adverse, list what the vendor must correct; otherwise summarise why it is acceptable.
 Return ONLY JSON: {"suggested": "approve" | "return" | "reject", "bullets": ["2–5 bullets, each at most 16 words"]}`
-      : `You are the assessor. Suggest a pre-qualification score 0–5 for each area from the facts (0 = no evidence, 3 = adequate, 5 = strong). Where there is no evidence, say so and score low.
+      : `You are the assessor. Suggest a pre-qualification score 0–5 for each area from the facts (0 = no evidence, 3 = adequate, 5 = strong). Score only on evidence actually present. A document type label lists what it may cover (e.g. "ISO 9001 / 14001 / 45001") — credit only the standard named in the file name or number, never the others. Where there is no evidence, say so and score 0–2.
 Areas: ${PREQUAL_AREAS.map((a) => `${a.id}: ${a.label}`).join("; ")}.
 Return ONLY JSON: {"areas": {"legal": 0, ...}, "why": {"legal": "at most 12 words", ...}, "scope_fit": "one line"}`;
     const res: any = await generateWithFallback({ contents: [{ role: "user", parts: [{ text: `${ask}\n\nFACTS:\n${facts}` }] }],
