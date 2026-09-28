@@ -12,7 +12,7 @@ import { deleteCcmsContract, getCcmsContract, setCcmsOwner } from "@/lib/ccms.fu
 import { CATEGORY_TINT, ObligationRows } from "@/components/ccms-obligations";
 import { toast } from "sonner";
 import {
-  CcmsHeader, StatusBadge, OutcomeText, SlaText, Section, CostChip, SeverityIcon, CARD, TH, TD, fmtMoney, useCcmsRole, NoteText } from "@/components/ccms-widgets";
+  CcmsHeader, StatusBadge, OutcomeText, SlaText, Section, CostChip, SeverityIcon, CARD, TH, TD, fmtMoney, useCcmsRole, useConfirm, NoteText } from "@/components/ccms-widgets";
 import {
   AI_ROLE, CCMS_ROLES, CONTRACT_TYPES, DEMO_PEOPLE, FLAG_META, BLOCKING_FLAGS, DEMO_SINGLE_USER, OBLIGATION_CATEGORIES, SECURITY_TYPES, STRAIGHT_THROUGH, contractOwner, straightThrough, wasStraightThrough, daysBetween, entityShort, flowOf, nextApproval, normalizeObligations, obligationBucket, paymentReady, stageTitle, roleLabel, templateById, displayName,
   type Flag, type NextAction, type Obligation, type ObligationCategory, type Security, type Stage,
@@ -351,10 +351,12 @@ function DeleteContract({ c }: { c: any }) {
   const nav = useNavigate();
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
+  const [confirm, confirmDialog] = useConfirm();
   return (
+    <>
+    {confirmDialog}
     <Button size="sm" variant="ghost" title="Delete this request" disabled={busy} className="gap-1 text-gray-500 hover:text-red-700" onClick={async () => {
-      const typed = window.prompt(`Delete ${c.reference_number} with its documents, comments and history? This cannot be undone.\n\nType ${c.reference_number} to confirm.`);
-      if (typed?.trim().toUpperCase() !== c.reference_number) { if (typed != null) toast.error("Reference did not match — nothing deleted."); return; }
+      if (!(await confirm({ title: `Delete ${c.reference_number}?`, body: "The request, its documents, comments and history are removed. This cannot be undone.", typeToConfirm: c.reference_number, confirmLabel: "Delete Request" }))) return;
       setBusy(true);
       try {
         const acting = ["requestor", "contract_executive", "legal", "contract_manager"].includes(role) ? role : "contract_executive";
@@ -365,6 +367,7 @@ function DeleteContract({ c }: { c: any }) {
         nav({ to: "/ccms/contracts" });
       } catch (e: any) { toast.error(e?.message ?? "Could not delete"); setBusy(false); }
     }}>{busy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />} Delete</Button>
+    </>
   );
 }
 

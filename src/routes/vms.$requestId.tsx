@@ -11,7 +11,7 @@ import {
   assessVmsRequest, complianceVmsDecision, decideVmsRequest, getVmsRequest, inviteVmsVendor, readVmsDocument,
   deleteVmsDocument, deleteVmsRequest, readCtosReport, recordVmsConflictCheck, recordVmsCtos, screenVmsRequest, verifyVmsDocument, vmsAiAssist,
 } from "@/lib/vms.functions";
-import { CcmsHeader, CARD, TD, StageBar, NoteText, friendlyError, useCcmsRole, uploadToStorage } from "@/components/ccms-widgets";
+import { CcmsHeader, CARD, TD, StageBar, NoteText, friendlyError, useCcmsRole, useConfirm, uploadToStorage } from "@/components/ccms-widgets";
 import {
   ABMS_QUESTIONS, AFS_ITEMS, DOC_TYPES, PASS_MARK, PREQUAL_AREAS, VENDOR_CATEGORIES, VMS_STATUS, afsRatios, daysTo, docsFor, prequalScore, requestMilestones, sameValue, validationRows, vmsActions, type Afs, type VmsAction,
 } from "@/lib/vms";
@@ -401,6 +401,7 @@ function DocumentsSection({ r, documents, onDone }: { r: any; documents: any[]; 
   const readFn = useServerFn(readVmsDocument);
   const verifyFn = useServerFn(verifyVmsDocument);
   const deleteFn = useServerFn(deleteVmsDocument);
+  const [confirm, confirmDialog] = useConfirm();
   const { busy, run } = useRun(onDone);
   const [edit, setEdit] = useState<Record<string, any>>({});
   const can = ["purchasing_executive", "contract_executive", "contract_manager"].includes(role);
@@ -415,6 +416,7 @@ function DocumentsSection({ r, documents, onDone }: { r: any; documents: any[]; 
         for (let i = 0; i < todo.length; i += 3) await Promise.all(todo.slice(i, i + 3).map((d) => readFn({ data: { document_id: d.id } }).catch(() => null)));
         toast.success(`Read ${todo.length} document${todo.length === 1 ? "" : "s"} — check each field, then Verify`); onDone();
       }} />}>
+      {confirmDialog}
       <div className="rounded-md border border-gray-200 p-3"><RequiredDocsChecklist category={r.category} documents={documents}
         done={[...(r.submitted_by_vendor_at ? ["register_form", "abms_001", "abms_004", "abms_005", "abc_ack"] : []), ...(r.ctos ? ["ctos"] : []), ...(r.assessment ? ["prequal_form"] : [])]} /></div>
       {docs.length === 0 && <p className="text-gray-500">No documents uploaded.</p>}
@@ -430,7 +432,7 @@ function DocumentsSection({ r, documents, onDone }: { r: any; documents: any[]; 
               <span className={cn("ml-auto text-xs font-semibold", d.status === "verified" ? "text-emerald-700" : d.status === "rejected" ? "text-red-700" : "text-amber-700")}>{d.status}{d.verified_by ? ` · ${displayName(d.verified_by)}` : ""}</span>
               {can && ["uploaded", "rejected"].includes(d.status) && (
                 <button type="button" title="Delete this document" disabled={busy}
-                  onClick={() => { if (window.confirm(`Delete ${d.file_name}?`)) run(() => deleteFn({ data: { document_id: d.id, acting_role: role } }), "Deleted"); }}
+                  onClick={async () => { if (await confirm({ title: "Delete this document?", body: `${d.file_name} is removed from the request.` })) run(() => deleteFn({ data: { document_id: d.id, acting_role: role } }), "Deleted"); }}
                   className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"><Trash2 className="size-4" /></button>
               )}
             </div>
@@ -576,10 +578,12 @@ function DeleteRequest({ r }: { r: any }) {
   const nav = useNavigate();
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
+  const [confirm, confirmDialog] = useConfirm();
   return (
+    <>
+    {confirmDialog}
     <button type="button" disabled={busy} className="ml-auto inline-flex items-center gap-1 text-sm text-gray-500 hover:text-red-700 disabled:opacity-60" onClick={async () => {
-      const typed = window.prompt(`Delete ${r.reference_number} (${r.company_name}) with its documents and history? This cannot be undone.\n\nType ${r.reference_number} to confirm.`);
-      if (typed?.trim().toUpperCase() !== r.reference_number) { if (typed != null) toast.error("Reference did not match — nothing deleted."); return; }
+      if (!(await confirm({ title: `Delete ${r.reference_number}?`, body: `${r.company_name}: the request, its documents and history are removed. A vendor record it created and nothing else uses goes too. This cannot be undone.`, typeToConfirm: r.reference_number, confirmLabel: "Delete Request" }))) return;
       setBusy(true);
       try {
         const acting = ["purchasing_executive", "purchasing_manager", "contract_executive", "contract_manager"].includes(role) ? role : "purchasing_executive";
@@ -590,5 +594,6 @@ function DeleteRequest({ r }: { r: any }) {
         nav({ to: "/vms/requests" });
       } catch (e: any) { toast.error(friendlyError(e)); setBusy(false); }
     }}>{busy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />} Delete Request</button>
+    </>
   );
 }

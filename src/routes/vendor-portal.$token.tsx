@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { deleteVendorPortalDocument, getVendorPortal, readVendorPortalDocuments, saveVendorPortal, uploadVendorPortalAuto, uploadVendorPortalDocument } from "@/lib/vms.functions";
 import { PORTAL_FORMS } from "@/lib/vms";
+import { useConfirm } from "@/components/ccms-widgets";
 import { Check, Clock, FileText, Files, Loader2, Sparkles, Star, Trash2, TriangleAlert, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -28,6 +29,7 @@ function VendorPortal() {
   const autoFn = useServerFn(uploadVendorPortalAuto);
   const readFn = useServerFn(readVendorPortalDocuments);
   const deleteFn = useServerFn(deleteVendorPortalDocument);
+  const [confirm, confirmDialog] = useConfirm();
   const [bulk, setBulk] = useState<{ name: string; state: "working" | "done" | "unknown" | "error"; label?: string; note?: string }[]>([]);
   const [drag, setDrag] = useState(false);
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ["vendor-portal", token], queryFn: () => getFn({ data: { token } }), retry: false });
@@ -100,7 +102,7 @@ function VendorPortal() {
     } catch (e: any) { if (!quiet) toast.error(e?.message ?? "Could not read the documents"); } finally { setBusy(null); }
   }
   async function remove(doc: any) {
-    if (!window.confirm(`Remove ${doc.file_name}?`)) return;
+    if (!(await confirm({ title: "Remove this file?", body: doc.file_name, confirmLabel: "Remove" }))) return;
     setBusy(doc.id);
     try { await deleteFn({ data: { token, document_id: doc.id } }); toast.success("Removed"); refetch(); }
     catch (e: any) { toast.error(e?.message ?? "Could not remove it"); } finally { setBusy(null); }
@@ -159,6 +161,7 @@ function VendorPortal() {
       </section>
 
       <section className={CARD + " p-5 space-y-2"}>
+        {confirmDialog}
         <div className="flex items-baseline gap-3">
           <h2 className="text-base font-semibold text-gray-900">2. Documents</h2>
           <span className="text-sm text-gray-500">{uploads.filter((x: any) => x.level === "M" && have.has(x.id)).length} of {uploads.filter((x: any) => x.level === "M").length} mandatory uploaded</span>

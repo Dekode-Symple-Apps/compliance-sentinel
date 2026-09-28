@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Briefcase, ChevronRight, Info, Loader2, OctagonAlert, Sparkles, TriangleAlert, UserCog } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -287,4 +288,38 @@ export function AiDraftButton({ run, onText }: { run: () => Promise<{ note: stri
       {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} {busy ? "Drafting…" : "Draft with AI"}
     </button>
   );
+}
+
+/** An in-page confirmation (the browser's own confirm/prompt boxes do not show
+ *  in every browser or embedded view). `typeToConfirm` asks for a word, such as
+ *  a reference, to be typed back before the destructive action runs. */
+export interface ConfirmOptions { title: string; body?: string; confirmLabel?: string; typeToConfirm?: string }
+export function useConfirm(): [(o: ConfirmOptions) => Promise<boolean>, React.ReactNode] {
+  const [opts, setOpts] = useState<ConfirmOptions | null>(null);
+  const [typed, setTyped] = useState("");
+  const resolver = useRef<((v: boolean) => void) | null>(null);
+  const ask = (o: ConfirmOptions) => new Promise<boolean>((res) => { resolver.current = res; setTyped(""); setOpts(o); });
+  const done = (v: boolean) => { resolver.current?.(v); resolver.current = null; setOpts(null); };
+  const ok = !opts?.typeToConfirm || typed.trim().toUpperCase() === opts.typeToConfirm.toUpperCase();
+  const element = (
+    <Dialog open={!!opts} onOpenChange={(o) => { if (!o) done(false); }}>
+      <DialogContent className="max-w-md bg-white">
+        <DialogHeader>
+          <DialogTitle>{opts?.title}</DialogTitle>
+          {opts?.body && <DialogDescription className="whitespace-pre-line">{opts.body}</DialogDescription>}
+        </DialogHeader>
+        {opts?.typeToConfirm && (
+          <label className="block text-sm text-gray-700">Type <b>{opts.typeToConfirm}</b> to confirm
+            <input autoFocus value={typed} onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && ok) done(true); }}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-red-600" />
+          </label>
+        )}
+        <div className="flex justify-end gap-2 pt-1">
+          <button type="button" onClick={() => done(false)} className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:border-gray-500">Cancel</button>
+          <button type="button" disabled={!ok} onClick={() => done(true)} className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-40">{opts?.confirmLabel ?? "Delete"}</button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+  return [ask, element];
 }
