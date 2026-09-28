@@ -397,6 +397,10 @@ export function categoryOf(text: string): ObligationCategory {
   return "business";
 }
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+/** A payment we make (an instalment or milestone with an amount), not security
+ *  the counterparty gives (bond, guarantee) or money it pays us. */
+export const isPayment = (o: Obligation) =>
+  o.category === "finance" && o.amount != null && !/\b(bond|guarantee|deposit by|insurance|retention sum held)\b/i.test(o.text) && !/^(deliver|provide|submit)\b/i.test(o.text.trim());
 /** Old (text) or new (object) obligations → objects with category, PIC and status. */
 export function normalizeObligations(list: any[] | null | undefined, owner?: string): Obligation[] {
   return (list ?? []).filter(Boolean).map((x: any, i: number) => {
@@ -452,7 +456,7 @@ export function departmentChecklist(c: any, cat: ObligationCategory, obl: Obliga
   const items: (CheckItem | false)[] = [];
   if (cat === "finance") {
     const fin = route.find((s) => s.key === "finance");
-    const pays = mine.filter((o) => o.amount != null);
+    const pays = mine.filter(isPayment);
     const secs: Security[] = c.securities ?? [];
     items.push(
       !!fin && { label: "Finance Review", done: decided(fin), note: by(fin) },

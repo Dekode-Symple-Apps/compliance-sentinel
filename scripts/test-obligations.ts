@@ -1,5 +1,5 @@
 // Obligations: categories from wording, PIC defaults, automatic obligations, due buckets.
-import { autoObligations, categoryOf, contractOwner, defaultPic, departmentChecklist, departmentRequired, entityShort, normalizeObligations, obligationBucket } from "../src/lib/ccms";
+import { isPayment, autoObligations, categoryOf, contractOwner, defaultPic, departmentChecklist, departmentRequired, entityShort, normalizeObligations, obligationBucket } from "../src/lib/ccms";
 let pass = 0, fail = 0;
 const check = (name: string, ok: boolean, detail = "") => { ok ? pass++ : fail++; console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  — " + detail : ""}`); };
 
@@ -43,5 +43,8 @@ check("finance checklist: review pending, schedule captured", finList[0].label =
 check("legal checklist: vetting done by Irwin", departmentChecklist(loaC, "legal", [])[0].done && departmentChecklist(loaC, "legal", [])[0].note?.startsWith("Irwin") === true);
 check("NDA finance checklist is empty (nothing for Finance to do)", departmentChecklist(ndaC, "finance", []).length === 0);
 
+const mk = (text: string) => normalizeObligations([{ text, category: "finance", amount: 1000 }])[0];
+check("instalments are payments", isPayment(mk("Pay contract signing instalment")) && isPayment(mk("Pay UAT acceptance instalment")));
+check("a performance bond is not a payment", !isPayment(mk("Deliver on-demand performance bond bank guarantee")));
 console.log(`\n${pass}/${pass + fail} obligation checks passed`);
 process.exit(fail ? 1 : 0);

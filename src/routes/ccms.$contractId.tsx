@@ -14,7 +14,7 @@ import { toast } from "sonner";
 import {
   CcmsHeader, StatusBadge, OutcomeText, SlaText, Section, CostChip, SeverityIcon, CARD, TH, TD, fmtMoney, useCcmsRole, useConfirm, NoteText } from "@/components/ccms-widgets";
 import {
-  AI_ROLE, CCMS_ROLES, CONTRACT_TYPES, DEMO_PEOPLE, FLAG_META, BLOCKING_FLAGS, DEMO_SINGLE_USER, OBLIGATION_CATEGORIES, SECURITY_TYPES, STRAIGHT_THROUGH, contractOwner, departmentChecklist, departmentRequired, straightThrough, wasStraightThrough, daysBetween, entityShort, flowOf, nextApproval, normalizeObligations, obligationBucket, paymentReady, stageTitle, roleLabel, templateById, displayName,
+  AI_ROLE, CCMS_ROLES, CONTRACT_TYPES, DEMO_PEOPLE, FLAG_META, BLOCKING_FLAGS, DEMO_SINGLE_USER, OBLIGATION_CATEGORIES, SECURITY_TYPES, STRAIGHT_THROUGH, contractOwner, departmentChecklist, departmentRequired, isPayment, straightThrough, wasStraightThrough, daysBetween, entityShort, flowOf, nextApproval, normalizeObligations, obligationBucket, paymentReady, stageTitle, roleLabel, templateById, displayName,
   type Flag, type NextAction, type Obligation, type ObligationCategory, type Security, type Stage,
 } from "@/lib/ccms";
 import { Loader2, FileText, ArrowLeft, ChevronRight, MoreHorizontal, Trash2 } from "lucide-react";
@@ -461,7 +461,7 @@ function DepartmentView({ cat, c, vendor, obl, fromDraft, onChanged }: { cat: Ob
   let facts: F[] = [];
   let extra: React.ReactNode = null;
   if (cat === "finance") {
-    const pays = mine.filter((o) => o.amount != null);
+    const pays = mine.filter(isPayment);
     const scheduled = pays.reduce((n, o) => n + (o.amount ?? 0), 0);
     const paid = pays.filter((o) => o.status === "done").reduce((n, o) => n + (o.amount ?? 0), 0);
     const next = pays.filter((o) => o.status === "open" && o.due_date).sort((a, b) => a.due_date!.localeCompare(b.due_date!))[0];
