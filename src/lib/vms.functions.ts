@@ -8,7 +8,7 @@ import { documentText, parseJson } from "@/lib/ccms.functions";
 import { actorOf, assertTenant, requireRole, selfApproval } from "@/lib/actor";
 import { CCMS_ROLES, type CcmsRole } from "@/lib/ccms";
 import {
-  ABMS_QUESTIONS, DOC_TYPES, PASS_MARK, VENDOR_CATEGORIES, addMonths, coiDates, daysTo, ddMonths, docsFor,
+  ABMS_QUESTIONS, DOC_TYPES, PASS_MARK, PORTAL_FORMS, VENDOR_CATEGORIES, addMonths, coiDates, daysTo, ddMonths, docTypeFromName, docsFor,
   needsCompliance, prequalScore, screen,
 } from "@/lib/vms";
 
@@ -155,23 +155,53 @@ export const getVendorPortal = createServerFn({ method: "GET" })
     };
   });
 
+async function storePortalDocument(r: any, docType: string, fileName: string, mime: string, base64: string) {
+  const buf = Buffer.from(base64, "base64");
+  const safe = fileName.replace(/[^\w.\- ]+/g, "_");
+  const path = `vms/${r.id}/${Date.now()}-${safe}`;
+  const up = await admin().storage.from("policies").upload(path, buf, { upsert: false, contentType: mime || "application/octet-stream" });
+  if (up.error) throw new Error(up.error.message);
+  const url = admin().storage.from("policies").getPublicUrl(path).data.publicUrl;
+  const { data: doc, error } = await admin().from("vms_documents").insert({
+    request_id: r.id, vendor_id: r.vendor_id, doc_type: docType, file_name: safe, file_url: url, uploaded_by: "Vendor",
+  }).select("id,doc_type,file_name,status,created_at").single();
+  if (error) throw new Error(error.message);
+  return doc;
+}
+
 export const uploadVendorPortalDocument = createServerFn({ method: "POST" })
   .inputValidator(z.object({ token: z.string(), doc_type: z.string(), file_name: z.string().max(200), mime_type: z.string().max(100), base64: z.string().max(4_200_000) }))
   .handler(async ({ data }) => {
     const r = await portalRequest(data.token);
     if (!portalOpen(r)) throw new Error("This submission is closed.");
     if (!DOC_TYPES.some((d) => d.id === data.doc_type)) throw new Error("Unknown document type.");
-    const buf = Buffer.from(data.base64, "base64");
-    const safe = data.file_name.replace(/[^\w.\- ]+/g, "_");
-    const path = `vms/${r.id}/${Date.now()}-${safe}`;
-    const up = await admin().storage.from("policies").upload(path, buf, { upsert: false, contentType: data.mime_type || "application/octet-stream" });
-    if (up.error) throw new Error(up.error.message);
-    const url = admin().storage.from("policies").getPublicUrl(path).data.publicUrl;
-    const { data: doc, error } = await admin().from("vms_documents").insert({
-      request_id: r.id, vendor_id: r.vendor_id, doc_type: data.doc_type, file_name: safe, file_url: url, uploaded_by: "Vendor",
-    }).select("id,doc_type,file_name,status,created_at").single();
-    if (error) throw new Error(error.message);
-    return doc;
+    return storePortalDocument(r, data.doc_type, data.file_name, data.mime_type, data.base64);
+  });
+
+/** Bulk upload: one file at a time, filed under the document it is — from its
+ *  name, or, when the name does not say, from reading the first page. A file
+ *  that is none of this category's documents is not stored. */
+export const uploadVendorPortalAuto = createServerFn({ method: "POST" })
+  .inputValidator(z.object({ token: z.string(), file_name: z.string().max(200), mime_type: z.string().max(100), base64: z.string().max(4_200_000) }))
+  .handler(async ({ data }) => {
+    const r = await portalRequest(data.token);
+    if (!portalOpen(r)) throw new Error("This submission is closed.");
+    const allowed = docsFor(r.category).filter((d) => !PORTAL_FORMS.has(d.id));
+    let docType = docTypeFromName(data.file_name, allowed.map((d) => d.id));
+    let how: "name" | "read" = "name";
+    const mime = data.mime_type || (/\.pdf$/i.test(data.file_name) ? "application/pdf" : "");
+    if (!docType && (mime === "application/pdf" || mime.startsWith("image/"))) {
+      how = "read";
+      const res: any = await generateWithFallback({ contents: [{ role: "user", parts: [
+        { text: `Which one of these vendor onboarding documents is this file? Answer with the id only, or "none" if it is none of them.\n${allowed.map((d) => `${d.id}: ${d.label}`).join("\n")}\nReturn ONLY JSON: {"doc_type": "id or none"}` },
+        { inlineData: { mimeType: mime, data: data.base64 } },
+      ] }], config: { responseMimeType: "application/json", maxOutputTokens: 256, temperature: 0 } }, { tier: "fast" });
+      const id = String(parseJson(res.text ?? "")?.doc_type ?? "");
+      docType = allowed.some((d) => d.id === id) ? id : null;
+    }
+    if (!docType) return { doc_type: null as string | null, file_name: data.file_name, how };
+    const doc = await storePortalDocument(r, docType, data.file_name, data.mime_type, data.base64);
+    return { ...doc, how };
   });
 
 const registerSchema = z.object({

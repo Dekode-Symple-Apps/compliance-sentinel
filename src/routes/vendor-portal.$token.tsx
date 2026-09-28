@@ -4,8 +4,9 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { getVendorPortal, saveVendorPortal, uploadVendorPortalDocument } from "@/lib/vms.functions";
-import { Check, Clock, Loader2, Star, Upload } from "lucide-react";
+import { getVendorPortal, saveVendorPortal, uploadVendorPortalAuto, uploadVendorPortalDocument } from "@/lib/vms.functions";
+import { PORTAL_FORMS } from "@/lib/vms";
+import { Check, Clock, Files, Loader2, Star, TriangleAlert, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // The vendor's own page: no account, reached from the invitation link. Every
@@ -24,6 +25,9 @@ function VendorPortal() {
   const getFn = useServerFn(getVendorPortal);
   const saveFn = useServerFn(saveVendorPortal);
   const uploadFn = useServerFn(uploadVendorPortalDocument);
+  const autoFn = useServerFn(uploadVendorPortalAuto);
+  const [bulk, setBulk] = useState<{ name: string; state: "working" | "done" | "unknown" | "error"; label?: string; note?: string }[]>([]);
+  const [drag, setDrag] = useState(false);
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ["vendor-portal", token], queryFn: () => getFn({ data: { token } }), retry: false });
   const [reg, setReg] = useState<any>({ directors: [{ name: "" }], project_references: ["", ""] });
   const [ab, setAb] = useState<any>({ answers: {} });
@@ -40,8 +44,7 @@ function VendorPortal() {
   const r = (k: string, v: any) => setReg((p: any) => ({ ...p, [k]: v }));
   const a = (k: string, v: any) => setAb((p: any) => ({ ...p, [k]: v }));
   const have = new Set(d.documents.map((x: any) => x.doc_type));
-  const inPortal = new Set(["register_form", "prequal_form", "abms_001", "abms_004", "abms_005", "ctos", "abc_ack"]);
-  const uploads = d.required.filter((x: any) => !inPortal.has(x.id));
+  const uploads = d.required.filter((x: any) => !PORTAL_FORMS.has(x.id));
 
   async function upload(docType: string, file: File) {
     if (file.size > 3_000_000) { toast.error("Files up to 3 MB, please (scan at a lower resolution if needed)."); return; }
@@ -51,6 +54,23 @@ function VendorPortal() {
       await uploadFn({ data: { token, doc_type: docType, file_name: file.name, mime_type: file.type || "application/octet-stream", base64: b64 } });
       toast.success("Uploaded"); refetch();
     } catch (e: any) { toast.error(e?.message ?? "Upload failed"); } finally { setBusy(null); }
+  }
+  const toB64 = (file: File) => new Promise<string>((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(",")[1] ?? ""); fr.onerror = rej; fr.readAsDataURL(file); });
+  /** Several files at once: each is filed under the document it is. */
+  async function uploadMany(files: File[]) {
+    if (!files.length) return;
+    setBulk(files.map((f) => ({ name: f.name, state: "working" })));
+    const put = (i: number, x: any) => setBulk((b) => b.map((y, j) => (j === i ? { ...y, ...x } : y)));
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (file.size > 3_000_000) { put(i, { state: "error", note: "Over 3 MB" }); continue; }
+      try {
+        const res: any = await autoFn({ data: { token, file_name: file.name, mime_type: file.type || "application/octet-stream", base64: await toB64(file) } });
+        if (res.doc_type) put(i, { state: "done", label: uploads.find((x: any) => x.id === res.doc_type)?.label ?? res.doc_type });
+        else put(i, { state: "unknown", note: "Not one of the listed documents — upload it on its row below" });
+      } catch (e: any) { put(i, { state: "error", note: e?.message ?? "Upload failed" }); }
+    }
+    refetch();
   }
   async function save(submit: boolean) {
     setBusy(submit ? "submit" : "save");
@@ -102,6 +122,26 @@ function VendorPortal() {
             <span className="flex items-center gap-1"><Clock className="size-3 text-gray-400" /> Expiry tracked</span>
           </span>
         </div>
+        <label
+          onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
+          onDrop={(e) => { e.preventDefault(); setDrag(false); uploadMany(Array.from(e.dataTransfer.files)); }}
+          className={cn("flex cursor-pointer items-center gap-3 rounded-md border border-dashed px-4 py-3 text-sm", drag ? "border-gray-900 bg-gray-50" : "border-gray-300 hover:border-gray-500")}>
+          <Files className="size-5 text-gray-500" />
+          <span className="flex-1"><span className="font-medium text-gray-900">Upload All at Once</span> <span className="text-gray-500">— drop your files here or choose several; each is filed under the right document.</span></span>
+          <span className="rounded-md border border-gray-300 px-3 py-1.5 text-gray-900">Choose Files</span>
+          <input type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.docx" className="hidden" onChange={(e) => { uploadMany(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
+        </label>
+        {bulk.length > 0 && (
+          <ul className="space-y-1 rounded-md bg-gray-50 px-3 py-2 text-sm">
+            {bulk.map((b, i) => (
+              <li key={i} className="flex items-center gap-2">
+                {b.state === "working" ? <Loader2 className="size-4 animate-spin text-gray-500" /> : b.state === "done" ? <Check className="size-4 text-emerald-600" /> : <TriangleAlert className="size-4 text-amber-600" />}
+                <span className="truncate text-gray-700">{b.name}</span>
+                <span className="ml-auto shrink-0 text-gray-500">{b.state === "working" ? "Reading…" : b.state === "done" ? `→ ${b.label}` : b.note}</span>
+              </li>
+            ))}
+          </ul>
+        )}
         {[...uploads].sort((p: any, q: any) => Number(q.level === "M") - Number(p.level === "M")).map((x: any) => (
           <div key={x.id} className="flex flex-wrap items-center gap-3 border-b border-gray-100 py-1.5 last:border-0">
             <span className={cn("grid size-4 shrink-0 place-items-center rounded border", have.has(x.id) ? "border-emerald-600 bg-emerald-600 text-white" : "border-gray-300")}>

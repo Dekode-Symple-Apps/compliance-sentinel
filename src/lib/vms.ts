@@ -48,6 +48,30 @@ export const DOC_TYPES: DocType[] = [
 export const docsFor = (category: string) =>
   DOC_TYPES.filter((d) => d.need[category] && d.need[category] !== "-").map((d) => ({ ...d, level: d.need[category] }));
 
+/** Filled in on the vendor portal's own forms, not uploaded as files. */
+export const PORTAL_FORMS = new Set(["register_form", "prequal_form", "abms_001", "abms_004", "abms_005", "ctos", "abc_ack"]);
+
+// Bulk upload: what a file is, from its name. Specific before general — a
+// "CIDB registration" is not an SSM registration. Null when the name does not say.
+const NAME_PATTERNS: [string, RegExp][] = [
+  ["cidb", /\bcidb\b|green ?card|\bpkk\b/],
+  ["calibration", /calibrat/],
+  ["competency", /competen|operator|\bskm\b|chargeman|wireman/],
+  ["machinery_cf", /\bcf\b|certificate of fitness|\bpm[adt]\b|\bdosh\b/],
+  ["iso", /\biso\b|9001|14001|45001/],
+  ["material_cert", /material|test report|mill cert/],
+  ["insurance", /insuran|\bpolicy\b|\bcar\b|public liability/],
+  ["bank_letter", /\bbank\b|account (confirmation|verification)/],
+  ["company_profile", /profile/],
+  ["ssm", /\bssm\b|incorporat|suruhanjaya syarikat|\bform ?(9|24|49)\b|\bsection ?(14|17|58)\b/],
+  ["licence", /licen[cs]e|permit/],
+];
+export function docTypeFromName(fileName: string, allowed: string[]): string | null {
+  const n = fileName.toLowerCase().replace(/\.[a-z0-9]+$/, "").replace(/[_\-.]+/g, " ");
+  for (const [id, re] of NAME_PATTERNS) if (allowed.includes(id) && re.test(n)) return id;
+  return null;
+}
+
 // ── integrity questionnaire (ABMS-004) — any Yes raises the risk ─────────────
 export const ABMS_QUESTIONS: { id: string; text: string }[] = [
   { id: "public_official", text: "Is any owner, director or key employee a public official, or related to one?" },
