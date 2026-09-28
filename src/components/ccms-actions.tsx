@@ -53,7 +53,8 @@ export function RememberedTextarea({ field, value, onChange, placeholder }: { fi
   useEffect(() => { setOpts(recall(field)); }, [field]);
   return (
     <div>
-      <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className={INPUT + " min-h-16"} />
+      <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className={INPUT + " min-h-16"}
+        rows={Math.min(12, Math.max(3, value.split("\n").reduce((n, l) => n + Math.ceil((l.length || 1) / 80), 0)))} />
       {!value && opts[0] && <Chip value={opts[0]} onPick={onChange} />}
     </div>
   );
