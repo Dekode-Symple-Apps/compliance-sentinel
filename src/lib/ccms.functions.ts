@@ -1364,12 +1364,37 @@ Rules:
 - Never invent a value, date or reference the requester did not give; leave it null. NDAs run from today; end date = start + term − 1 day.
 - Propose only when you have the type, entity, counterparty, title and scope (and the NDA answers for an NDA). Never on the first turn unless the first message already has all of it.
 
+When you ask a question, also say what you are asking for in "ask", so the screen can offer choices:
+- "field": one of side, contract_type, entity, vendor, department, purpose, direction, term, start_date, dates, value, scope, title, other.
+- "options": for department, purpose, scope, title or other, up to 5 short likely answers drawn from the conversation (e.g. departments: Group IT, Project Management, Procurement, Finance, Legal). Leave [] for the rest; the screen supplies them.
+Set "ask" to null when you propose.
+
 Reply with ONLY JSON, no markdown:
-{"reply": "your message", "action": null | {"type": "propose_request", "draft": {
+{"reply": "your message", "ask": null | {"field": "", "options": []}, "action": null | {"type": "propose_request", "draft": {
   "side": "vendor" | "client", "contract_type": "key", "entity": "exact entity", "vendor_name": "exact vendor name or null", "counterparty_name": "client name or null",
   "title": "", "scope_summary": "", "project": "", "award_reference": "", "value": null, "currency": "MYR", "start_date": "yyyy-mm-dd or null", "end_date": "yyyy-mm-dd or null",
   "requestor_department": "", "personal_data_cross_border": false,
   "particulars": {"purpose": "", "direction": "Mutual", "term": "Two (2) years"} }}}`;
+}
+
+/** The choices shown under the assistant's question. Lists the records hold
+ *  (types, entities, vendors) come from the records, not from the model. */
+function intakeAsk(ask: any, vendors: any[]): { field: string; kind: "choice" | "date" | "dates" | "value"; options: string[] } | null {
+  const field = typeof ask?.field === "string" ? ask.field : "";
+  if (!field) return null;
+  const clean = (xs: any) => (Array.isArray(xs) ? xs : []).filter((x) => typeof x === "string" && x.trim()).map((x: string) => x.trim().slice(0, 120)).slice(0, 5);
+  switch (field) {
+    case "side": return { field, kind: "choice", options: ["Vendor contract — we award the work", "Client contract — we are awarded the work"] };
+    case "contract_type": return { field, kind: "choice", options: Object.values(CONTRACT_TYPES).map((t) => t.label) };
+    case "entity": return { field, kind: "choice", options: [...LSH_ENTITIES] };
+    case "vendor": return { field, kind: "choice", options: vendors.filter((v) => ["approved", "conditional"].includes(v.status) && !v.compliance_hold).map((v) => v.name) };
+    case "direction": return { field, kind: "choice", options: ["Mutual", "Company to Counterparty only", "Counterparty to Company only"] };
+    case "term": return { field, kind: "choice", options: ["One (1) year", "Two (2) years", "Three (3) years"] };
+    case "start_date": return { field, kind: "date", options: [] };
+    case "dates": return { field, kind: "dates", options: [] };
+    case "value": return { field, kind: "value", options: [] };
+    default: { const o = clean(ask.options); return o.length ? { field, kind: "choice", options: o } : null; }
+  }
 }
 
 export const ccmsIntakeChat = createServerFn({ method: "POST" })
@@ -1388,7 +1413,7 @@ export const ccmsIntakeChat = createServerFn({ method: "POST" })
       const d = out.action?.type === "propose_request" ? out.action.draft : null;
       // Keep only a proposal the form can take: a known type and entity.
       const ok = d && CONTRACT_TYPES[d.contract_type] && LSH_ENTITIES.includes(d.entity);
-      return { reply: out.reply, action: ok ? { type: "propose_request", draft: d } : null };
+      return { reply: out.reply, ask: ok ? null : intakeAsk(out.ask, vendors ?? []), action: ok ? { type: "propose_request", draft: d } : null };
     }
-    return { reply: text || "Sorry — could you say a bit more about the contract you need?", action: null };
+    return { reply: text || "Sorry — could you say a bit more about the contract you need?", ask: null, action: null };
   });

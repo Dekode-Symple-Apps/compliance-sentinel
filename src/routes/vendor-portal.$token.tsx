@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { getVendorPortal, saveVendorPortal, uploadVendorPortalDocument } from "@/lib/vms.functions";
-import { Check, Loader2, Upload } from "lucide-react";
+import { Check, Clock, Loader2, Star, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // The vendor's own page: no account, reached from the invitation link. Every
@@ -94,11 +94,24 @@ function VendorPortal() {
       </section>
 
       <section className={CARD + " p-5 space-y-2"}>
-        <h2 className="text-base font-semibold text-gray-900">2. Documents</h2>
-        {uploads.map((x: any) => (
+        <div className="flex items-baseline gap-3">
+          <h2 className="text-base font-semibold text-gray-900">2. Documents</h2>
+          <span className="text-sm text-gray-500">{uploads.filter((x: any) => x.level === "M" && have.has(x.id)).length} of {uploads.filter((x: any) => x.level === "M").length} mandatory uploaded</span>
+          <span className="ml-auto flex items-center gap-3 text-xs text-gray-500">
+            <span className="flex items-center gap-1"><Star className="size-3 fill-amber-400 text-amber-400" /> Mandatory</span>
+            <span className="flex items-center gap-1"><Clock className="size-3 text-gray-400" /> Expiry tracked</span>
+          </span>
+        </div>
+        {[...uploads].sort((p: any, q: any) => Number(q.level === "M") - Number(p.level === "M")).map((x: any) => (
           <div key={x.id} className="flex flex-wrap items-center gap-3 border-b border-gray-100 py-1.5 last:border-0">
-            <span className={cn("text-sm flex-1", x.level === "M" ? "text-gray-900 font-medium" : "text-gray-700")}>{x.label} <span className="text-xs text-gray-500">{x.level === "M" ? "required" : x.level === "C" ? "if relevant" : "suggested"}</span></span>
-            {have.has(x.id) && <span className="text-sm text-emerald-700 flex items-center gap-1"><Check className="size-4" /> uploaded</span>}
+            <span className={cn("grid size-4 shrink-0 place-items-center rounded border", have.has(x.id) ? "border-emerald-600 bg-emerald-600 text-white" : "border-gray-300")}>
+              {have.has(x.id) && <Check className="size-3" strokeWidth={3} />}
+            </span>
+            <span className={cn("text-sm flex-1", x.level === "M" ? "text-gray-900" : "text-gray-600")}>{x.label}</span>
+            {x.expires && <span title="Expiry tracked"><Clock className="size-3.5 text-gray-400" aria-label="Expiry tracked" /></span>}
+            {x.level === "M"
+              ? <span title="Mandatory"><Star className="size-3.5 fill-amber-400 text-amber-400" aria-label="Mandatory" /></span>
+              : <span className="w-20 text-right text-[11px] text-gray-400">{x.level === "C" ? "If relevant" : "Suggested"}</span>}
             <label className={cn("inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-sm cursor-pointer hover:border-gray-500", busy === x.id && "opacity-60 pointer-events-none")}>
               {busy === x.id ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />} {have.has(x.id) ? "Replace" : "Upload"}
               <input type="file" accept=".pdf,.png,.jpg,.jpeg,.docx" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(x.id, f); e.target.value = ""; }} />

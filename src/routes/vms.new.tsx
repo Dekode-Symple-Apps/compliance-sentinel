@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { createVmsRequest } from "@/lib/vms.functions";
 import { listVmsVendors } from "@/lib/vms.functions";
 import { CcmsHeader, CARD, useCcmsRole, friendlyError } from "@/components/ccms-widgets";
-import { VENDOR_CATEGORIES, docsFor, daysTo } from "@/lib/vms";
+import { VENDOR_CATEGORIES, daysTo } from "@/lib/vms";
+import { RequiredDocsChecklist } from "@/components/vms-docs-checklist";
 import { LSH_ENTITIES } from "@/lib/ccms";
 import { Loader2 } from "lucide-react";
 
@@ -135,9 +136,7 @@ function NewVmsRequest() {
           <aside className={CARD + " p-4 h-fit"}>
             <h2 className="text-sm font-semibold text-gray-900">Required Documents</h2>
             <p className="text-sm text-gray-600">{VENDOR_CATEGORIES[category]}</p>
-            <ul className="mt-2 space-y-1 text-sm">
-              {docsFor(category).map((d) => <li key={d.id}><span className={d.level === "M" ? "font-semibold text-gray-900" : "text-gray-600"}>{d.label}</span> <span className="text-xs text-gray-500">{d.level === "M" ? "mandatory" : d.level === "C" ? "if relevant" : "suggested"}{d.expires ? " · tracked expiry" : ""}</span></li>)}
-            </ul>
+            <div className="mt-3"><RequiredDocsChecklist category={category} /></div>
           </aside>
         </div>
       </div>

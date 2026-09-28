@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
 import { format } from "date-fns";
+import { RequiredDocsChecklist } from "@/components/vms-docs-checklist";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,7 +16,7 @@ import {
   ABMS_QUESTIONS, DOC_TYPES, PASS_MARK, PREQUAL_AREAS, VENDOR_CATEGORIES, VMS_STATUS, docsFor, prequalScore, requestMilestones,
 } from "@/lib/vms";
 import { CCMS_ROLES, displayName, fmtMoneyPlain } from "@/lib/ccms";
-import { ArrowLeft, Copy, Loader2, Sparkles, Upload } from "lucide-react";
+import { ArrowLeft, Copy, Loader2, Sparkles, Star, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/vms/$requestId")({
@@ -240,6 +241,7 @@ function DocumentsSection({ r, documents, onDone }: { r: any; documents: any[]; 
   const docs = documents.filter((d) => d.doc_type !== "ctos");
   return (
     <Section title="Documents" sub="The AI reads each certificate; the person verifying confirms every field. A name that does not match the company blocks verification.">
+      <div className="rounded-md border border-gray-200 p-3"><RequiredDocsChecklist category={r.category} documents={documents} /></div>
       {docs.length === 0 && <p className="text-gray-500">No documents uploaded.</p>}
       {docs.map((d) => {
         const t = DOC_TYPES.find((x) => x.id === d.doc_type);
@@ -248,7 +250,7 @@ function DocumentsSection({ r, documents, onDone }: { r: any; documents: any[]; 
           <div key={d.id} className="rounded-md border border-gray-200 p-2.5 space-y-1.5">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-semibold text-gray-900">{t?.label ?? d.doc_type}</span>
-              {lvl === "M" && <span className="text-xs text-gray-500">mandatory</span>}
+              {lvl === "M" && <span title="Mandatory"><Star className="size-3.5 fill-amber-400 text-amber-400" aria-label="Mandatory" /></span>}
               <a href={d.file_url} target="_blank" rel="noreferrer" className="text-blue-700 hover:underline truncate max-w-64">{d.file_name}</a>
               <span className={cn("ml-auto text-xs font-semibold", d.status === "verified" ? "text-emerald-700" : d.status === "rejected" ? "text-red-700" : "text-amber-700")}>{d.status}{d.verified_by ? ` · ${displayName(d.verified_by)}` : ""}</span>
             </div>

@@ -12,7 +12,8 @@ import { cn } from "@/lib/utils";
 // interview, then a proposed request the requester applies to the form or
 // submits directly.
 
-interface Msg { role: "user" | "assistant"; text: string; action?: any }
+interface Msg { role: "user" | "assistant"; text: string; action?: any; ask?: Ask | null }
+interface Ask { field: string; kind: "choice" | "date" | "dates" | "value"; options: string[] }
 
 const GREETING: Msg = {
   role: "assistant",
@@ -39,7 +40,7 @@ export function IntakeChat({ onApply }: { onApply: (draft: any, submitNow: boole
     setMessages(next); setInput(""); setSending(true);
     try {
       const r: any = await chatFn({ data: { messages: next.filter((m) => m !== GREETING).map((m) => ({ role: m.role, text: m.text })) } });
-      setMessages((cur) => [...cur, { role: "assistant", text: r.reply, action: r.action }]);
+      setMessages((cur) => [...cur, { role: "assistant", text: r.reply, action: r.action, ask: r.ask }]);
     } catch (e: any) {
       toast.error(friendlyError(e));
       setMessages((cur) => [...cur, { role: "assistant", text: "Sorry — that didn't go through. Try again, or switch to the form." }]);
@@ -56,6 +57,7 @@ export function IntakeChat({ onApply }: { onApply: (draft: any, submitNow: boole
               <div className={cn("max-w-[80%] whitespace-pre-wrap rounded-2xl px-3.5 py-2 text-sm", m.role === "assistant" ? "rounded-tl-sm bg-gray-100 text-gray-900" : "rounded-tr-sm bg-gray-900 text-white")}>{m.text}</div>
             </div>
             {m.action?.type === "propose_request" && <DraftCard draft={m.action.draft} onApply={onApply} />}
+            {m.ask && i === messages.length - 1 && !sending && <AskPicker ask={m.ask} onPick={send} />}
           </div>
         ))}
         {sending && <div className="flex gap-2"><div className="grid size-7 place-items-center rounded-lg border border-gray-200"><Bot className="size-4 text-gray-600" /></div><div className="rounded-2xl rounded-tl-sm bg-gray-100 px-3.5 py-2"><Loader2 className="size-4 animate-spin text-gray-500" /></div></div>}
@@ -99,6 +101,50 @@ function DraftCard({ draft, onApply }: { draft: any; onApply: (draft: any, submi
         <Button size="sm" variant="outline" onClick={() => onApply(draft, false)}>Review in Form</Button>
       </div>
       {t?.templateId && <p className="px-3 pb-3 text-xs text-gray-500">The draft is generated from the approved template, with the company and vendor particulars taken from the records.</p>}
+    </div>
+  );
+}
+
+// Micro UI under the assistant's question: pick instead of typing. Whatever is
+// picked is sent as the user's answer, so the chat record reads naturally.
+const iso = (d: Date) => d.toISOString().slice(0, 10);
+const addYears = (d: Date, n: number) => { const x = new Date(d); x.setFullYear(x.getFullYear() + n); x.setDate(x.getDate() - 1); return x; };
+const fmt = (s: string) => new Date(s + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+const CHIP = "rounded-full border border-gray-200 bg-white px-3 py-1 text-sm text-gray-700 hover:border-gray-900 hover:text-gray-900";
+const FIELD = "rounded-md border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-gray-900";
+
+function AskPicker({ ask, onPick }: { ask: Ask; onPick: (text: string) => void }) {
+  const today = new Date();
+  const firstNext = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+  const [start, setStart] = useState(iso(today));
+  const [end, setEnd] = useState(iso(addYears(today, 1)));
+  const [value, setValue] = useState("");
+  const [cur, setCur] = useState("MYR");
+  return (
+    <div className="ml-9 flex max-w-[80%] flex-wrap items-center gap-1.5">
+      {ask.kind === "choice" && ask.options.map((o) => <button key={o} onClick={() => onPick(o)} className={CHIP}>{o}</button>)}
+      {ask.kind === "date" && <>
+        <button className={CHIP} onClick={() => onPick(`Start ${fmt(iso(today))}`)}>Today</button>
+        <button className={CHIP} onClick={() => onPick(`Start ${fmt(iso(firstNext))}`)}>{fmt(iso(firstNext))}</button>
+        <input type="date" className={FIELD} value={start} onChange={(e) => setStart(e.target.value)} />
+        <Button size="sm" variant="outline" onClick={() => onPick(`Start ${fmt(start)}`)}>Use Date</Button>
+      </>}
+      {ask.kind === "dates" && <>
+        {[1, 2, 3].map((n) => <button key={n} className={CHIP} onClick={() => onPick(`${fmt(iso(today))} to ${fmt(iso(addYears(today, n)))} (${n} year${n > 1 ? "s" : ""})`)}>{n} year{n > 1 ? "s" : ""} from today</button>)}
+        <span className="flex items-center gap-1.5">
+          <input type="date" className={FIELD} value={start} onChange={(e) => setStart(e.target.value)} />
+          <span className="text-sm text-gray-500">to</span>
+          <input type="date" className={FIELD} value={end} onChange={(e) => setEnd(e.target.value)} />
+          <Button size="sm" variant="outline" disabled={!start || !end || end < start} onClick={() => onPick(`${fmt(start)} to ${fmt(end)}`)}>Use Dates</Button>
+        </span>
+      </>}
+      {ask.kind === "value" && <>
+        <select className={FIELD} value={cur} onChange={(e) => setCur(e.target.value)}>{["MYR", "USD", "SGD", "EUR", "CNY", "GBP"].map((c) => <option key={c}>{c}</option>)}</select>
+        <input type="number" min={0} className={FIELD + " w-40"} placeholder="Amount" value={value} onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && value) onPick(`${cur} ${Number(value).toLocaleString()}`); }} />
+        <Button size="sm" variant="outline" disabled={!value} onClick={() => onPick(`${cur} ${Number(value).toLocaleString()}`)}>Use Value</Button>
+        <button className={CHIP} onClick={() => onPick("No contract value")}>No contract value</button>
+      </>}
     </div>
   );
 }
