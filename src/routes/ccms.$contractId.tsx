@@ -14,7 +14,7 @@ import { toast } from "sonner";
 import {
   CcmsHeader, StatusBadge, OutcomeText, SlaText, Section, CostChip, SeverityIcon, CARD, TH, TD, fmtMoney, useCcmsRole, useConfirm, NoteText } from "@/components/ccms-widgets";
 import {
-  AI_ROLE, CCMS_ROLES, CONTRACT_TYPES, DEMO_PEOPLE, FLAG_META, BLOCKING_FLAGS, DEMO_SINGLE_USER, OBLIGATION_CATEGORIES, SECURITY_TYPES, STRAIGHT_THROUGH, contractOwner, straightThrough, wasStraightThrough, daysBetween, entityShort, flowOf, nextApproval, normalizeObligations, obligationBucket, paymentReady, stageTitle, roleLabel, templateById, displayName,
+  AI_ROLE, CCMS_ROLES, CONTRACT_TYPES, DEMO_PEOPLE, FLAG_META, BLOCKING_FLAGS, DEMO_SINGLE_USER, OBLIGATION_CATEGORIES, SECURITY_TYPES, STRAIGHT_THROUGH, contractOwner, departmentChecklist, departmentRequired, straightThrough, wasStraightThrough, daysBetween, entityShort, flowOf, nextApproval, normalizeObligations, obligationBucket, paymentReady, stageTitle, roleLabel, templateById, displayName,
   type Flag, type NextAction, type Obligation, type ObligationCategory, type Security, type Stage,
 } from "@/lib/ccms";
 import { Loader2, FileText, ArrowLeft, ChevronRight, MoreHorizontal, Trash2 } from "lucide-react";
@@ -62,7 +62,10 @@ function ContractDetail() {
 
   // Obligations by department, for the tree and the department views.
   const owner = contractOwner(c);
-  const obl = c.repository ? normalizeObligations(c.repository.obligations, owner) : [];
+  // Filed: the confirmed obligations. In review: those read from the draft.
+  const draftDoc = documents.find((d: any) => (d.doc_role === "draft" || d.doc_role === "counterparty") && d.terms);
+  const fromDraft = !c.repository && !!draftDoc?.terms;
+  const obl = c.repository ? normalizeObligations(c.repository.obligations, owner) : fromDraft ? normalizeObligations(draftDoc.terms.obligations, owner) : [];
   const openOf = (cat?: ObligationCategory) => obl.filter((o) => o.status === "open" && (!cat || o.category === cat)).length;
   const client = c.side === "client" && (c.confirmation || documents.some((d: any) => d.comparison));
   const lifecycle = ["signed", "stamped", "active", "closed"].includes(c.status) && ((c.changes ?? []).length > 0 || c.renewal);
@@ -72,7 +75,10 @@ function ContractDetail() {
     { key: "comments", label: "Comments", badge: openNow ? <span className="text-amber-700">{openNow} open</span> : onCurrent.length || undefined },
     { key: "review", label: "Review & Approval", badge: blocking.length ? <SeverityIcon severity="red_flag" className="size-3.5" /> : flags.length ? <SeverityIcon severity="caution" className="size-3.5" /> : undefined },
     { key: "details", label: "Details" },
-    { key: "obligations", label: "Obligations", badge: c.repository ? openOf() || undefined : undefined, children: (Object.keys(OBLIGATION_CATEGORIES) as ObligationCategory[]).map((k) => ({ key: `ob-${k}`, label: OBLIGATION_CATEGORIES[k], badge: c.repository ? openOf(k) || undefined : undefined })) },
+    { key: "obligations", label: "Obligations", badge: obl.length ? openOf() || undefined : undefined, children: (Object.keys(OBLIGATION_CATEGORIES) as ObligationCategory[]).map((k) => ({
+      key: `ob-${k}`, label: OBLIGATION_CATEGORIES[k],
+      badge: openOf(k) || (!departmentRequired(c, k).required ? <span className="text-gray-400">Not required</span> : undefined),
+    })) },
     { key: "confirmation", label: "Confirmation Letter", show: !!client },
     { key: "signing", label: "Signing & Repository", show: after },
     { key: "lifecycle", label: "Changes & Renewals", show: !!lifecycle },
@@ -241,8 +247,8 @@ function ContractDetail() {
                 </Panel>
               )}
 
-              {cur === "obligations" && <ObligationsOverview c={c} obl={obl} go={go} />}
-              {cur.startsWith("ob-") && <DepartmentView cat={cur.slice(3) as ObligationCategory} c={c} vendor={vendor} obl={obl} onChanged={refresh} />}
+              {cur === "obligations" && <ObligationsOverview c={c} obl={obl} fromDraft={fromDraft} go={go} />}
+              {cur.startsWith("ob-") && <DepartmentView cat={cur.slice(3) as ObligationCategory} c={{ ...c, __draftTerms: draftDoc?.terms }} vendor={vendor} obl={obl} fromDraft={fromDraft} onChanged={refresh} />}
 
               {cur === "confirmation" && client && <Panel title="Confirmation Letter"><ConfirmationRecord c={c} documents={documents} /></Panel>}
               {cur === "signing" && after && <Panel title="Signing & Repository" sub={c.expiry_date ? `expires ${c.expiry_date}` : c.signed_date ? `signed ${c.signed_date}` : undefined}><ExecutionRecord c={c} /></Panel>}
@@ -412,16 +418,21 @@ function Fact({ label, value, note, tone }: { label: string; value: React.ReactN
 const NOT_FILED = <p className="px-4 py-6 text-sm text-gray-500">Obligations come in when the contract is filed: File to Repository reads the signed copy and lists each one, with a person in charge and a due date.</p>;
 
 /** All obligations, with a card per department that opens its view. */
-function ObligationsOverview({ c, obl, go }: { c: any; obl: Obligation[]; go: (k: string) => void }) {
-  if (!c.repository) return <Panel title="Obligations">{NOT_FILED}</Panel>;
+function ObligationsOverview({ c, obl, fromDraft, go }: { c: any; obl: Obligation[]; fromDraft: boolean; go: (k: string) => void }) {
+  if (!obl.length) return <Panel title="Obligations">{NOT_FILED}</Panel>;
   return (
-    <Panel title="Obligations" sub={`${obl.filter((o) => o.status === "open").length} open · ${obl.filter((o) => o.status === "done").length} done`}>
+    <Panel title="Obligations" sub={fromDraft ? "From the draft under review · confirmed when filed" : `${obl.filter((o) => o.status === "open").length} open · ${obl.filter((o) => o.status === "done").length} done`}>
       <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-3">
         {(Object.keys(OBLIGATION_CATEGORIES) as ObligationCategory[]).map((k) => {
           const mine = obl.filter((o) => o.category === k);
           const open = mine.filter((o) => o.status === "open");
           const soon = open.filter((o) => ["overdue", "soon"].includes(obligationBucket(o))).length;
           const next = open.filter((o) => o.due_date).sort((a, b) => a.due_date!.localeCompare(b.due_date!))[0];
+          if (!mine.length && !departmentRequired(c, k).required) return (
+            <button key={k} onClick={() => go(`ob-${k}`)} className="rounded-lg border border-gray-200 p-3 text-left text-gray-500 hover:shadow-sm">
+              <div className="font-semibold">{OBLIGATION_CATEGORIES[k]}</div><div className="mt-1 text-sm">Not required for this contract</div>
+            </button>
+          );
           return (
             <button key={k} onClick={() => go(`ob-${k}`)} className={cn("rounded-lg border p-3 text-left hover:shadow-sm", CATEGORY_TINT[k])}>
               <div className="flex items-center justify-between"><span className="font-semibold">{OBLIGATION_CATEGORIES[k]}</span><span className="text-xs">PIC {[...new Set(mine.map((o) => o.pic))].join(", ") || "—"}</span></div>
@@ -435,108 +446,105 @@ function ObligationsOverview({ c, obl, go }: { c: any; obl: Obligation[]; go: (k
   );
 }
 
-/** One department's view of the contract: the facts that department works
- *  with, its obligations, and the records behind them. */
-function DepartmentView({ cat, c, vendor, obl, onChanged }: { cat: ObligationCategory; c: any; vendor: any; obl: Obligation[]; onChanged: () => void }) {
-  const mine = obl.filter((o) => o.category === cat);
+/** One department's view of the contract: its checklist, the facts it works
+ *  with (only those with a value), its obligations and the records behind them. */
+function DepartmentView({ cat, c, vendor, obl, fromDraft, onChanged }: { cat: ObligationCategory; c: any; vendor: any; obl: Obligation[]; fromDraft: boolean; onChanged: () => void }) {
+  const mine = obl.filter((o) => o.category === cat).sort((a, b) => String(a.due_date ?? "9999").localeCompare(String(b.due_date ?? "9999")));
+  const req = departmentRequired(c, cat);
+  const checklist = departmentChecklist(c, cat, obl);
   const cur = c.repository?.currency ?? c.currency;
   const value = c.repository?.value ?? c.value;
   const days = c.expiry_date ? daysBetween(new Date(), c.expiry_date) : null;
-  const stage = (key: string) => (c.approval_route ?? []).find((s: any) => s.key === key);
-  const obligations = (
-    <Panel title={`${OBLIGATION_CATEGORIES[cat]} obligations`} sub={c.repository ? `${mine.filter((o) => o.status === "open").length} open · PIC ${[...new Set(mine.map((o) => o.pic))].join(", ") || "—"}` : undefined}>
-      {c.repository ? <ObligationRows rows={mine.sort((a, b) => String(a.due_date ?? "9999").localeCompare(String(b.due_date ?? "9999"))).map((o) => ({ o, c }))} onChanged={onChanged} /> : NOT_FILED}
-    </Panel>
-  );
-
+  const terms = c.__draftTerms as any;
+  const has = (v: any) => v !== null && v !== undefined && v !== "" && v !== "—";
+  type F = { label: string; value: any; note?: any; tone?: "good" | "warn" | "bad" };
+  let facts: F[] = [];
+  let extra: React.ReactNode = null;
   if (cat === "finance") {
     const pays = mine.filter((o) => o.amount != null);
     const scheduled = pays.reduce((n, o) => n + (o.amount ?? 0), 0);
     const paid = pays.filter((o) => o.status === "done").reduce((n, o) => n + (o.amount ?? 0), 0);
     const next = pays.filter((o) => o.status === "open" && o.due_date).sort((a, b) => a.due_date!.localeCompare(b.due_date!))[0];
     const secs: Security[] = c.securities ?? [];
-    const fin = stage("finance");
-    return (
-      <>
-        <Panel title="Finance" sub="Value, payments and security for payment">
-          <div className="grid grid-cols-2 gap-3 p-4 md:grid-cols-4">
-            <Fact label="Contract value" value={fmtMoney(value, cur)} note={c.currency !== "MYR" && c.value_myr != null ? `≈ ${fmtMoney(c.value_myr)}` : undefined} />
-            <Fact label="Payment schedule" value={pays.length ? fmtMoney(scheduled, cur) : "—"} note={pays.length ? `${pays.length} instalment${pays.length === 1 ? "" : "s"}${value ? ` · ${Math.round((scheduled / value) * 100)}% of value` : ""}` : "No payments in the contract"} />
-            <Fact label="Paid" value={fmtMoney(paid, cur)} note={`Outstanding ${fmtMoney(scheduled - paid, cur)}`} tone={pays.length && paid >= scheduled ? "good" : undefined} />
-            <Fact label="Next payment" value={next ? fmtMoney(next.amount, cur) : "—"} note={next ? `${next.due_date} · ${next.text}` : undefined} tone={next && obligationBucket(next) === "overdue" ? "bad" : next && obligationBucket(next) === "soon" ? "warn" : undefined} />
-            <Fact label="Payment-ready" value={secs.length === 0 ? "—" : paymentReady(secs) ? "Yes" : "Incomplete"} tone={secs.length ? (paymentReady(secs) ? "good" : "warn") : undefined} note="Bonds and insurance on file" />
-            <Fact label="Stamp duty" value={c.stamping?.duty != null ? fmtMoney(c.stamping.duty) : "—"} note={c.stamping?.certificate_no ?? undefined} />
-            <Fact label="Finance review" value={fin ? fin.status.replace(/_/g, " ") : "Not in the route"} note={fin?.decided_by ? displayName(fin.decided_by) : undefined} />
-            <Fact label="Currency" value={cur ?? "MYR"} />
-          </div>
-        </Panel>
-        {obligations}
-        {secs.length > 0 && (
-          <Panel title="Bonds and insurance">
-            <table className="w-full"><thead><tr className="border-b border-gray-200"><th className={TH}>Instrument</th><th className={TH}>Required</th><th className={TH + " text-right"}>Amount</th><th className={TH}>Reference</th><th className={TH}>Valid until</th></tr></thead>
-              <tbody>{secs.map((x) => (
-                <tr key={x.type} className="border-b border-gray-100 last:border-0">
-                  <td className={TD}>{SECURITY_TYPES.find((t) => t.id === x.type)?.label ?? x.type}</td>
-                  <td className={TD}>{x.required ? "Yes" : "—"}</td>
-                  <td className={TD + " text-right tabular-nums"}>{x.amount != null ? fmtMoney(x.amount) : "—"}</td>
-                  <td className={TD}>{x.reference || "—"}</td>
-                  <td className={TD}>{x.valid_until || "—"}</td>
-                </tr>
-              ))}</tbody>
-            </table>
-          </Panel>
-        )}
-      </>
+    facts = [
+      { label: "Contract value", value: value != null ? fmtMoney(value, cur) : null, note: c.currency !== "MYR" && c.value_myr != null ? `≈ ${fmtMoney(c.value_myr)}` : undefined },
+      { label: "Payment schedule", value: pays.length ? fmtMoney(scheduled, cur) : null, note: `${pays.length} instalment${pays.length === 1 ? "" : "s"}${value ? ` · ${Math.round((scheduled / value) * 100)}% of value` : ""}` },
+      ...(!fromDraft && pays.length ? [{ label: "Paid", value: fmtMoney(paid, cur), note: `Outstanding ${fmtMoney(scheduled - paid, cur)}`, tone: paid >= scheduled ? ("good" as const) : undefined }] : []),
+      { label: "Next payment", value: next ? fmtMoney(next.amount, cur) : null, note: next ? `${next.due_date} · ${next.text}` : undefined, tone: next && !fromDraft && obligationBucket(next) === "overdue" ? "bad" : undefined },
+      { label: "Stamp duty", value: c.stamping?.duty != null ? fmtMoney(c.stamping.duty) : null, note: c.stamping?.certificate_no ?? undefined },
+    ];
+    if (secs.some((x) => x.reference || x.required)) extra = (
+      <Panel title="Bonds and insurance" sub={paymentReady(secs) ? "Payment-ready" : "Incomplete"}>
+        <table className="w-full"><thead><tr className="border-b border-gray-200"><th className={TH}>Instrument</th><th className={TH}>Required</th><th className={TH + " text-right"}>Amount</th><th className={TH}>Reference</th><th className={TH}>Valid until</th></tr></thead>
+          <tbody>{secs.filter((x) => x.required || x.reference).map((x) => (
+            <tr key={x.type} className="border-b border-gray-100 last:border-0">
+              <td className={TD}>{SECURITY_TYPES.find((t) => t.id === x.type)?.label ?? x.type}</td><td className={TD}>{x.required ? "Yes" : "—"}</td>
+              <td className={TD + " text-right tabular-nums"}>{x.amount != null ? fmtMoney(x.amount) : "—"}</td><td className={TD}>{x.reference || "—"}</td><td className={TD}>{x.valid_until || "—"}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </Panel>
+    );
+  } else if (cat === "business") {
+    facts = [
+      { label: "Contract owner", value: contractOwner(c) || null, note: c.requestor_department ?? undefined },
+      { label: "Period", value: (c.repository?.start_date ?? c.start_date) || c.expiry_date || c.end_date ? `${c.repository?.start_date ?? c.start_date ?? "—"} to ${c.expiry_date ?? c.end_date ?? "—"}` : null },
+      { label: "Expires in", value: days == null ? null : days < 0 ? `expired ${-days} days ago` : `${days} days`, tone: days != null && days <= 30 ? "warn" : undefined },
+      { label: "Renewal", value: c.repository?.renewal || null, note: c.renewal ? `Decided: ${c.renewal.decision}` : undefined },
+      { label: "Counterparty", value: c.counterparty_name, note: vendor ? `${vendor.status}${vendor.dd_valid_until ? ` · due diligence to ${vendor.dd_valid_until}` : ""}` : undefined, tone: vendor && vendor.status !== "approved" ? "warn" : undefined },
+      { label: "Project / job", value: [c.project, c.job_number].filter(Boolean).join(" · ") || null },
+      { label: "Changes", value: (c.changes ?? []).length || null },
+    ];
+    if ((c.changes ?? []).length) extra = <Panel title="Changes and renewals"><LifecycleRecord c={c} /></Panel>;
+  } else {
+    const flags = (c.flags ?? []) as Flag[];
+    facts = [
+      { label: "Parties", value: c.repository?.parties || null },
+      { label: "Contracting entity", value: entityShort(c.entity), note: c.entity },
+      { label: "Governing law", value: c.repository?.governing_law || terms?.governing_law || null },
+      { label: "Notice period", value: c.repository?.notice_period || terms?.notice_period || null },
+      { label: "Flags", value: flags.length ? flags.map((f) => FLAG_META[f.key]?.label).join(", ") : null, tone: flags.some((f) => BLOCKING_FLAGS.includes(f.key)) ? "bad" : flags.length ? "warn" : undefined },
+    ];
+    const sigs = (c.signatories ?? []) as any[];
+    if (sigs.length) extra = (
+      <Panel title="Signatories">
+        <table className="w-full"><tbody>{sigs.map((x, i) => (
+          <tr key={i} className="border-b border-gray-100 last:border-0"><td className={TD}>{x.name}</td><td className={TD + " text-gray-600"}>{x.designation ?? "—"}</td><td className={TD + " text-gray-600"}>{x.party}</td></tr>
+        ))}</tbody></table>
+      </Panel>
     );
   }
+  facts = facts.filter((f) => has(f.value));
+  const pics = [...new Set(mine.map((o) => o.pic))].join(", ");
 
-  if (cat === "business") {
-    return (
-      <>
-        <Panel title="Business" sub="Ownership, scope, delivery and renewal">
-          <div className="grid grid-cols-2 gap-3 p-4 md:grid-cols-4">
-            <Fact label="Contract owner" value={contractOwner(c) || "—"} note={c.requestor_department ?? undefined} />
-            <Fact label="Period" value={`${c.repository?.start_date ?? c.start_date ?? "—"} to ${c.expiry_date ?? c.end_date ?? "—"}`} />
-            <Fact label="Expires in" value={days == null ? "—" : days < 0 ? `expired ${-days} days ago` : `${days} days`} tone={days != null && days <= 30 ? "warn" : undefined} />
-            <Fact label="Renewal" value={c.repository?.renewal || "—"} note={c.renewal ? `Decided: ${c.renewal.decision}` : undefined} />
-            <Fact label="Counterparty" value={c.counterparty_name ?? "—"} note={vendor ? `${vendor.status}${vendor.dd_valid_until ? ` · due diligence to ${vendor.dd_valid_until}` : ""}` : undefined} tone={vendor && vendor.status !== "approved" ? "warn" : undefined} />
-            <Fact label="Project / job" value={[c.project, c.job_number].filter(Boolean).join(" · ") || "—"} />
-            <Fact label="Changes" value={(c.changes ?? []).length} note={(c.changes ?? []).length ? "Change requests on this contract" : undefined} />
-            <Fact label="Requested" value={format(new Date(c.created_at), "d MMM yyyy")} note={displayName(c.requestor_name)} />
-          </div>
-          <div className="border-t border-gray-100 px-4 py-3 text-sm"><span className="text-gray-500">Scope · </span><span className="whitespace-pre-wrap text-gray-900">{c.scope_summary}</span></div>
-        </Panel>
-        {obligations}
-        {(c.changes ?? []).length > 0 && <Panel title="Changes and renewals"><LifecycleRecord c={c} /></Panel>}
-      </>
-    );
-  }
-
-  const legal = stage("legal");
-  const sigs = (c.signatories ?? []) as any[];
-  const flags = (c.flags ?? []) as Flag[];
   return (
     <>
-      <Panel title="Legal" sub="Parties, terms, execution and stamping">
-        <div className="grid grid-cols-2 gap-3 p-4 md:grid-cols-4">
-          <Fact label="Parties" value={c.repository?.parties || `${c.entity} and ${c.counterparty_name ?? "—"}`} />
-          <Fact label="Contracting entity" value={entityShort(c.entity)} note={c.entity} />
-          <Fact label="Governing law" value={c.repository?.governing_law || "—"} />
-          <Fact label="Notice period" value={c.repository?.notice_period || "—"} />
-          <Fact label="Legal review" value={legal ? legal.status.replace(/_/g, " ") : "—"} note={legal?.decided_by ? displayName(legal.decided_by) : undefined} tone={legal && ["cleared", "cleared_with_comments", "approved"].includes(legal.status) ? "good" : undefined} />
-          <Fact label="Signed" value={c.signed_date ?? "—"} note={sigs.map((x) => x.name).join(", ") || undefined} />
-          <Fact label="Stamped" value={c.stamping?.stamped_date ?? (flowOf(c) === "lite" ? "Not required" : "—")} note={c.stamping?.certificate_no ?? undefined} tone={c.stamping?.stamped_date ? "good" : undefined} />
-          <Fact label="Flags" value={flags.length ? flags.map((f) => FLAG_META[f.key]?.label).join(", ") : "None"} tone={flags.some((f) => BLOCKING_FLAGS.includes(f.key)) ? "bad" : flags.length ? "warn" : "good"} />
-        </div>
+      <Panel title={OBLIGATION_CATEGORIES[cat]} sub={req.required ? req.why : "Not required"}>
+        {!req.required && <p className="border-b border-gray-100 bg-gray-50/60 px-4 py-2.5 text-sm text-gray-600">{req.why}{mine.length ? ` Its ${OBLIGATION_CATEGORIES[cat].toLowerCase()} obligations are still listed below.` : ""}</p>}
+        {checklist.length > 0 && (
+          <ul className="divide-y divide-gray-100">
+            {checklist.map((it) => (
+              <li key={it.label} className="flex items-center gap-3 px-4 py-2 text-sm">
+                <span className={cn("grid size-5 shrink-0 place-items-center rounded-full border text-xs", it.done ? "border-emerald-600 bg-emerald-600 text-white" : "border-gray-300 text-gray-300")}>{it.done ? "✓" : ""}</span>
+                <span className={cn("flex-1", it.done ? "text-gray-900" : "text-gray-600")}>{it.label}</span>
+                <span className="text-xs text-gray-500">{it.note ?? (it.done ? "Done" : "Pending")}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {facts.length > 0 && (
+          <div className="grid grid-cols-2 gap-3 border-t border-gray-100 p-4 md:grid-cols-4">
+            {facts.map((f) => <Fact key={f.label} label={f.label} value={f.value} note={f.note} tone={f.tone} />)}
+          </div>
+        )}
+        {cat === "business" && c.scope_summary && <div className="border-t border-gray-100 px-4 py-3 text-sm"><span className="text-gray-500">Scope · </span><span className="whitespace-pre-wrap text-gray-900">{c.scope_summary}</span></div>}
       </Panel>
-      {obligations}
-      {sigs.length > 0 && (
-        <Panel title="Signatories">
-          <table className="w-full"><tbody>{sigs.map((x, i) => (
-            <tr key={i} className="border-b border-gray-100 last:border-0"><td className={TD}>{x.name}</td><td className={TD + " text-gray-600"}>{x.designation ?? "—"}</td><td className={TD + " text-gray-600"}>{x.party}</td></tr>
-          ))}</tbody></table>
+      {mine.length > 0 && (
+        <Panel title={`${OBLIGATION_CATEGORIES[cat]} obligations`} sub={fromDraft ? `From the draft under review · confirmed when filed · PIC ${pics}` : `${mine.filter((o) => o.status === "open").length} open · PIC ${pics}`}>
+          <ObligationRows rows={mine.map((o) => ({ o, c }))} onChanged={onChanged} readOnly={fromDraft} />
         </Panel>
       )}
+      {extra}
     </>
   );
 }

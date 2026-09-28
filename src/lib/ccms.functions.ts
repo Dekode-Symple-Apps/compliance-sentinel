@@ -249,7 +249,7 @@ export const getCcmsContract = createServerFn({ method: "GET" })
     const contract = await loadContract(sb, data.id, tenantId);
     const [vendor, docs, comments, reviews, events] = await Promise.all([
       loadVendor(sb, contract.vendor_id, tenantId),
-      sb.from("ccms_documents").select("id,contract_id,file_name,file_url,mime_type,size_bytes,doc_role,version,ai_review_status,uploaded_by_name,created_at,ai_review->verdict,ai_review->riskScore,ai_review->summary,ai_review->generated,ai_review->fields,ai_review->findings,comparison")
+      sb.from("ccms_documents").select("id,contract_id,file_name,file_url,mime_type,size_bytes,doc_role,version,ai_review_status,uploaded_by_name,created_at,ai_review->verdict,ai_review->riskScore,ai_review->summary,ai_review->generated,ai_review->fields,ai_review->findings,ai_review->terms,comparison")
         .eq("contract_id", data.id).order("created_at", { ascending: false }),
       sb.from("ccms_comments").select("*").eq("contract_id", data.id).order("created_at"),
       sb.from("ccms_reviews").select("*").eq("contract_id", data.id).order("created_at"),
@@ -530,7 +530,13 @@ export const reviewCcmsDocument = createServerFn({ method: "POST" })
     await sb.from("ccms_documents").update({ ai_review_status: "running" }).eq("id", doc.id);
     try {
       const { text, pdfBase64 } = await documentText(doc);
-      const { ai_review, deviation, loa_check, res } = await runDraftReview(contract, vendor, doc.file_name, text, pdfBase64);
+      // The review, and the draft's obligations read alongside it, so each
+      // department sees what it will have to do while the contract is in review.
+      const [{ ai_review, deviation, loa_check, res }, kt] = await Promise.all([
+        runDraftReview(contract, vendor, doc.file_name, text, pdfBase64),
+        runKeyTerms(doc.file_name, text, pdfBase64).catch(() => null),
+      ]);
+      if (kt?.out) (ai_review as any).terms = draftTerms(kt.out, contract);
       const tpl = templateById(contract.template_id);
       await sb.from("ccms_documents").update({ ai_review, deviation, loa_check, ai_review_status: "done" }).eq("id", doc.id);
       const threads = await syncAiThreads(sb, contract.id, doc.id, ai_review.findings);
@@ -546,7 +552,7 @@ export const reviewCcmsDocument = createServerFn({ method: "POST" })
         routing.approval_route = routing.approval_route.map((s: Stage) => ({ ...s, status: s.kind === "review" ? "cleared" : "approved", decided_by: STP_ACTOR, decided_at: at, note }));
       }
       const model = res.modelVersion ?? (await getDefaultModel());
-      const cost_log = [...(contract.cost_log ?? []).slice(-49), costEntry("Draft review", res, model)];
+      const cost_log = [...(contract.cost_log ?? []).slice(-48), costEntry("Draft review", res, model), ...(kt?.res ? [costEntry("Draft obligations", kt.res, kt.res.modelVersion ?? model)] : [])];
       await sb.from("ccms_contracts").update({
         ...routing, cost_log,
         status: contract.status === "submitted" ? statusFor(routing.approval_route, true) : contract.status,
@@ -1162,6 +1168,20 @@ Obligations: up to 8, of either party, that someone must act on. finance = payin
   if (pdfBase64) parts.push({ inlineData: { mimeType: "application/pdf", data: pdfBase64 } });
   const res: any = await generateWithFallback({ contents: [{ role: "user", parts }], config: { responseMimeType: "application/json", maxOutputTokens: 4096, temperature: 0 } }, { tier: "quality" });
   return { out: parseJson(res.text ?? "") ?? {}, res };
+}
+
+/** Key terms read from a draft: obligations (with instalment amounts) and dates. */
+export function draftTerms(out: any, contract: any) {
+  const value = typeof out.value === "number" ? out.value : contract.value ?? null;
+  const owner = contractOwner(contract);
+  return {
+    value, currency: String(out.currency || contract.currency || "MYR"), start_date: out.start_date || null, end_date: out.end_date || null,
+    governing_law: String(out.governing_law ?? ""), notice_period: String(out.notice_period ?? ""),
+    obligations: normalizeObligations((Array.isArray(out.obligations) ? out.obligations : []).slice(0, 10).map((o: any, i: number) => ({
+      ...(typeof o === "string" ? { text: o } : o), id: `d${i + 1}`,
+      amount: typeof o?.amount === "number" ? o.amount : typeof o?.percent === "number" && value ? Math.round((o.percent / 100) * value * 100) / 100 : null,
+    })), owner),
+  };
 }
 
 export const extractCcmsKeyTerms = createServerFn({ method: "POST" })

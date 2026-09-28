@@ -68,7 +68,7 @@ export function ObligationsEditor({ value, onChange, owner }: { value: Obligatio
 }
 
 /** Obligations as a list with Mark Done — on the contract page and across contracts. */
-export function ObligationRows({ rows, showContract, onChanged }: { rows: { o: Obligation; c: any }[]; showContract?: boolean; onChanged: () => void }) {
+export function ObligationRows({ rows, showContract, onChanged, readOnly }: { rows: { o: Obligation; c: any }[]; showContract?: boolean; onChanged: () => void; readOnly?: boolean }) {
   const fn = useServerFn(updateCcmsObligation);
   const [busy, setBusy] = useState<string | null>(null);
   async function toggle(o: Obligation, c: any) {
@@ -92,10 +92,10 @@ export function ObligationRows({ rows, showContract, onChanged }: { rows: { o: O
             </div>
           </div>
           <div className="w-32 shrink-0 text-right"><DueText o={o} /></div>
-          <button type="button" disabled={busy === o.id + c.id} onClick={() => toggle(o, c)}
+          {!readOnly && <button type="button" disabled={busy === o.id + c.id} onClick={() => toggle(o, c)}
             className={cn("inline-flex w-28 shrink-0 items-center justify-center gap-1 rounded-md border px-2 py-1 text-sm", o.status === "done" ? "border-gray-200 text-gray-600 hover:border-gray-400" : "border-gray-300 text-gray-900 hover:border-gray-900")}>
             {busy === o.id + c.id ? <Loader2 className="size-4 animate-spin" /> : o.status === "done" ? <><RotateCcw className="size-3.5" /> Reopen</> : <><Check className="size-4" /> Mark Done</>}
-          </button>
+          </button>}
         </li>
       ))}
     </ul>

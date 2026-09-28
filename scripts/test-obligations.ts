@@ -1,5 +1,5 @@
 // Obligations: categories from wording, PIC defaults, automatic obligations, due buckets.
-import { autoObligations, categoryOf, contractOwner, defaultPic, entityShort, normalizeObligations, obligationBucket } from "../src/lib/ccms";
+import { autoObligations, categoryOf, contractOwner, defaultPic, departmentChecklist, departmentRequired, entityShort, normalizeObligations, obligationBucket } from "../src/lib/ccms";
 let pass = 0, fail = 0;
 const check = (name: string, ok: boolean, detail = "") => { ok ? pass++ : fail++; console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  — " + detail : ""}`); };
 
@@ -31,6 +31,17 @@ check("buckets", b("2026-09-01") === "overdue" && b("2026-10-15") === "soon" && 
 
 check("owner falls back to the requester", contractOwner({ requestor_name: "Jeremy Teh" }) === "Jeremy Teh" && contractOwner({ owner_name: "Dabraj", requestor_name: "Jeremy Teh" }) === "Dabraj");
 check("entity short names", entityShort("Lim Seong Hai Lighting Sdn Bhd") === "LSH Lighting" && entityShort("Lim Seong Hai Capital Berhad") === "LSH Capital" && entityShort("Knight Auto Sdn Bhd") === "Knight Auto");
+
+const ndaC = { contract_type: "nda", approval_route: [{ key: "legal", label: "Legal Decision", kind: "review", status: "pending" }] } as any;
+check("NDA: only Legal clears", departmentRequired(ndaC, "legal").required && !departmentRequired(ndaC, "finance").required && !departmentRequired(ndaC, "business").required, departmentRequired(ndaC, "finance").why);
+const loaC = { contract_type: "letter_of_award", requestor_name: "Jeremy Teh", created_at: "2026-09-28", approval_route: [
+  { key: "legal", label: "Legal Vetting", kind: "review", status: "cleared", decided_by: "Irwin" }, { key: "finance", label: "Finance Review", kind: "review", status: "pending" },
+  { key: "approval", label: "Final Approval Committee", kind: "approval", status: "pending" }] } as any;
+check("Letter of Award: all three clear", ["legal", "finance", "business"].every((k) => departmentRequired(loaC, k as any).required));
+const finList = departmentChecklist(loaC, "finance", normalizeObligations([{ text: "Pay progress claims", category: "finance", amount: 100 }]));
+check("finance checklist: review pending, schedule captured", finList[0].label === "Finance Review" && !finList[0].done && finList.some((x) => x.label === "Payment schedule captured" && x.done), JSON.stringify(finList));
+check("legal checklist: vetting done by Irwin", departmentChecklist(loaC, "legal", [])[0].done && departmentChecklist(loaC, "legal", [])[0].note?.startsWith("Irwin") === true);
+check("NDA finance checklist is empty (nothing for Finance to do)", departmentChecklist(ndaC, "finance", []).length === 0);
 
 console.log(`\n${pass}/${pass + fail} obligation checks passed`);
 process.exit(fail ? 1 : 0);

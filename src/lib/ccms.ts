@@ -426,6 +426,64 @@ export function autoObligations(c: any, end_date: string | null | undefined, exi
   }
   return out;
 }
+/** Whether a department has to clear this contract: Legal and Finance when
+ *  their review is in the route, Business when an approval is (the approver
+ *  is the business). An NDA, for one, is Legal's decision alone. */
+export function departmentRequired(c: { contract_type: string; approval_route?: Stage[] | null }, cat: ObligationCategory): { required: boolean; why: string } {
+  const route = c.approval_route ?? [];
+  const t = CONTRACT_TYPES[c.contract_type]?.label ?? "this contract";
+  const stage = cat === "business" ? route.find((s) => s.kind === "approval") : route.find((s) => s.key === cat);
+  if (stage) return { required: true, why: `${stage.label} is in the route` };
+  const who = route.map((s) => s.label).join(", ") || "no review";
+  return { required: false, why: `Not required for a ${t} — its route is ${who}.` };
+}
+
+/** Each department's steps on a contract, ticked as they are done. Steps that
+ *  do not apply to this contract are left out. */
+export interface CheckItem { label: string; done: boolean; note?: string }
+export function departmentChecklist(c: any, cat: ObligationCategory, obl: Obligation[]): CheckItem[] {
+  const route: Stage[] = c.approval_route ?? [];
+  const lite = flowOf(c) === "lite";
+  const decided = (s?: Stage) => !!s && ["cleared", "cleared_with_comments", "approved"].includes(s.status);
+  const by = (s?: Stage) => (s?.decided_by ? `${displayName(s.decided_by)}${s.decided_at ? ` · ${String(s.decided_at).slice(0, 10)}` : ""}` : s ? s.status.replace(/_/g, " ") : undefined);
+  const mine = obl.filter((o) => o.category === cat);
+  const doneOf = (xs: Obligation[]) => `${xs.filter((o) => o.status === "done").length} of ${xs.length} done`;
+  const filed = !!c.repository;
+  const items: (CheckItem | false)[] = [];
+  if (cat === "finance") {
+    const fin = route.find((s) => s.key === "finance");
+    const pays = mine.filter((o) => o.amount != null);
+    const secs: Security[] = c.securities ?? [];
+    items.push(
+      !!fin && { label: "Finance Review", done: decided(fin), note: by(fin) },
+      pays.length > 0 && { label: "Payment schedule captured", done: true, note: `${pays.length} instalment${pays.length === 1 ? "" : "s"}` },
+      secs.some((x) => x.required) && { label: "Bonds and insurance on file", done: paymentReady(secs) },
+      !lite && !!c.signed_date && { label: "Stamp duty paid", done: !!c.stamping?.stamped_date, note: c.stamping?.certificate_no },
+      filed && pays.length > 0 && { label: "Payments made", done: pays.every((o) => o.status === "done"), note: doneOf(pays) },
+    );
+  } else if (cat === "business") {
+    const approvals = route.filter((s) => s.kind === "approval");
+    items.push(
+      { label: "Request raised", done: true, note: `${displayName(c.requestor_name)} · ${String(c.created_at ?? "").slice(0, 10)}` },
+      { label: "Contract owner", done: !!contractOwner(c), note: contractOwner(c) || undefined },
+      ...approvals.map((s) => ({ label: `${s.label} approval`, done: decided(s), note: by(s) })),
+      { label: "Signed", done: !!c.signed_date, note: c.signed_date ?? undefined },
+      { label: "Filed to the repository", done: filed, note: c.expiry_date ? `expires ${c.expiry_date}` : undefined },
+      filed && mine.length > 0 && { label: "Business obligations", done: mine.every((o) => o.status === "done"), note: doneOf(mine) },
+    );
+  } else {
+    const legal = route.find((s) => s.key === "legal");
+    items.push(
+      !!legal && { label: legal.label, done: decided(legal), note: by(legal) },
+      { label: "Signed", done: !!c.signed_date, note: (c.signatories ?? []).map((x: any) => x.name).join(", ") || undefined },
+      !lite && { label: "Stamped", done: !!c.stamping?.stamped_date, note: c.stamping?.certificate_no },
+      { label: "Filed to the repository", done: filed },
+      filed && mine.length > 0 && { label: "Legal obligations", done: mine.every((o) => o.status === "done"), note: doneOf(mine) },
+    );
+  }
+  return items.filter(Boolean) as CheckItem[];
+}
+
 export type ObligationBucket = "overdue" | "soon" | "later" | "nodate" | "done";
 export function obligationBucket(o: Obligation, today = new Date()): ObligationBucket {
   if (o.status === "done") return "done";
