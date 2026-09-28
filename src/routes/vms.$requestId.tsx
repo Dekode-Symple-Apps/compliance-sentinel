@@ -148,7 +148,7 @@ function SubmissionSection({ r }: { r: any }) {
         <li><span className="text-gray-500">Directors:</span> {(reg.directors ?? []).map((d: any) => d.name).join(", ") || "—"}</li>
         <li><span className="text-gray-500">Bank:</span> {reg.bank_name} · account ending {String(reg.bank_account ?? "").slice(-4)}</li>
         {reg.cidb_grade && <li><span className="text-gray-500">CIDB:</span> {reg.cidb_grade}</li>}
-        {(reg.project_references ?? []).length > 0 && <li><span className="text-gray-500">References:</span> {reg.project_references.join("; ")}</li>}
+        {(reg.project_references ?? []).filter((x: string) => x?.trim()).length > 0 && <li><span className="text-gray-500">References:</span> {reg.project_references.filter((x: string) => x?.trim()).join("; ")}</li>}
       </ul>
       <div className="pt-1">
         <div className="font-semibold text-gray-900">Integrity forms</div>

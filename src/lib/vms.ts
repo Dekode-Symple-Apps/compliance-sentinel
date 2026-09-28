@@ -94,7 +94,7 @@ export function screen(input: {
   if (input.ctos?.winding_up) { rating = "high"; reasons.push("CTOS: winding-up petition"); }
   if (input.ctos?.litigation) { if (rating === "low") rating = "medium"; reasons.push("CTOS: litigation on record"); }
   if (input.ctos?.director_flags) { if (rating === "low") rating = "medium"; reasons.push("CTOS: director flags"); }
-  if (input.relatedPartyMatch) { if (rating === "low") rating = "medium"; reasons.push("Name matches the related-party list — confirm"); }
+  if (input.relatedPartyMatch) { if (rating === "low") rating = "medium"; reasons.push("Possible related party — confirm the relationship"); }
   if (input.duplicates.length) reasons.push(`Possible duplicate of ${input.duplicates.join(", ")}`);
   if (input.blacklisted) reasons.unshift("On the blacklist");
   return { rating, reasons, blacklisted: input.blacklisted, relatedParty: input.relatedPartyMatch, duplicateOf: input.duplicates };
@@ -134,7 +134,7 @@ export function requestMilestones(r: any, docs: any[]): { stages: VmsStage[]; ne
   const compl = needsCompliance(r.screening) || (sub && r.conflict_check?.accounts_decision === "red_flag");
   const steps: { key: string; label: string; ok: boolean; detail?: string; skip?: boolean }[] = [
     { key: "request", label: "Request raised", ok: true },
-    { key: "invite", label: "Vendor invited", ok: !!r.invite_token },
+    { key: "invite", label: "Vendor invited", ok: !!r.invite_token || !!r.invite_expires || !!r.submitted_by_vendor_at },
     { key: "register", label: "Vendor submitted", ok: !!r.submitted_by_vendor_at },
     { key: "screen", label: "Screened", ok: !!r.screening, detail: r.screening ? `${r.screening.rating} risk` : undefined },
     { key: "ctos", label: sub ? "Conflict check" : "CTOS report", ok: sub ? !!r.conflict_check?.accounts_decision : !!r.ctos },

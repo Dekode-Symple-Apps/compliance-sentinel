@@ -447,7 +447,13 @@ export const decideVmsRequest = createServerFn({ method: "POST" })
     } else {
       const { data: v } = await sb.from("ccms_vendors").select("*").eq("id", r.vendor_id).single();
       const rating = r.screening?.rating ?? v?.risk_rating ?? "low";
-      const code = v?.vendor_code ?? `V-${String(Date.now()).slice(-6)}`;
+      // Codes run in sequence within the organisation: V-00001, V-00002, …
+      let code = v?.vendor_code;
+      if (!code) {
+        const { data: coded } = await sb.from("ccms_vendors").select("vendor_code").eq("tenant_id", tenantId).like("vendor_code", "V-%");
+        const max = Math.max(0, ...(coded ?? []).map((x: any) => Number(String(x.vendor_code).slice(2)) || 0));
+        code = `V-${String(max + 1).padStart(5, "0")}`;
+      }
       await sb.from("ccms_vendors").update({
         status: data.outcome === "conditional" ? "conditional" : "approved", vendor_code: code,
         dd_valid_until: addMonths(today(), ddMonths(rating)), approved_at: now, approved_by: userName, compliance_hold: false, hold_reason: null,
