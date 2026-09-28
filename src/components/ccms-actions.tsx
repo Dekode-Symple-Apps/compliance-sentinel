@@ -21,7 +21,7 @@ import {
   resubmitCcmsContract, reviewCcmsDocument, saveCcmsRepository, saveCcmsSecurities,
 } from "@/lib/ccms.functions";
 import {
-  BLOCKING_FLAGS, CCMS_ROLES, DEMO_SINGLE_USER, ENTITY_DETAILS, LINK_ACTIONS, SECURITY_TYPES, fillNda, flowOf, nextActions, nextApproval, paymentReady,
+  BLOCKING_FLAGS, CCMS_ROLES, DEMO_SINGLE_USER, particularsFromRecords, LINK_ACTIONS, SECURITY_TYPES, fillNda, flowOf, nextActions, nextApproval, paymentReady,
   type Flag, type KeyTerms, type NextAction, type Security, type Stage,
 } from "@/lib/ccms";
 import { recall, recallForm, remember } from "@/lib/ccms-prefill";
@@ -187,18 +187,21 @@ function GenerateForm({ a, c, documents, done }: FormProps) {
   const genFn = useServerFn(generateCcmsDraft);
   const { busy, run } = useRun();
   const previous = documents.find((d: any) => d.generated)?.fields ?? null;
-  const d = ENTITY_DETAILS[c.entity];
-  const [tf, setTf] = useState<Record<string, string>>(() => previous ?? {
+  // The particulars come from the records (entity master, vendor record); what
+  // they lack is kept as typed. Blanks in a saved snapshot never clear a value.
+  const withRecords = (p: Record<string, string>) =>
+    ({ ...p, ...Object.fromEntries(Object.entries(particularsFromRecords(c.entity, c.vendor ?? null)).filter(([, x]) => x)) });
+  const [tf, setTf] = useState<Record<string, string>>(() => previous ?? withRecords({
     date: today(), direction: "Mutual", term: "Two (2) years", disputes: "Courts of Malaysia",
     stamp_duty: "Counterparty", non_solicit: "No", cp_form: "company", cp_country: "Malaysia", cp_name: c.counterparty_name ?? "",
-    company_reg: d?.regNo ?? "", company_address: d?.address ?? "", purpose: c.scope_summary ?? "",
-  });
+    purpose: c.scope_summary ?? "",
+  }));
   const miss = fillNda(c.entity, tf).missing;
   return (
     <div className="space-y-4">
       <div className="flex items-start gap-3">
         <span className="flex-1" />
-        <FillButton onClick={() => { const s = recallForm(`request:${c.contract_type}`); if (s?.tf) setTf((p) => ({ ...p, ...s.tf })); }} />
+        <FillButton onClick={() => { const s = recallForm(`request:${c.contract_type}`); if (s?.tf) setTf((p) => withRecords({ ...p, ...Object.fromEntries(Object.entries(s.tf as Record<string, string>).filter(([, x]) => x)) })); }} />
       </div>
       <TemplateFieldsForm values={tf} onChange={(k, v) => setTf((p) => ({ ...p, [k]: v }))} fallbackPurpose={c.scope_summary ?? ""} />
       {miss.length > 0 && <p className="text-sm text-amber-700">Missing particulars: {miss.join("; ")}.</p>}

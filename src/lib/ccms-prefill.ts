@@ -59,9 +59,7 @@ const SEED_FORMS: Record<string, () => Record<string, any>> = {
     f: { entity: "Lim Seong Hai Capital Berhad", vendor_name: "Awan Digital Solutions Sdn Bhd", title: "Mutual NDA — cloud ERP evaluation",
       start_date: iso(new Date()), end_date: inYears(2), requestor_department: "Group IT",
       scope_summary: "Share financial and project data so Awan Digital can scope a cloud ERP migration." },
-    tf: { company_reg: "199001012345 (123456-X)", company_contact: "Head of Legal, Wisma Lim Seong Hai, Kuala Lumpur, legal@example.com",
-      whistleblowing: "whistleblowing@example.com", cp_address: "Level 8, Menara Awan, Petaling Jaya, Selangor",
-      cp_contact: "Farid Osman, Director, Level 8, Menara Awan, Petaling Jaya, farid@example.com" },
+    tf: { purpose: "Evaluation of a cloud ERP migration for the Group, including sharing of financial and project data." },
   }),
   "request:letter_of_award": () => ({
     f: { entity: "LSH BEST Builders Sdn Bhd", vendor_name: "Teguh Piling & Foundation Sdn Bhd", title: "Bored piling — Block C substructure",

@@ -76,7 +76,10 @@ function NewRequest() {
   useEffect(() => {
     if (!pendingTf.current) return;
     const p = pendingTf.current; pendingTf.current = null;
-    setTf((x) => ({ ...x, ...p }));
+    // Blanks in a saved snapshot never clear a value, and the entity and vendor
+    // records win over what was typed last time.
+    const kept = Object.fromEntries(Object.entries(p).filter(([, v]) => v));
+    setTf((x) => fromRecords(f.entity, vendor, { ...x, ...kept }));
   }, [fillTick, f.entity, f.vendor_id]);
   function fillLast() {
     const snap = recallForm(`request:${f.contract_type}`);

@@ -61,7 +61,7 @@ function ContractDetail() {
         <div className="mx-auto max-w-6xl space-y-4">
           <Link to="/ccms/contracts" className="inline-flex items-center gap-1 text-sm text-gray-600 hover:underline"><ArrowLeft className="size-4" /> Contracts</Link>
 
-          <Milestones c={c} documents={documents} events={events} onDone={refresh} />
+          <Milestones c={{ ...c, vendor }} documents={documents} events={events} onDone={refresh} />
 
           <Section title="Documents" summary={`${documents.length} version${documents.length === 1 ? "" : "s"}`} defaultOpen
             right={<MoreMenu c={c} documents={documents} onDone={refresh} />}>
