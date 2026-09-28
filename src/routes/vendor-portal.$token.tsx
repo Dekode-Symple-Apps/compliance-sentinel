@@ -4,9 +4,9 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { getVendorPortal, saveVendorPortal, uploadVendorPortalAuto, uploadVendorPortalDocument } from "@/lib/vms.functions";
+import { getVendorPortal, readVendorPortalDocuments, saveVendorPortal, uploadVendorPortalAuto, uploadVendorPortalDocument } from "@/lib/vms.functions";
 import { PORTAL_FORMS } from "@/lib/vms";
-import { Check, Clock, Files, Loader2, Star, TriangleAlert, Upload } from "lucide-react";
+import { Check, Clock, Files, Loader2, Sparkles, Star, TriangleAlert, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // The vendor's own page: no account, reached from the invitation link. Every
@@ -26,6 +26,7 @@ function VendorPortal() {
   const saveFn = useServerFn(saveVendorPortal);
   const uploadFn = useServerFn(uploadVendorPortalDocument);
   const autoFn = useServerFn(uploadVendorPortalAuto);
+  const readFn = useServerFn(readVendorPortalDocuments);
   const [bulk, setBulk] = useState<{ name: string; state: "working" | "done" | "unknown" | "error"; label?: string; note?: string }[]>([]);
   const [drag, setDrag] = useState(false);
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ["vendor-portal", token], queryFn: () => getFn({ data: { token } }), retry: false });
@@ -34,7 +35,9 @@ function VendorPortal() {
   const [busy, setBusy] = useState<string | null>(null);
   useEffect(() => {
     if (!data) return;
-    setReg({ company_name: data.company, directors: [{ name: "" }], project_references: ["", ""], ...(data.register ?? {}) });
+    const k: any = (data as any).known ?? {};
+    setReg({ company_name: data.company, registration_no: k.registration_no || "", contact_name: k.contact_name || "", contact_email: k.contact_email || "",
+      directors: [{ name: "" }], project_references: ["", ""], ...(data.register ?? {}) });
     setAb({ answers: {}, signed_date: new Date().toISOString().slice(0, 10), ...(data.abms ?? {}) });
   }, [data?.reference]);
 
@@ -57,7 +60,8 @@ function VendorPortal() {
   }
   const toB64 = (file: File) => new Promise<string>((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(",")[1] ?? ""); fr.onerror = rej; fr.readAsDataURL(file); });
   /** Several files at once: each is filed under the document it is. */
-  async function uploadMany(files: File[]) {
+  async function uploadMany(all: File[]) {
+    const files = all.filter((f) => f.size > 0 && /\.\w+$/.test(f.name)); // a dropped folder arrives as an empty entry
     if (!files.length) return;
     setBulk(files.map((f) => ({ name: f.name, state: "working" })));
     const put = (i: number, x: any) => setBulk((b) => b.map((y, j) => (j === i ? { ...y, ...x } : y)));
@@ -71,6 +75,26 @@ function VendorPortal() {
       } catch (e: any) { put(i, { state: "error", note: e?.message ?? "Upload failed" }); }
     }
     refetch();
+    await fillFromDocs(true);
+  }
+  /** Fill the register form from the uploaded documents — only empty fields. */
+  async function fillFromDocs(quiet = false) {
+    setBusy("read");
+    try {
+      const { fields, read } = await readFn({ data: { token } });
+      if (!read.length) { if (!quiet) toast.message("Upload your SSM certificate, company profile or bank letter first."); return; }
+      setReg((p: any) => {
+        const next = { ...p };
+        for (const [key, v] of Object.entries(fields)) {
+          if (key === "contact_designation") continue;
+          if (key === "directors") { if (!(p.directors ?? []).some((x: any) => x.name?.trim())) next.directors = v; continue; }
+          if (!String(p[key] ?? "").trim()) next[key] = v;
+        }
+        return next;
+      });
+      setAb((p: any) => ({ ...p, signatory: p.signatory || fields.contact_name || reg.contact_name || "", designation: p.designation || fields.contact_designation || "" }));
+      toast.success(`Filled from ${read.join(", ")} — please check each field.`);
+    } catch (e: any) { if (!quiet) toast.error(e?.message ?? "Could not read the documents"); } finally { setBusy(null); }
   }
   async function save(submit: boolean) {
     setBusy(submit ? "submit" : "save");
@@ -90,7 +114,13 @@ function VendorPortal() {
       <p className="text-sm text-gray-600">Category: {d.categoryLabel}{d.entity ? ` · for ${d.entity}` : ""} · link valid to {String(d.expires ?? "").slice(0, 10)}</p>
 
       <section className={CARD + " p-5 space-y-3"}>
-        <h2 className="text-base font-semibold text-gray-900">1. Supplier register form</h2>
+        <div className="flex items-center gap-3">
+          <h2 className="flex-1 text-base font-semibold text-gray-900">1. Supplier register form</h2>
+          <button type="button" disabled={!!busy} onClick={() => fillFromDocs()} className="inline-flex items-center gap-1 text-sm text-blue-700 hover:underline disabled:opacity-60"
+            title="Reads your SSM certificate, company profile and bank letter (upload them in section 2)">
+            {busy === "read" ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} {busy === "read" ? "Reading…" : "Fill from Documents"}
+          </button>
+        </div>
         <div className="grid grid-cols-2 gap-3">
           {[["company_name", "Company name"], ["registration_no", "SSM registration no."], ["tin", "Tax identification no. (TIN)"], ["address", "Registered address"], ["contact_name", "Contact person"], ["contact_email", "Contact email"], ["contact_phone", "Contact phone"], ["bank_name", "Bank"], ["bank_account", "Bank account no."], ...(d.category === "subcontractor" ? [["cidb_grade", "CIDB grade and number"]] : [])].map(([k, l]) => (
             <div key={k}><label className={LABEL}>{l}</label><input className={INPUT} value={reg[k] ?? ""} onChange={(e) => r(k, e.target.value)} /></div>
@@ -162,7 +192,10 @@ function VendorPortal() {
 
       <section className={CARD + " p-5 space-y-3"}>
         <h2 className="text-base font-semibold text-gray-900">3. Integrity forms</h2>
-        <p className="text-sm text-gray-600">ABMS-004 questionnaire. Answer every question.</p>
+        <div className="flex items-center gap-3">
+          <p className="flex-1 text-sm text-gray-600">ABMS-004 questionnaire. Answer every question.</p>
+          <button type="button" className="text-sm text-blue-700 hover:underline" onClick={() => a("answers", Object.fromEntries(d.questions.map((q: any) => [q.id, "no"])))}>No to All</button>
+        </div>
         {d.questions.map((q: any) => (
           <div key={q.id} className="flex items-start gap-3 text-sm">
             <span className="flex-1 text-gray-900">{q.text}</span>

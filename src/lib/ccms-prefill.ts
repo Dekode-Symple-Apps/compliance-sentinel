@@ -95,7 +95,7 @@ const SEED_COMPANIES: Record<string, any>[] = [
   { kind: "onboarding", company_name: "Delima Mechanical & Electrical Sdn Bhd", registration_no: "201901045678 (1334567-M)", entity: "LSH BEST Builders Sdn Bhd",
     category: "services", goods_services: "Testing, commissioning and maintenance of M&E systems", annual_spend: "450000",
     justification: "No approved M&E commissioning vendor for the Klang Valley projects; needed before the LSH 33 handover.",
-    contact_name: "Nurul Aina", contact_email: "aina@delima-me.example" },
+    contact_name: "Nurul Aina binti Hashim", contact_email: "aina@delima-me.example" },
   { kind: "subcontractor", company_name: "Kukuh Formwork & Scaffolding Sdn Bhd", registration_no: "201601023456 (1187654-P)", entity: "LSH BEST Builders Sdn Bhd",
     category: "subcontractor", trade: "Formwork and scaffolding", project: "LSH 33 Block C", expected_value: "2400000",
     justification: "Second formwork subcontractor to hold the Block C superstructure programme.",

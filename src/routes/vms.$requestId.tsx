@@ -9,9 +9,9 @@ import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import {
   assessVmsRequest, complianceVmsDecision, decideVmsRequest, getVmsRequest, inviteVmsVendor, readVmsDocument,
-  recordVmsConflictCheck, recordVmsCtos, screenVmsRequest, verifyVmsDocument,
+  readCtosReport, recordVmsConflictCheck, recordVmsCtos, screenVmsRequest, verifyVmsDocument, vmsAiAssist,
 } from "@/lib/vms.functions";
-import { CcmsHeader, CARD, TD, StageBar, useCcmsRole, uploadToStorage } from "@/components/ccms-widgets";
+import { CcmsHeader, CARD, TD, StageBar, NoteText, friendlyError, useCcmsRole, uploadToStorage } from "@/components/ccms-widgets";
 import {
   ABMS_QUESTIONS, DOC_TYPES, PASS_MARK, PREQUAL_AREAS, VENDOR_CATEGORIES, VMS_STATUS, docsFor, prequalScore, requestMilestones,
 } from "@/lib/vms";
@@ -189,6 +189,17 @@ function CtosSection({ r, onDone }: { r: any; onDone: () => void }) {
   const { busy, run } = useRun(onDone);
   const [f, setF] = useState({ score: "", litigation: false, winding_up: false, director_flags: false, note: "" });
   const [file, setFile] = useState<File | null>(null);
+  const [reading, setReading] = useState(false);
+  const readCtos = useServerFn(readCtosReport);
+  async function pick(fl: File | null) {
+    setFile(fl);
+    if (!fl) return;
+    setReading(true);
+    try {
+      const o: any = await readCtos({ data: { file_name: fl.name, mime_type: fl.type || "application/octet-stream", base64: await toB64(fl) } });
+      if (o) { setF({ score: o.score == null ? "" : String(o.score), litigation: o.litigation, winding_up: o.winding_up, director_flags: o.director_flags, note: o.note }); toast.success("Read the report — check the score and flags"); }
+    } catch (e) { toast.error(friendlyError(e)); } finally { setReading(false); }
+  }
   if (r.ctos) return (
     <Section title="CTOS report"><p>Score {r.ctos.score ?? "—"} · {[r.ctos.litigation && "litigation", r.ctos.winding_up && "winding-up", r.ctos.director_flags && "director flags"].filter(Boolean).join(", ") || "no adverse records"} · {displayName(r.ctos.by)}{r.ctos.note ? ` — ${r.ctos.note}` : ""}</p></Section>
   );
@@ -198,7 +209,7 @@ function CtosSection({ r, onDone }: { r: any; onDone: () => void }) {
         <div className="flex flex-wrap items-center gap-2">
           <input className={INPUT + " w-24"} placeholder="Score" value={f.score} onChange={(e) => setF({ ...f, score: e.target.value })} />
           {(["litigation", "winding_up", "director_flags"] as const).map((k) => <label key={k} className="flex items-center gap-1"><input type="checkbox" checked={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.checked })} /> {k.replace("_", " ")}</label>)}
-          <label className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1.5 cursor-pointer"><Upload className="size-4" /> {file ? file.name : "Report"}<input type="file" className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></label>
+          <label className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1.5 cursor-pointer">{reading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />} {reading ? "Reading…" : file ? file.name : "Upload Report"}<input type="file" className="hidden" onChange={(e) => pick(e.target.files?.[0] ?? null)} /></label>
           <input className={INPUT + " flex-1 min-w-40"} placeholder="Note" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />
           <Button size="sm" disabled={busy || !file} onClick={() => run(async () => {
             const url = await uploadToStorage(`vms/${r.id}`, file!);
@@ -220,13 +231,26 @@ function ConflictSection({ r, onDone }: { r: any; onDone: () => void }) {
     <Section title="CTOS conflict check" sub="Directors and shareholders screened against the related-party list and the employee conflict register. Must clear before selection.">
       {c?.accounts_decision ? <p>Accounts: <span className={c.accounts_decision === "cleared" ? "text-emerald-700 font-semibold" : "text-red-700 font-semibold"}>{c.accounts_decision === "cleared" ? "cleared" : "red flag"}</span> · {displayName(c.by)}{c.note ? ` — ${c.note}` : ""}</p>
         : role !== "accounts" ? <Hint role="Accounts" /> : (
-          <div className="flex gap-2"><input className={INPUT + " flex-1"} placeholder="Note (required for a red flag)" value={note} onChange={(e) => setNote(e.target.value)} />
+          <div className="flex gap-2"><div className="flex-1"><input className={INPUT + " w-full"} placeholder="Note (required for a red flag)" value={note} onChange={(e) => setNote(e.target.value)} />
+            {!note && <button type="button" onClick={() => setNote("No matches against the related-party list or the employee conflict register.")} className="mt-1 rounded border border-dashed border-gray-300 px-1.5 py-0.5 text-xs text-gray-600 hover:border-gray-500">↺ No matches against the related-party list or the employee conflict register.</button>}</div>
             <Button size="sm" disabled={busy} onClick={() => run(() => fn({ data: { request_id: r.id, decision: "cleared", note, acting_role: role } }), "Cleared")}>Clear</Button>
             <Button size="sm" variant="outline" disabled={busy} onClick={() => run(() => fn({ data: { request_id: r.id, decision: "red_flag", note, acting_role: role } }), "Red flag recorded")}>Red flag</Button></div>
         )}
     </Section>
   );
 }
+
+/** A blue "✦ label" link that runs an AI assist; the result lands in the form for the person to check. */
+function AiLink({ label, run }: { label: string; run: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button type="button" disabled={busy} className="inline-flex shrink-0 items-center gap-1 text-sm text-blue-700 hover:underline disabled:opacity-60"
+      onClick={async () => { setBusy(true); try { await run(); } catch (e) { toast.error(friendlyError(e)); } finally { setBusy(false); } }}>
+      {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} {busy ? "Working…" : label}
+    </button>
+  );
+}
+const toB64 = (file: File) => new Promise<string>((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(",")[1] ?? ""); fr.onerror = rej; fr.readAsDataURL(file); });
 
 function DocumentsSection({ r, documents, onDone }: { r: any; documents: any[]; onDone: () => void }) {
   const [role] = useCcmsRole();
@@ -240,7 +264,12 @@ function DocumentsSection({ r, documents, onDone }: { r: any; documents: any[]; 
   const set = (d: any, k: string, v: string) => setEdit((e) => ({ ...e, [d.id]: { ...(e[d.id] ?? {}), [k]: v } }));
   const docs = documents.filter((d) => d.doc_type !== "ctos");
   return (
-    <Section title="Documents" sub="The AI reads each certificate; the person verifying confirms every field. A name that does not match the company blocks verification.">
+    <Section title="Documents" sub="The AI reads each certificate; the person verifying confirms every field. A name that does not match the company blocks verification."
+      right={can && docs.some((d) => d.status === "uploaded" && !d.extracted) && <AiLink label="Read All with AI" run={async () => {
+        const todo = docs.filter((d) => d.status === "uploaded" && !d.extracted);
+        for (let i = 0; i < todo.length; i += 3) await Promise.all(todo.slice(i, i + 3).map((d) => readFn({ data: { document_id: d.id } }).catch(() => null)));
+        toast.success(`Read ${todo.length} document${todo.length === 1 ? "" : "s"} — check each field, then Verify`); onDone();
+      }} />}>
       <div className="rounded-md border border-gray-200 p-3"><RequiredDocsChecklist category={r.category} documents={documents} /></div>
       {docs.length === 0 && <p className="text-gray-500">No documents uploaded.</p>}
       {docs.map((d) => {
@@ -281,6 +310,8 @@ function AssessmentSection({ r, onDone }: { r: any; onDone: () => void }) {
   const [own, setOwn] = useState<"none" | "declared">("none");
   const [details, setDetails] = useState("");
   const [fit, setFit] = useState("");
+  const [why, setWhy] = useState<Record<string, string>>({});
+  const assist = useServerFn(vmsAiAssist);
   const total = prequalScore(areas);
   const who = sub ? "contract_manager" : "purchasing_executive";
   if (r.assessment) return (
@@ -292,10 +323,15 @@ function AssessmentSection({ r, onDone }: { r: any; onDone: () => void }) {
     <Section title={sub ? "Contract Manager review" : "Pre-qualification assessment"} sub={`Nine areas, 0–5 each; pass mark ${PASS_MARK}%. Every document must be verified first.`}>
       {role !== who ? <Hint role={CCMS_ROLES[who as keyof typeof CCMS_ROLES]} /> : (
         <>
+          <div className="flex justify-end"><AiLink label="Suggest Scores with AI" run={async () => {
+            const o: any = await assist({ data: { request_id: r.id, kind: "prequal" } });
+            setAreas((p) => ({ ...p, ...o.areas })); setWhy(o.why ?? {}); if (sub && o.text && !fit) setFit(o.text);
+            toast.success("Suggested — adjust any score you disagree with");
+          }} /></div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
             {PREQUAL_AREAS.map((a) => (
-              <label key={a.id} className="flex items-center justify-between gap-2 rounded-md border border-gray-200 px-2 py-1.5">
-                <span className="text-gray-800">{a.label}</span>
+              <label key={a.id} title={why[a.id]} className="flex items-center justify-between gap-2 rounded-md border border-gray-200 px-2 py-1.5">
+                <span className="text-gray-800">{a.label}{why[a.id] && <span className="block text-xs text-gray-500">{why[a.id]}</span>}</span>
                 <select className={INPUT + " py-0.5"} value={areas[a.id] ?? ""} onChange={(e) => setAreas({ ...areas, [a.id]: Number(e.target.value) })}>
                   <option value="">–</option>{[0, 1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
                 </select>
@@ -320,11 +356,12 @@ function AssessmentSection({ r, onDone }: { r: any; onDone: () => void }) {
 function ComplianceSection({ r, onDone }: { r: any; onDone: () => void }) {
   const [role] = useCcmsRole();
   const fn = useServerFn(complianceVmsDecision);
+  const assist = useServerFn(vmsAiAssist);
   const { busy, run } = useRun(onDone);
   const [f, setF] = useState({ decision: "approve", conditions: "", due: "", rationale: "" });
   const sub = r.kind === "subcontractor";
   if (r.compliance) return (
-    <Section title="Compliance"><p><span className="font-semibold">{r.compliance.decision}</span> · {displayName(r.compliance.by)}{r.compliance.conditions ? ` · conditions: ${r.compliance.conditions} (due ${r.compliance.due})` : ""}</p><p className="text-gray-700">{r.compliance.rationale}</p></Section>
+    <Section title="Compliance"><p><span className="font-semibold">{r.compliance.decision}</span> · {displayName(r.compliance.by)}{r.compliance.conditions ? ` · conditions: ${r.compliance.conditions} (due ${r.compliance.due})` : ""}</p><NoteText text={r.compliance.rationale} className="text-gray-700" /></Section>
   );
   return (
     <Section title="Compliance" sub={sub ? "Clear, clear with safeguards, or not accepted. Safeguards stay on the vendor record." : "Extended due diligence. Approve, conditional (with conditions and a due date), or reject. Due diligence is valid 24 months, 12 for High risk."}>
@@ -336,7 +373,11 @@ function ComplianceSection({ r, onDone }: { r: any; onDone: () => void }) {
             ))}
           </div>
           {f.decision === "conditional" && <div className="flex gap-2"><input className={INPUT + " flex-1"} placeholder={sub ? "Safeguards" : "Conditions"} value={f.conditions} onChange={(e) => setF({ ...f, conditions: e.target.value })} /><input type="date" className={INPUT} value={f.due} onChange={(e) => setF({ ...f, due: e.target.value })} /></div>}
-          <textarea className={INPUT + " w-full min-h-16"} placeholder="Assessment and rationale (required)" value={f.rationale} onChange={(e) => setF({ ...f, rationale: e.target.value })} />
+          <div className="flex justify-end"><AiLink label="Draft with AI" run={async () => {
+            const o: any = await assist({ data: { request_id: r.id, kind: "compliance" } });
+            setF({ decision: o.decision, conditions: o.decision === "conditional" ? o.conditions : "", due: o.decision === "conditional" ? o.due : "", rationale: o.text });
+          }} /></div>
+          <textarea className={INPUT + " w-full min-h-16"} rows={Math.min(10, Math.max(3, f.rationale.split("\n").length + 1))} placeholder="Assessment and rationale (required)" value={f.rationale} onChange={(e) => setF({ ...f, rationale: e.target.value })} />
           <Button size="sm" disabled={busy} onClick={() => run(() => fn({ data: { request_id: r.id, decision: f.decision as any, conditions: f.conditions || null, due: f.due || null, rationale: f.rationale, acting_role: role } }), "Compliance decision recorded")}>Record decision</Button>
         </div>
       )}
@@ -347,18 +388,23 @@ function ComplianceSection({ r, onDone }: { r: any; onDone: () => void }) {
 function DecisionSection({ r, onDone }: { r: any; onDone: () => void }) {
   const [role] = useCcmsRole();
   const fn = useServerFn(decideVmsRequest);
+  const assist = useServerFn(vmsAiAssist);
   const { busy, run } = useRun(onDone);
   const [reason, setReason] = useState("");
   const sub = r.kind === "subcontractor";
   const who = sub ? "head_contracts" : "purchasing_manager";
   if (r.decision) return (
-    <Section title={sub ? "Head of Contracts & Procurement" : "Purchasing Manager"}><p><span className="font-semibold">{r.decision.outcome}</span> · {displayName(r.decision.by)}{r.decision.reason ? ` — ${r.decision.reason}` : ""}</p></Section>
+    <Section title={sub ? "Head of Contracts & Procurement" : "Purchasing Manager"}><p><span className="font-semibold">{r.decision.outcome}</span> · {displayName(r.decision.by)}</p><NoteText text={r.decision.reason} className="text-gray-700" /></Section>
   );
   return (
     <Section title={sub ? "Head of Contracts & Procurement" : "Purchasing Manager"} sub={sub ? "Adds the subcontractor to the Master Sub-Contractor List. Nobody approves their own submission." : "Signs off the register and pre-qualification forms. Conditional only with Compliance's concurrence; nobody approves their own submission."}>
       {role !== who ? <Hint role={CCMS_ROLES[who as keyof typeof CCMS_ROLES]} /> : (
         <div className="space-y-2">
-          <input className={INPUT + " w-full"} placeholder="Reason (required to return or reject; for a return, name the items to correct)" value={reason} onChange={(e) => setReason(e.target.value)} />
+          <div className="flex justify-end"><AiLink label="Draft with AI" run={async () => {
+            const o: any = await assist({ data: { request_id: r.id, kind: "decision" } });
+            setReason(o.text); if (o.suggested) toast.message(`Suggested: ${o.suggested}`);
+          }} /></div>
+          <textarea className={INPUT + " w-full"} rows={Math.min(10, Math.max(2, reason.split("\n").length + 1))} placeholder="Reason (required to return or reject; for a return, name the items to correct)" value={reason} onChange={(e) => setReason(e.target.value)} />
           <div className="flex flex-wrap gap-2">
             <Button size="sm" disabled={busy} onClick={() => run(() => fn({ data: { request_id: r.id, outcome: "approve", reason, acting_role: role } }), "Approved")}>{sub ? "Add to the list" : "Approve"}</Button>
             {r.compliance?.decision === "conditional" && <Button size="sm" variant="outline" disabled={busy} onClick={() => run(() => fn({ data: { request_id: r.id, outcome: "conditional", reason, acting_role: role } }), "Approved with conditions")}>Approve with conditions</Button>}

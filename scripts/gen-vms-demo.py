@@ -18,6 +18,7 @@ COMPANIES = {
         address="No. 21, Jalan Pelukis U1/46, Temasya Industrial Park, 40150 Shah Alam, Selangor",
         business="Testing, commissioning and maintenance of mechanical and electrical (M&E) systems for commercial and residential buildings.",
         staff=36, directors=["Mohd Hafiz bin Ismail", "Chong Mei Ling"], clients="property developers, facility managers, hospitals",
+        tin="C 2471 0935 08", ctos=712, contact=("Nurul Aina binti Hashim", "Business Development Manager", "03-5510 2288", "aina@delima-me.example"),
         bank=("CIMB BANK BERHAD", "8603 4471 2290", "Shah Alam Branch", "15 March 2019"),
         insurer=("Allianz General Insurance Company (Malaysia) Berhad", "PL-2026-310554", "RM3,000,000", "1 January 2026", "31 December 2026"),
         extras=["iso", "calibration", "competency"],
@@ -27,6 +28,7 @@ COMPANIES = {
         address="Lot 7, Jalan Perusahaan 2, Kawasan Perindustrian Beranang, 43700 Beranang, Selangor",
         business="Formwork, falsework and scaffolding for high-rise residential and commercial construction.",
         staff=120, directors=["Wong Chee Keong", "Siti Rahmah binti Abdullah"], clients="main contractors on high-rise projects in the Klang Valley",
+        tin="C 2388 1164 02", ctos=655, contact=("Wong Chee Keong", "Managing Director", "03-8723 4410", "ckwong@kukuh.example"),
         bank=("PUBLIC BANK BERHAD", "3198 0056 7712", "Semenyih Branch", "4 July 2016"),
         insurer=("Etiqa General Insurance Berhad", "CAR-2026-882107", "RM5,000,000", "1 March 2026", "28 February 2027"),
         extras=["cidb", "competency", "iso"],
@@ -71,8 +73,11 @@ def build(folder, d):
     footer(c, "Demo document — invented company and registration number."); c.save()
 
     c = page(f("02 Company profile.pdf"), "COMPANY PROFILE", n)
-    y = lines(c, H - 110, [("Registration No.", d["reg"]), ("Established", d["incorporated"]), ("Staff", str(d["staff"])),
-                           ("Directors", ", ".join(d["directors"])), ("Key clients", d["clients"])])
+    ct = d["contact"]
+    y = lines(c, H - 110, [("Registration No.", d["reg"]), ("Tax ID (TIN)", d["tin"]), ("Established", d["incorporated"]), ("Staff", str(d["staff"])),
+                           ("Directors", ", ".join(d["directors"])), ("Key clients", d["clients"]),
+                           ("Contact person", f"{ct[0]}, {ct[1]}"), ("Telephone", ct[2]), ("Email", ct[3]),
+                           ("Office", d["address"][:70]), ("", d["address"][70:])])
     c.setFont("Helvetica-Bold", 11); c.drawString(50, y - 10, "Business"); c.setFont("Helvetica", 10.5)
     t = c.beginText(50, y - 28); t.setLeading(15)
     for chunk in [d["business"][i:i + 95] for i in range(0, len(d["business"]), 95)]: t.textLine(chunk)
@@ -116,9 +121,32 @@ def build(folder, d):
         lines(c, H - 120, [("Holder", who), ("Employer", n), ("Competency", "Wireman, single and three phase (PW4)" if me else "Scaffolder, tubular and system scaffold"),
                            ("Certificate No.", "PW4-2021-18830" if me else "SKM-SCF-2022-07714"), ("Issued", "12 April 2021" if me else "9 August 2022"), ("Valid until", "11 April 2027" if me else "8 August 2027")])
         footer(c, "Demo document — invented certificate."); c.save()
+    # Finance's CTOS report — kept apart: Finance uploads it, not the vendor.
+    fin = os.path.join(folder, "For Finance"); os.makedirs(fin, exist_ok=True)
+    c = page(os.path.join(fin, "CTOS report.pdf"), "CTOS BUSINESS REPORT", "CTOS Data Systems Sdn Bhd · Confidential")
+    y = lines(c, H - 110, [("Subject", n), ("Registration No.", d["reg"]), ("Report date", "25 September 2026"),
+                           ("CTOS score", f'{d["ctos"]} (range 300–850)'), ("Litigation (as defendant)", "None found"),
+                           ("Winding-up / bankruptcy", "None found"), ("Directors' adverse records", "None found"),
+                           ("Trade references", "3 references, all prompt payers"), ("Banking facilities", "No arrears reported")])
+    lines(c, y - 10, ["Summary: no adverse records found for the company or its directors."])
+    footer(c, "Demo document — invented report."); c.save()
     return sorted(os.listdir(folder))
+
+
+def renewal():
+    """Bayu Kuasa's public liability policy runs to 31 Oct 2026 — its renewal,
+    for the Monitoring "Upload Renewal" step."""
+    fin = os.path.join(OUT, "Renewals"); os.makedirs(fin, exist_ok=True)
+    path = os.path.join(fin, "Bayu Kuasa - insurance renewal 2026-27.pdf")
+    c = page(path, "CERTIFICATE OF INSURANCE · RENEWAL", "Tokio Marine Insurans (Malaysia) Berhad")
+    lines(c, H - 120, [("Insured", "BAYU KUASA ENGINEERING SDN BHD"), ("Policy No.", "PL-2027-778412"), ("Cover", "Public liability"),
+                       ("Limit of liability", "RM2,000,000 any one occurrence"), ("Period of insurance", "1 November 2026 to 31 October 2027"),
+                       ("Renewal of", "PL-2026-778412")])
+    footer(c, "Demo document — invented policy."); c.save()
+    return path
 
 
 if __name__ == "__main__":
     for folder, d in COMPANIES.items():
         print(folder, build(os.path.join(OUT, folder), d))
+    print(renewal())

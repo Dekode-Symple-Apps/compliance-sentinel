@@ -7,14 +7,14 @@ import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
-  assessVmsCoi, escalateVmsCoi, getVmsMonitor, recordVmsCoi, runVmsScan, startVmsCoiCampaign, uploadVmsRenewal, verifyVmsDocument,
+  assessVmsCoi, escalateVmsCoi, getVmsMonitor, readVmsCertificateFile, readVmsDocument, recordVmsCoi, runVmsScan, startVmsCoiCampaign, uploadVmsRenewal, verifyVmsDocument,
 } from "@/lib/vms.functions";
 import { CcmsHeader, CARD, TH, TD, PRIORITY_TINT, friendlyError, useCcmsRole, uploadToStorage } from "@/components/ccms-widgets";
 import { RememberedInput } from "@/components/ccms-actions";
 import { remember } from "@/lib/ccms-prefill";
 import { DOC_TYPES, coiDates, credentialAlerts, daysTo } from "@/lib/vms";
 import { CCMS_ROLES, DEMO_SINGLE_USER, displayName, type CcmsRole } from "@/lib/ccms";
-import { FileText, Loader2, Search, Upload } from "lucide-react";
+import { FileText, Loader2, Search, Sparkles, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/vms/monitoring")({
@@ -233,12 +233,26 @@ function RenewalForm({ row, as, onDone }: { row: Row; as: CcmsRole; onDone: () =
   const [file, setFile] = useState<File | null>(null);
   const [expiry, setExpiry] = useState("");
   const [ref, setRef] = useState("");
+  const [reading, setReading] = useState(false);
+  const readFile = useServerFn(readVmsCertificateFile);
+  /** Choosing the file reads it: the new expiry and reference fill in. */
+  async function pick(fl: File | null) {
+    setFile(fl);
+    if (!fl) return;
+    setReading(true);
+    try {
+      const b64 = await new Promise<string>((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(",")[1] ?? ""); fr.onerror = rej; fr.readAsDataURL(fl); });
+      const o: any = await readFile({ data: { file_name: fl.name, mime_type: fl.type || "application/octet-stream", base64: b64 } });
+      if (o?.expiry) setExpiry(o.expiry);
+      if (o?.number) setRef(o.number);
+    } catch { /* fill by hand */ } finally { setReading(false); }
+  }
   return (
     <div className="space-y-3 rounded-md border border-gray-200 p-3">
       <div className="font-semibold text-gray-900">Upload Renewal</div>
       <label className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-gray-300 px-3 py-3 text-gray-700 hover:border-gray-500">
-        {file ? <FileText className="size-4" /> : <Upload className="size-4" />} {file ? file.name : "Select file"}
-        <input type="file" className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        {reading ? <Loader2 className="size-4 animate-spin" /> : file ? <FileText className="size-4" /> : <Upload className="size-4" />} {file ? file.name : "Select file"}{reading && <span className="text-gray-500">· reading…</span>}
+        <input type="file" className="hidden" onChange={(e) => pick(e.target.files?.[0] ?? null)} />
       </label>
       <div className="grid grid-cols-2 gap-3">
         <label className={LABEL}>New expiry<input type="date" className={INPUT} value={expiry} onChange={(e) => setExpiry(e.target.value)} /></label>
@@ -255,11 +269,19 @@ function RenewalForm({ row, as, onDone }: { row: Row; as: CcmsRole; onDone: () =
 
 function VerifyForm({ doc, as, onDone }: { doc: any; as: CcmsRole; onDone: () => void }) {
   const verifyFn = useServerFn(verifyVmsDocument);
+  const readFn = useServerFn(readVmsDocument);
   const { busy, run } = useRun(onDone);
-  const [expiry, setExpiry] = useState("");
+  const [expiry, setExpiry] = useState(doc.expiry_date ?? doc.extracted?.expiry ?? "");
   const [note, setNote] = useState("");
+  const [reading, setReading] = useState(false);
   return (
     <div className="space-y-3 rounded-md border border-gray-200 p-3">
+      <div className="flex justify-end">
+        <button type="button" disabled={reading} className="inline-flex items-center gap-1 text-sm text-blue-700 hover:underline disabled:opacity-60"
+          onClick={async () => { setReading(true); try { const o: any = await readFn({ data: { document_id: doc.id } }); if (o?.expiry) setExpiry(o.expiry); else toast.message("No expiry printed on it — enter it by hand."); } catch (e) { toast.error(friendlyError(e)); } finally { setReading(false); } }}>
+          {reading ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} {reading ? "Reading…" : "Read with AI"}
+        </button>
+      </div>
       <div className="grid grid-cols-2 gap-3">
         <label className={LABEL}>Expiry<input type="date" className={INPUT} value={expiry} onChange={(e) => setExpiry(e.target.value)} /></label>
         <label className={LABEL}>Note · required to reject<input className={INPUT} value={note} onChange={(e) => setNote(e.target.value)} /></label>

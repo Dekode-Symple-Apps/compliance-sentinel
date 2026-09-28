@@ -8,7 +8,7 @@ import { documentText, parseJson } from "@/lib/ccms.functions";
 import { actorOf, assertTenant, requireRole, selfApproval } from "@/lib/actor";
 import { CCMS_ROLES, type CcmsRole } from "@/lib/ccms";
 import {
-  ABMS_QUESTIONS, DOC_TYPES, PASS_MARK, PORTAL_FORMS, VENDOR_CATEGORIES, addMonths, coiDates, daysTo, ddMonths, docTypeFromName, docsFor,
+  ABMS_QUESTIONS, DOC_TYPES, PASS_MARK, PORTAL_FORMS, PREQUAL_AREAS, VENDOR_CATEGORIES, addMonths, coiDates, daysTo, ddMonths, docTypeFromName, docsFor,
   needsCompliance, prequalScore, screen,
 } from "@/lib/vms";
 
@@ -152,6 +152,8 @@ export const getVendorPortal = createServerFn({ method: "GET" })
       register: r.register ?? {}, abms: r.abms ?? {}, expires: r.invite_expires,
       required: docsFor(r.category).map((d) => ({ id: d.id, label: d.label, level: d.level, expires: d.expires })),
       documents: docs ?? [], questions: ABMS_QUESTIONS,
+      // What the requester already gave us, so the vendor does not retype it.
+      known: { company_name: r.company_name ?? "", registration_no: r.registration_no ?? "", contact_name: r.contact_name ?? "", contact_email: r.contact_email ?? "" },
     };
   });
 
@@ -202,6 +204,39 @@ export const uploadVendorPortalAuto = createServerFn({ method: "POST" })
     if (!docType) return { doc_type: null as string | null, file_name: data.file_name, how };
     const doc = await storePortalDocument(r, docType, data.file_name, data.mime_type, data.base64);
     return { ...doc, how };
+  });
+
+/** The register form, read from what the vendor uploaded (SSM, company
+ *  profile, bank letter, CIDB): only what is printed; blanks otherwise. */
+export const readVendorPortalDocuments = createServerFn({ method: "POST" })
+  .inputValidator(z.object({ token: z.string() }))
+  .handler(async ({ data }) => {
+    const r = await portalRequest(data.token);
+    if (!portalOpen(r)) throw new Error("This submission is closed.");
+    const { data: docs } = await admin().from("vms_documents").select("id,doc_type,file_name,file_url").eq("request_id", r.id)
+      .in("doc_type", ["ssm", "company_profile", "bank_letter", "cidb"]).order("created_at", { ascending: false });
+    const latest = Object.values(Object.fromEntries((docs ?? []).reverse().map((d: any) => [d.doc_type, d]))) as any[];
+    if (!latest.length) return { fields: {} as Record<string, any>, read: [] as string[] };
+    const parts: any[] = [{ text: `Fill a Malaysian supplier register form from these company documents. Copy values exactly as printed; empty string (or []) when a value is not in the documents — never guess.
+Return ONLY JSON: {"company_name":"","registration_no":"","tin":"","address":"","contact_name":"","contact_designation":"","contact_phone":"","contact_email":"","bank_name":"","bank_account":"","directors":[""],"cidb_grade":"","years_in_business":""}` }];
+    for (const d of latest) {
+      const label = DOC_TYPES.find((t) => t.id === d.doc_type)?.label ?? d.doc_type;
+      try {
+        const { text, pdfBase64 } = await documentText(d);
+        parts.push({ text: `--- ${label} (${d.file_name}) ---` });
+        if (pdfBase64) parts.push({ inlineData: { mimeType: "application/pdf", data: pdfBase64 } });
+        else parts.push({ text: text.slice(0, 20_000) });
+      } catch { /* unreadable file — the rest still fill */ }
+    }
+    const res: any = await generateWithFallback({ contents: [{ role: "user", parts }],
+      config: { responseMimeType: "application/json", maxOutputTokens: 1024, temperature: 0 } }, { tier: "fast" });
+    const out = parseJson(res.text ?? "") ?? {};
+    const str = (k: string) => (typeof out[k] === "string" ? out[k].trim().slice(0, 300) : "");
+    const fields: Record<string, any> = {};
+    for (const k of ["company_name", "registration_no", "tin", "address", "contact_name", "contact_designation", "contact_phone", "contact_email", "bank_name", "bank_account", "cidb_grade", "years_in_business"]) if (str(k)) fields[k] = str(k);
+    const directors = (Array.isArray(out.directors) ? out.directors : []).filter((x: any) => typeof x === "string" && x.trim()).slice(0, 10);
+    if (directors.length) fields.directors = directors.map((name: string) => ({ name: name.trim() }));
+    return { fields, read: latest.map((d) => DOC_TYPES.find((t) => t.id === d.doc_type)?.label ?? d.doc_type) };
   });
 
 const registerSchema = z.object({
@@ -640,4 +675,96 @@ export const listVmsVendors = createServerFn({ method: "GET" })
     const { sb, tenantId } = await vms(context);
     const { data } = await sb.from("ccms_vendors").select("*").eq("tenant_id", tenantId).order("name");
     return (data ?? []) as any[];
+  });
+
+// ── AI assist: drafts the reviewer edits, never a decision ─────────────────
+
+/** What the file shows so far, for the AI to work from. */
+async function requestFacts(sb: any, r: any) {
+  const { data: docs } = await sb.from("vms_documents").select("doc_type,status,expiry_date,number,issuer,holder,extracted").eq("request_id", r.id);
+  const have = new Set((docs ?? []).map((d: any) => d.doc_type));
+  const missing = docsFor(r.category).filter((d) => d.level === "M" && !PORTAL_FORMS.has(d.id) && !have.has(d.id)).map((d) => d.label);
+  const yes = ABMS_QUESTIONS.filter((q) => r.abms?.answers?.[q.id] === "yes").map((q) => q.text);
+  return [
+    `Vendor: ${r.company_name} · ${VENDOR_CATEGORIES[r.category] ?? r.category} · ${r.kind}${r.trade ? ` · trade ${r.trade}` : ""}${r.project ? ` · project ${r.project}` : ""}`,
+    r.goods_services ? `Goods/services: ${r.goods_services}` : "",
+    r.justification ? `Justification: ${r.justification}` : "",
+    r.register ? `Register form: ${JSON.stringify({ ...r.register, bank_account: r.register.bank_account ? "given" : "" })}` : "Register form: not submitted",
+    r.screening ? `Screening: risk ${r.screening.rating}${r.screening.relatedParty ? ", RELATED PARTY" : ""}; ${(r.screening.reasons ?? []).join("; ") || "no issues"}` : "Screening: not run",
+    r.ctos ? `CTOS: score ${r.ctos.score ?? "—"}; ${[r.ctos.litigation && "litigation", r.ctos.winding_up && "winding-up", r.ctos.director_flags && "director flags"].filter(Boolean).join(", ") || "no adverse records"}` : "CTOS: not recorded",
+    r.conflict_check?.accounts_decision ? `Conflict check: ${r.conflict_check.accounts_decision}${r.conflict_check.note ? ` (${r.conflict_check.note})` : ""}` : "",
+    `Integrity questionnaire: ${yes.length ? `YES to: ${yes.join(" | ")}${r.abms?.details ? ` — details: ${r.abms.details}` : ""}` : r.abms?.answers ? "all No" : "not answered"}; declaration of interest: ${r.abms?.declaration_interest ?? "—"}${r.abms?.interest_details ? ` (${r.abms.interest_details})` : ""}; CTOS consent: ${r.abms?.ctos_consent ?? "—"}`,
+    `Documents: ${(docs ?? []).map((d: any) => `${DOC_TYPES.find((t) => t.id === d.doc_type)?.label ?? d.doc_type} (${d.status}${d.expiry_date ? `, expires ${d.expiry_date}` : ""})`).join("; ") || "none"}`,
+    missing.length ? `Mandatory documents missing: ${missing.join("; ")}` : "All mandatory documents uploaded",
+    r.assessment ? `Pre-qualification: ${r.assessment.total}% (${r.assessment.pass ? "pass" : "fail"})` : "",
+    r.compliance ? `Compliance: ${r.compliance.decision}${r.compliance.conditions ? ` — conditions: ${r.compliance.conditions}` : ""}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+export const vmsAiAssist = createServerFn({ method: "POST" })
+  .middleware([requireVms])
+  .inputValidator(z.object({ request_id: z.string().uuid(), kind: z.enum(["compliance", "decision", "prequal"]) }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId } = await vms(context);
+    const r = await loadRequest(sb, data.request_id, tenantId);
+    const facts = await requestFacts(sb, r);
+    const ask = data.kind === "compliance"
+      ? `You are the Compliance officer doing extended due diligence. Suggest a decision and write the rationale.
+Return ONLY JSON: {"decision": "approve" | "conditional" | "reject", "conditions": "for conditional only — what must be done, one line", "due_days": 30, "rationale": ["3–5 bullets, each at most 18 words, citing the facts"]}`
+      : data.kind === "decision"
+      ? `You are the Purchasing Manager signing off. Write the reason for the decision. If anything is missing or adverse, list what the vendor must correct; otherwise summarise why it is acceptable.
+Return ONLY JSON: {"suggested": "approve" | "return" | "reject", "bullets": ["2–5 bullets, each at most 16 words"]}`
+      : `You are the assessor. Suggest a pre-qualification score 0–5 for each area from the facts (0 = no evidence, 3 = adequate, 5 = strong). Where there is no evidence, say so and score low.
+Areas: ${PREQUAL_AREAS.map((a) => `${a.id}: ${a.label}`).join("; ")}.
+Return ONLY JSON: {"areas": {"legal": 0, ...}, "why": {"legal": "at most 12 words", ...}, "scope_fit": "one line"}`;
+    const res: any = await generateWithFallback({ contents: [{ role: "user", parts: [{ text: `${ask}\n\nFACTS:\n${facts}` }] }],
+      config: { responseMimeType: "application/json", maxOutputTokens: 1500, temperature: 0.2 } }, { tier: "fast" });
+    const out = parseJson(res.text ?? "") ?? {};
+    const bullets = (xs: any) => (Array.isArray(xs) ? xs : []).filter((x) => typeof x === "string" && x.trim()).map((x: string) => `- ${x.trim().replace(/^[-•*]\s*/, "")}`).join("\n");
+    if (data.kind === "compliance") {
+      const due = new Date(); due.setDate(due.getDate() + (Number(out.due_days) > 0 ? Math.min(Number(out.due_days), 180) : 30));
+      return { decision: ["approve", "conditional", "reject"].includes(out.decision) ? out.decision : "approve", conditions: String(out.conditions ?? ""), due: due.toISOString().slice(0, 10), text: bullets(out.rationale) };
+    }
+    if (data.kind === "decision") return { suggested: String(out.suggested ?? ""), text: bullets(out.bullets) };
+    const areas: Record<string, number> = {}; const why: Record<string, string> = {};
+    for (const a of PREQUAL_AREAS) {
+      const n = Number(out.areas?.[a.id]);
+      if (Number.isFinite(n)) areas[a.id] = Math.max(0, Math.min(5, Math.round(n)));
+      if (typeof out.why?.[a.id] === "string") why[a.id] = out.why[a.id].slice(0, 120);
+    }
+    return { areas, why, text: String(out.scope_fit ?? "") };
+  });
+
+/** Finance's CTOS report, read: score and adverse records, as printed. */
+export const readCtosReport = createServerFn({ method: "POST" })
+  .middleware([requireVms])
+  .inputValidator(z.object({ file_name: z.string().max(200), mime_type: z.string().max(100), base64: z.string().max(4_200_000) }))
+  .handler(async ({ data }) => {
+    const mime = data.mime_type || (/\.pdf$/i.test(data.file_name) ? "application/pdf" : "");
+    if (!(mime === "application/pdf" || mime.startsWith("image/"))) return null;
+    const res: any = await generateWithFallback({ contents: [{ role: "user", parts: [
+      { text: `Read this CTOS credit report. Only what is printed; never guess.
+Return ONLY JSON: {"score": number or null, "litigation": true/false, "winding_up": true/false, "director_flags": true/false, "note": "at most 20 words: anything adverse, or 'No adverse records.'"}` },
+      { inlineData: { mimeType: mime, data: data.base64 } },
+    ] }], config: { responseMimeType: "application/json", maxOutputTokens: 512, temperature: 0 } }, { tier: "fast" });
+    const o = parseJson(res.text ?? "") ?? {};
+    return { score: Number.isFinite(Number(o.score)) && o.score !== null ? Number(o.score) : null, litigation: !!o.litigation, winding_up: !!o.winding_up, director_flags: !!o.director_flags, note: String(o.note ?? "").slice(0, 200) };
+  });
+
+/** A certificate chosen in a form (before it is stored), read: number, issuer,
+ *  holder and dates as printed — for the renewal pop-up. */
+export const readVmsCertificateFile = createServerFn({ method: "POST" })
+  .middleware([requireVms])
+  .inputValidator(z.object({ file_name: z.string().max(200), mime_type: z.string().max(100), base64: z.string().max(4_200_000) }))
+  .handler(async ({ data }) => {
+    const mime = data.mime_type || (/\.pdf$/i.test(data.file_name) ? "application/pdf" : "");
+    if (!(mime === "application/pdf" || mime.startsWith("image/"))) return null;
+    const res: any = await generateWithFallback({ contents: [{ role: "user", parts: [
+      { text: `Read this certificate and extract, only as printed (never guess; empty string if absent):
+{"number": "certificate / policy / registration number", "issuer": "issuing body or insurer", "holder": "the company it is issued to", "issued": "yyyy-mm-dd", "expiry": "yyyy-mm-dd"}
+Return ONLY JSON.` },
+      { inlineData: { mimeType: mime, data: data.base64 } },
+    ] }], config: { responseMimeType: "application/json", maxOutputTokens: 512, temperature: 0 } }, { tier: "fast" });
+    const o = parseJson(res.text ?? "") ?? {};
+    return { number: String(o.number ?? ""), issuer: String(o.issuer ?? ""), holder: String(o.holder ?? ""), issued: o.issued || null, expiry: o.expiry || null };
   });
