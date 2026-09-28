@@ -13,7 +13,7 @@ import {
 } from "@/lib/vms.functions";
 import { CcmsHeader, CARD, TD, StageBar, NoteText, friendlyError, useCcmsRole, useConfirm, uploadToStorage } from "@/components/ccms-widgets";
 import {
-  ABMS_QUESTIONS, AFS_ITEMS, DOC_TYPES, PASS_MARK, PREQUAL_AREAS, VENDOR_CATEGORIES, VMS_STATUS, afsRatios, daysTo, docsFor, prequalScore, requestMilestones, sameValue, validationRows, vmsActions, type Afs, type VmsAction,
+  ABMS_QUESTIONS, AFS_ITEMS, DOC_TYPES, PASS_MARK, PORTAL_FORMS, PREQUAL_AREAS, VENDOR_CATEGORIES, VMS_STATUS, afsRatios, daysTo, docsFor, prequalScore, requestMilestones, sameValue, validationRows, vmsActions, type Afs, type VmsAction,
 } from "@/lib/vms";
 import { CCMS_ROLES, DEMO_SINGLE_USER, displayName, fmtMoneyPlain } from "@/lib/ccms";
 import { ArrowLeft, ChevronRight, Copy, Loader2, Sparkles, Star, Trash2, Upload } from "lucide-react";
@@ -98,6 +98,7 @@ function VmsRequestPage() {
         <StageBar stages={ms.stages} next={ms.next} actions={acts.length ? acts.map((a, i) => (
           <Button key={a.id} size="sm" variant={i === 0 ? "default" : "outline"} onClick={() => act(a)}>{a.label}</Button>
         )) : undefined} />
+        {r.submitted_by_vendor_at && <VendorSummary r={r} documents={documents} onOpen={(k) => { setFocus(k); setTimeout(() => document.getElementById(`sec-${k}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }} />}
         <SectionCtx.Provider value={{ isOpen, toggle }}>
         <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-5">
           <div className="space-y-5 min-w-0">
@@ -231,7 +232,8 @@ function SubmissionSection({ r, documents, onDone }: { r: any; documents: any[];
               const x = d.extracted ?? {};
               const expiry = d.expiry_date || x.expiry;
               const expired = expiry && daysTo(expiry) < 0;
-              const nameOk = !x.holder || sameValue("name", x.holder, reg.company_name || r.company_name);
+              // Competency certificates are issued to a person, not the company.
+              const nameOk = !x.holder || d.doc_type === "competency" || sameValue("name", x.holder, reg.company_name || r.company_name);
               return (
                 <tr key={d.id} className={cn("border-t border-gray-100", (expired || !nameOk) && "bg-amber-50/60")}>
                   <td className={TD2 + " text-gray-900"}>{DOC_TYPES.find((t) => t.id === d.doc_type)?.label ?? d.doc_type}</td>
@@ -595,5 +597,48 @@ function DeleteRequest({ r }: { r: any }) {
       } catch (e: any) { toast.error(friendlyError(e)); setBusy(false); }
     }}>{busy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />} Delete Request</button>
     </>
+  );
+}
+
+/** The vendor at a glance: one tile per check, coloured by its state; a tile
+ *  opens its section below. */
+function VendorSummary({ r, documents, onOpen }: { r: any; documents: any[]; onOpen: (section: string) => void }) {
+  const docs = documents.filter((d) => d.status !== "superseded");
+  const rows = validationRows(r, docs);
+  const differs = rows.filter((x) => x.check === "differs").length;
+  const confirmed = rows.filter((x) => x.check === "match").length;
+  const mandatory = docsFor(r.category).filter((d) => d.level === "M" && !PORTAL_FORMS.has(d.id));
+  const have = new Set(docs.map((d) => d.doc_type));
+  const verified = docs.filter((d) => d.status === "verified").length;
+  const expired = docs.filter((d) => { const e = d.expiry_date || d.extracted?.expiry; return e && daysTo(e) < 0; }).length;
+  const afs = docs.find((d) => d.doc_type === "afs" && d.extracted?.afs)?.extracted?.afs as Afs | undefined;
+  const k = afs ? afsRatios(afs, r.annual_spend) : null;
+  const yes = ABMS_QUESTIONS.filter((q) => r.abms?.answers?.[q.id] === "yes").length;
+  const s = r.screening;
+  type T = { key: string; label: string; value: string; note: string; tone: "good" | "warn" | "bad" | "idle"; section: string };
+  const tiles: T[] = [
+    { key: "val", label: "Details vs documents", value: `${confirmed}/${rows.length}`, note: differs ? `${differs} differ` : "all confirmed", tone: differs ? "warn" : confirmed === rows.length ? "good" : "idle", section: "validation" },
+    { key: "docs", label: "Documents", value: `${mandatory.filter((m) => have.has(m.id)).length}/${mandatory.length}`, note: `mandatory · ${verified} of ${docs.length} verified${expired ? ` · ${expired} expired` : ""}`, tone: expired ? "bad" : mandatory.every((m) => have.has(m.id)) ? (verified === docs.length && docs.length ? "good" : "idle") : "warn", section: "documents" },
+    { key: "screen", label: "Screening", value: s ? `${s.rating[0].toUpperCase()}${s.rating.slice(1)} risk` : "Not run", note: s ? (s.reasons.length ? `${s.reasons.length} point${s.reasons.length === 1 ? "" : "s"}` : "no issues") : "run by Purchasing", tone: !s ? "idle" : s.rating === "high" ? "bad" : s.rating === "medium" ? "warn" : "good", section: "screening" },
+    ...(r.kind === "subcontractor" ? [] : [{ key: "ctos", label: "CTOS", value: r.ctos ? String(r.ctos.score ?? "—") : "Awaiting", note: r.ctos ? ([r.ctos.litigation && "litigation", r.ctos.winding_up && "winding-up", r.ctos.director_flags && "director flags"].filter(Boolean).join(", ") || "no adverse records") : "Finance uploads the report", tone: (!r.ctos ? "idle" : r.ctos.litigation || r.ctos.winding_up || r.ctos.director_flags ? "bad" : "good") as T["tone"], section: "ctos" }]),
+    { key: "fin", label: "Financial standing", value: k ? `${k.currentRatio != null ? k.currentRatio.toFixed(2) : "—"}` : "No accounts", note: k ? `current ratio · ${k.flags.length ? `${k.flags.length} flag${k.flags.length === 1 ? "" : "s"}` : `margin ${k.netMargin != null ? (k.netMargin * 100).toFixed(1) + "%" : "—"}, no flags`}` : "audited accounts not provided", tone: !k ? "idle" : k.flags.length ? "warn" : "good", section: "validation" },
+    { key: "int", label: "Integrity", value: yes ? `${yes} Yes` : r.abms?.answers ? "All No" : "—", note: r.abms?.declaration_interest === "declared" ? "interest declared" : r.abms?.pledge ? "pledge signed" : "not signed", tone: yes || r.abms?.declaration_interest === "declared" ? "warn" : r.abms?.pledge ? "good" : "idle", section: "validation" },
+    { key: "pq", label: "Pre-qualification", value: r.assessment ? `${r.assessment.total}%` : "Not scored", note: r.assessment ? (r.assessment.pass ? `pass (${PASS_MARK}%)` : `below ${PASS_MARK}%`) : `pass mark ${PASS_MARK}%`, tone: !r.assessment ? "idle" : r.assessment.pass ? "good" : "bad", section: "assessment" },
+    { key: "dec", label: "Decision", value: r.decision ? String(r.decision.outcome).replace(/^\w/, (c: string) => c.toUpperCase()) : r.compliance ? `Compliance: ${r.compliance.decision}` : "Pending", note: r.decision ? displayName(r.decision.by) : r.compliance ? "awaiting Purchasing Manager" : "after scoring", tone: r.decision ? (["approve", "approved", "conditional"].includes(r.decision.outcome) ? "good" : "bad") : "idle", section: r.compliance && !r.decision ? "decision" : r.status === "compliance" ? "compliance" : "decision" },
+  ];
+  const TONE: Record<T["tone"], string> = {
+    good: "border-emerald-200 bg-emerald-50/60", warn: "border-amber-200 bg-amber-50/70", bad: "border-red-200 bg-red-50/60", idle: "border-gray-200 bg-white",
+  };
+  const DOT: Record<T["tone"], string> = { good: "bg-emerald-500", warn: "bg-amber-500", bad: "bg-red-500", idle: "bg-gray-300" };
+  return (
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
+      {tiles.map((t) => (
+        <button key={t.key} type="button" onClick={() => onOpen(t.section)} className={cn("rounded-lg border px-3 py-2.5 text-left transition-shadow hover:shadow-sm", TONE[t.tone])}>
+          <div className="flex items-center gap-1.5 text-xs text-gray-600"><span className={cn("size-1.5 rounded-full", DOT[t.tone])} />{t.label}</div>
+          <div className="mt-1 text-lg font-semibold tabular-nums text-gray-900">{t.value}</div>
+          <div className="text-xs text-gray-600">{t.note}</div>
+        </button>
+      ))}
+    </div>
   );
 }

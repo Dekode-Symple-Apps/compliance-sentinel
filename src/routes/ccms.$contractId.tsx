@@ -248,7 +248,7 @@ function ContractDetail() {
               )}
 
               {cur === "obligations" && <ObligationsOverview c={c} obl={obl} fromDraft={fromDraft} go={go} />}
-              {cur.startsWith("ob-") && <DepartmentView cat={cur.slice(3) as ObligationCategory} c={{ ...c, __draftTerms: draftDoc?.terms }} vendor={vendor} obl={obl} fromDraft={fromDraft} onChanged={refresh} />}
+              {cur.startsWith("ob-") && <DepartmentView cat={cur.slice(3) as ObligationCategory} c={{ ...c, __draftTerms: draftDoc?.terms }} vendor={vendor} obl={obl} fromDraft={fromDraft} reviewDocId={current?.id} onChanged={refresh} />}
 
               {cur === "confirmation" && client && <Panel title="Confirmation Letter"><ConfirmationRecord c={c} documents={documents} /></Panel>}
               {cur === "signing" && after && <Panel title="Signing & Repository" sub={c.expiry_date ? `expires ${c.expiry_date}` : c.signed_date ? `signed ${c.signed_date}` : undefined}><ExecutionRecord c={c} /></Panel>}
@@ -448,7 +448,7 @@ function ObligationsOverview({ c, obl, fromDraft, go }: { c: any; obl: Obligatio
 
 /** One department's view of the contract: its checklist, the facts it works
  *  with (only those with a value), its obligations and the records behind them. */
-function DepartmentView({ cat, c, vendor, obl, fromDraft, onChanged }: { cat: ObligationCategory; c: any; vendor: any; obl: Obligation[]; fromDraft: boolean; onChanged: () => void }) {
+function DepartmentView({ cat, c, vendor, obl, fromDraft, reviewDocId, onChanged }: { cat: ObligationCategory; c: any; vendor: any; obl: Obligation[]; fromDraft: boolean; reviewDocId?: string; onChanged: () => void }) {
   const mine = obl.filter((o) => o.category === cat).sort((a, b) => String(a.due_date ?? "9999").localeCompare(String(b.due_date ?? "9999")));
   const req = departmentRequired(c, cat);
   const checklist = departmentChecklist(c, cat, obl);
@@ -516,10 +516,13 @@ function DepartmentView({ cat, c, vendor, obl, fromDraft, onChanged }: { cat: Ob
   }
   facts = facts.filter((f) => has(f.value));
   const pics = [...new Set(mine.map((o) => o.pic))].join(", ");
+  // This department's review, when it is waiting: validate here, clear beside the document.
+  const pendingStage = cat !== "business" ? (c.approval_route ?? []).find((st: Stage) => st.key === cat && st.status === "pending") : null;
 
   return (
     <>
-      <Panel title={OBLIGATION_CATEGORIES[cat]} sub={req.required ? req.why : "Not required"}>
+      <Panel title={OBLIGATION_CATEGORIES[cat]} sub={req.required ? req.why : "Not required"}
+        right={pendingStage && reviewDocId ? <Button asChild size="sm"><Link to="/ccms/review/$documentId" params={{ documentId: reviewDocId }} hash={`decide-${pendingStage.key}`}>Clear {pendingStage.label}</Link></Button> : undefined}>
         {!req.required && <p className="border-b border-gray-100 bg-gray-50/60 px-4 py-2.5 text-sm text-gray-600">{req.why}{mine.length ? ` Its ${OBLIGATION_CATEGORIES[cat].toLowerCase()} obligations are still listed below.` : ""}</p>}
         {checklist.length > 0 && (
           <ul className="divide-y divide-gray-100">
