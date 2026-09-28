@@ -45,6 +45,7 @@ check("NDA finance checklist is empty (nothing for Finance to do)", departmentCh
 
 const mk = (text: string) => normalizeObligations([{ text, category: "finance", amount: 1000 }])[0];
 check("instalments are payments", isPayment(mk("Pay contract signing instalment")) && isPayment(mk("Pay UAT acceptance instalment")));
-check("a performance bond is not a payment", !isPayment(mk("Deliver on-demand performance bond bank guarantee")));
+check("a performance bond is not a payment", !isPayment(mk("Deliver on-demand performance bond bank guarantee")) && !isPayment(mk("Deliver performance bond of 5% of contract price")));
+check("an advance paid against a bond is a payment", isPayment(mk("Pay advance payment against advance payment bond")) && isPayment(mk("Release retention sum to Supplier")));
 console.log(`\n${pass}/${pass + fail} obligation checks passed`);
 process.exit(fail ? 1 : 0);
