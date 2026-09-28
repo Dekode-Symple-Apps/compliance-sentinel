@@ -133,7 +133,8 @@ function NewRequest() {
         const url = supabase.storage.from("policies").getPublicUrl(path).data.publicUrl;
         const doc = await attachFn({ data: { contract_id: contract.id, file_name: file.name, file_url: url, mime_type: file.type || null, size_bytes: file.size, doc_role: "draft", acting_role: role } });
         setPhase("AI review in progress…");
-        await reviewFn({ data: { document_id: doc.id, acting_role: role } });
+        const rv: any = await reviewFn({ data: { document_id: doc.id, acting_role: role } });
+        if (rv?.straightThrough) toast.success(`${contract.reference_number} cleared and approved straight-through — ready to sign`);
       } catch (e: any) { toast.error(`Request ${contract.reference_number} created, but the draft step failed: ${friendlyError(e)}`); }
     }
     nav({ to: "/ccms/$contractId", params: { contractId: contract.id } });

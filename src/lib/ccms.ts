@@ -256,6 +256,44 @@ export function buildRoute(
   return carry(stages, previous);
 }
 
+// ── straight-through processing ─────────────────────────────────────────────
+// ASSUMPTION (policy to confirm with LSH): a routine, low-value contract whose
+// draft the AI finds clean is cleared and approved without waiting for people.
+// People still sign, stamp and file it. Anything outside the rule goes the
+// normal route, and the reasons it did not qualify are shown.
+export const STRAIGHT_THROUGH = {
+  types: ["work_order", "supply_agreement", "service_agreement", "rental_agreement"],
+  maxValueMyr: 500_000,        // within Director authority
+  maxRisk: 20,
+  allowedFlags: ["non_standard"] as FlagKey[], // no template for these types; the AI review stands in
+};
+export const STP_ACTOR = "Straight-through (AI)";
+export function straightThrough(
+  c: { contract_type: string; value_myr: number | null; side?: string },
+  vendor: { status?: string | null; risk_rating?: string | null; related_party?: boolean | null } | null,
+  flags: Flag[],
+  review: { verdict?: string; riskScore?: number; findings?: { severity?: string }[] } | null,
+): { eligible: boolean; reasons: string[]; blockers: string[] } {
+  const t = CONTRACT_TYPES[c.contract_type];
+  const findings = review?.findings ?? [];
+  // Red flags stop it; minor cautions on a draft the AI calls compliant stay as comments for signing.
+  const serious = findings.filter((f) => f.severity === "red_flag").length;
+  const minor = findings.filter((f) => f.severity === "caution").length;
+  const other = flags.filter((f) => !STRAIGHT_THROUGH.allowedFlags.includes(f.key));
+  const checks: [boolean, string, string][] = [
+    [STRAIGHT_THROUGH.types.includes(c.contract_type), `routine ${t?.label ?? c.contract_type}`, `${t?.label ?? c.contract_type} is not a routine type`],
+    [(c.value_myr ?? Infinity) <= STRAIGHT_THROUGH.maxValueMyr, `value RM${(c.value_myr ?? 0).toLocaleString()} within Director authority`, `value over RM${STRAIGHT_THROUGH.maxValueMyr.toLocaleString()}`],
+    [!!review && review.verdict === "compliant", "AI review compliant", `AI verdict ${review?.verdict ?? "not reviewed"}`],
+    [!!review && (review.riskScore ?? 100) <= STRAIGHT_THROUGH.maxRisk, `risk ${review?.riskScore ?? "—"}`, `risk ${review?.riskScore ?? "—"} over ${STRAIGHT_THROUGH.maxRisk}`],
+    [serious === 0, minor ? `no red flags (${minor} minor point${minor === 1 ? "" : "s"} noted for signing)` : "no red flags or cautions", `${serious} red-flag finding(s)`],
+    [!!vendor && vendor.status === "approved" && vendor.risk_rating !== "high" && !vendor.related_party, "approved, low-risk vendor", "vendor not approved, high risk or related"],
+    [other.length === 0, "no platform flags", `flags: ${other.map((f) => FLAG_META[f.key]?.label ?? f.key).join(", ")}`],
+  ];
+  return { eligible: checks.every(([ok]) => ok), reasons: checks.filter(([ok]) => ok).map(([, r]) => r), blockers: checks.filter(([ok]) => !ok).map(([, , b]) => b) };
+}
+/** True when every stage was decided straight-through. */
+export const wasStraightThrough = (route: Stage[] | null | undefined) => !!route?.length && route.every((s) => s.decided_by === STP_ACTOR);
+
 /** Decisions already taken on a stage that is still required carry over by key. */
 function carry(stages: Omit<Stage, "status">[], previous: Stage[]): Stage[] {
   return stages.map((s) => {

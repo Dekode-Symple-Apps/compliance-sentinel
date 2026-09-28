@@ -14,7 +14,7 @@ import { toast } from "sonner";
 import {
   CcmsHeader, StatusBadge, OutcomeText, SlaText, Section, CostChip, SeverityIcon, CARD, TH, TD, fmtMoney, useCcmsRole, NoteText } from "@/components/ccms-widgets";
 import {
-  AI_ROLE, CCMS_ROLES, CONTRACT_TYPES, DEMO_PEOPLE, FLAG_META, BLOCKING_FLAGS, DEMO_SINGLE_USER, OBLIGATION_CATEGORIES, SECURITY_TYPES, contractOwner, daysBetween, entityShort, flowOf, nextApproval, normalizeObligations, obligationBucket, paymentReady, stageTitle, roleLabel, templateById, displayName,
+  AI_ROLE, CCMS_ROLES, CONTRACT_TYPES, DEMO_PEOPLE, FLAG_META, BLOCKING_FLAGS, DEMO_SINGLE_USER, OBLIGATION_CATEGORIES, SECURITY_TYPES, STRAIGHT_THROUGH, contractOwner, straightThrough, wasStraightThrough, daysBetween, entityShort, flowOf, nextApproval, normalizeObligations, obligationBucket, paymentReady, stageTitle, roleLabel, templateById, displayName,
   type Flag, type NextAction, type Obligation, type ObligationCategory, type Security, type Stage,
 } from "@/lib/ccms";
 import { Loader2, FileText, ArrowLeft, ChevronRight, MoreHorizontal, Trash2 } from "lucide-react";
@@ -93,6 +93,14 @@ function ContractDetail() {
           <Link to="/ccms/contracts" className="inline-flex items-center gap-1 text-sm text-gray-600 hover:underline"><ArrowLeft className="size-4" /> Contracts</Link>
 
           <Milestones c={{ ...c, vendor }} documents={documents} events={events} onDone={refresh} />
+
+          {wasStraightThrough(route) && (
+            <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50/60 px-4 py-3 text-sm">
+              <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-emerald-600 text-xs text-white">✓</span>
+              <div><div className="font-semibold text-emerald-900">Cleared and approved straight-through</div>
+                <div className="text-emerald-800">{(route[0]?.note ?? "").replace(/^Straight-through:\s*/, "")} No one needed to review or approve it; it goes straight to signing.</div></div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-[230px_minmax(0,1fr)]">
             <nav className="h-fit rounded-lg border border-gray-200 p-2 lg:sticky lg:top-4" aria-label="Contract sections">
@@ -180,6 +188,12 @@ function ContractDetail() {
               </ul>
                     </Panel>
                   )}
+                  {STRAIGHT_THROUGH.types.includes(c.contract_type) && !wasStraightThrough(route) && current?.ai_review_status === "done" && (() => {
+                    const st = straightThrough(c, vendor, flags, { verdict: current.verdict, riskScore: current.riskScore, findings: current.findings });
+                    return st.blockers.length ? (
+                      <div className="rounded-md border border-gray-200 px-4 py-2.5 text-sm text-gray-700"><span className="font-semibold text-gray-900">Not straight-through</span> — {st.blockers.join("; ")}. Routine contracts that pass every check are cleared and approved without waiting.</div>
+                    ) : null;
+                  })()}
                   <Panel title="Review and approval route" sub={route.length ? `${route.length} stage${route.length === 1 ? "" : "s"}` : undefined}>
 
             <table className="w-full">

@@ -14,7 +14,7 @@ import {
   CONTRACT_TYPES, CCMS_ROLES, DEMO_SINGLE_USER, flowOf, LSH_ENTITIES, LOA_ITEMS, BLOCKING_FLAGS, AI_ROLE, roleLabel,
   buildRoute, computeFlags, nextApproval, reviewsDone, templateById, toMyr, fillNda, displayName,
   COMPARISON_AREAS, defaultSecurities, SECURITY_TYPES, APPROVAL_BANDS, type Security, type KeyTerms,
-  autoObligations, contractOwner, normalizeObligations,
+  autoObligations, contractOwner, normalizeObligations, straightThrough, STP_ACTOR,
   type CcmsRole, type Flag, type Stage, type VendorLite,
 } from "@/lib/ccms";
 
@@ -537,6 +537,14 @@ export const reviewCcmsDocument = createServerFn({ method: "POST" })
 
       // Flags and route follow the new review; status follows the route.
       const routing = await refreshRouting(sb, contract, tenantId);
+      // Straight-through: a routine, low-value, clean draft from an approved
+      // vendor is cleared and approved now (first review of a new request only).
+      const stp = contract.status === "submitted" && doc.doc_role === "draft" ? straightThrough(contract, vendor, routing.flags, ai_review) : null;
+      if (stp?.eligible) {
+        const at = new Date().toISOString();
+        const note = `Straight-through: ${stp.reasons.join("; ")}.`;
+        routing.approval_route = routing.approval_route.map((s: Stage) => ({ ...s, status: s.kind === "review" ? "cleared" : "approved", decided_by: STP_ACTOR, decided_at: at, note }));
+      }
       const model = res.modelVersion ?? (await getDefaultModel());
       const cost_log = [...(contract.cost_log ?? []).slice(-49), costEntry("Draft review", res, model)];
       await sb.from("ccms_contracts").update({
@@ -545,13 +553,15 @@ export const reviewCcmsDocument = createServerFn({ method: "POST" })
         stage_started_at: contract.status === "submitted" ? new Date().toISOString() : contract.stage_started_at,
         updated_at: new Date().toISOString(),
       }).eq("id", contract.id);
+      if (stp?.eligible) await logEvent(sb, { contract_id: contract.id, event_type: "straight_through", actor_id: null, actor_name: STP_ACTOR, acting_role: null,
+        detail: `Cleared and approved straight-through — ${stp.reasons.join("; ")}. Ready to sign.` });
       const devCount = (deviation.clauses as any[]).filter((c) => c.status !== "same").length;
       await logEvent(sb, { contract_id: contract.id, event_type: "ai_review", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
         detail: `AI review of v${doc.version}: ${ai_review.findings.length} finding(s), risk ${ai_review.riskScore}` +
           (tpl ? `, ${devCount} template deviation(s)` : ", no approved template") +
           (loa_check ? `, ${loa_check.items.filter((i) => i.status !== "present").length} Letter of Award item(s) missing or unclear` : "") +
           `; ${threads.added} comment thread(s) opened by the AI Reviewer${threads.kept ? `, ${threads.kept} earlier thread(s) kept` : ""}.` });
-      return { ok: true, findings: ai_review.findings.length, riskScore: ai_review.riskScore, verdict: ai_review.verdict, threads: threads.added };
+      return { ok: true, findings: ai_review.findings.length, riskScore: ai_review.riskScore, verdict: ai_review.verdict, threads: threads.added, straightThrough: !!stp?.eligible };
     } catch (e: any) {
       await sb.from("ccms_documents").update({ ai_review_status: "failed" }).eq("id", doc.id);
       throw new Error(e?.message ?? "AI review failed");
