@@ -688,7 +688,8 @@ async function requestFacts(sb: any, r: any) {
   // The company profile says what the vendor does, since when, with whom.
   const pd = (docs ?? []).find((d: any) => d.doc_type === "company_profile");
   let profile = "";
-  if (pd) { try { profile = (await documentText(pd)).text.replace(/\s+/g, " ").slice(0, 2000); } catch { /* unreadable */ } }
+  // (The generated demo files carry a "Demo document — invented …" footer; it is not evidence about the vendor.)
+  if (pd) { try { profile = (await documentText(pd)).text.replace(/Demo document[^.]*\./gi, "").replace(/\s+/g, " ").slice(0, 2000); } catch { /* unreadable */ } }
   const yes = ABMS_QUESTIONS.filter((q) => r.abms?.answers?.[q.id] === "yes").map((q) => q.text);
   return [
     `Vendor: ${r.company_name} · ${VENDOR_CATEGORIES[r.category] ?? r.category} · ${r.kind}${r.trade ? ` · trade ${r.trade}` : ""}${r.project ? ` · project ${r.project}` : ""}`,
@@ -711,38 +712,45 @@ async function requestFacts(sb: any, r: any) {
   ].filter(Boolean).join("\n");
 }
 
+/** The AI assist itself — a plain function so it can be run outside a request. */
+export async function runVmsAssist(sb: any, r: any, kind: "compliance" | "decision" | "prequal") {
+  const data = { kind };
+  const facts = await requestFacts(sb, r);
+  const honest = "State only what the facts show. Anything not yet done — CTOS not recorded, a document uploaded but not verified, screening not run — is outstanding: say so, never describe it as clear or verified.";
+  const ask = data.kind === "compliance"
+    ? `You are the Compliance officer doing extended due diligence. Suggest a decision and write the rationale. ${honest} If a step is outstanding, suggest "conditional" with that step as the condition.
+Return ONLY JSON: {"decision": "approve" | "conditional" | "reject", "conditions": "for conditional only — what must be done, one line", "due_days": 30, "rationale": ["3–5 bullets, each at most 18 words, citing the facts"]}`
+    : data.kind === "decision"
+    ? `You are the Purchasing Manager signing off. Write the reason for the decision. If anything is missing or adverse, list what the vendor must correct; otherwise summarise why it is acceptable. ${honest}
+Return ONLY JSON: {"suggested": "approve" | "return" | "reject", "bullets": ["2–5 bullets, each at most 16 words"]}`
+    : `You are the assessor. Suggest a pre-qualification score 0–5 for each area from the facts (0 = no evidence, 3 = adequate, 5 = strong). Score only on evidence actually present. A document type label lists what it may cover (e.g. "ISO 9001 / 14001 / 45001") — credit only the standard named in the file name or number, never the others. Where there is no evidence, say so and score 0–2.
+Areas: ${PREQUAL_AREAS.map((a) => `${a.id}: ${a.label}`).join("; ")}.
+Return ONLY JSON: {"areas": {"legal": 0, ...}, "why": {"legal": "at most 12 words", ...}, "scope_fit": "one line"}`;
+  const res: any = await generateWithFallback({ contents: [{ role: "user", parts: [{ text: `${ask}\n\nFACTS:\n${facts}` }] }],
+    config: { responseMimeType: "application/json", maxOutputTokens: 1500, temperature: 0.2 } }, { tier: "fast" });
+  const out = parseJson(res.text ?? "") ?? {};
+  const bullets = (xs: any) => (Array.isArray(xs) ? xs : []).filter((x) => typeof x === "string" && x.trim()).map((x: string) => `- ${x.trim().replace(/^[-•*]\s*/, "")}`).join("\n");
+  if (data.kind === "compliance") {
+    const due = new Date(); due.setDate(due.getDate() + (Number(out.due_days) > 0 ? Math.min(Number(out.due_days), 180) : 30));
+    return { decision: ["approve", "conditional", "reject"].includes(out.decision) ? out.decision : "approve", conditions: String(out.conditions ?? ""), due: due.toISOString().slice(0, 10), text: bullets(out.rationale) };
+  }
+  if (data.kind === "decision") return { suggested: String(out.suggested ?? ""), text: bullets(out.bullets) };
+  const areas: Record<string, number> = {}; const why: Record<string, string> = {};
+  for (const a of PREQUAL_AREAS) {
+    const n = Number(out.areas?.[a.id]);
+    if (Number.isFinite(n)) areas[a.id] = Math.max(0, Math.min(5, Math.round(n)));
+    if (typeof out.why?.[a.id] === "string") why[a.id] = out.why[a.id].slice(0, 120);
+  }
+  return { areas, why, text: String(out.scope_fit ?? "") };
+}
+
 export const vmsAiAssist = createServerFn({ method: "POST" })
   .middleware([requireVms])
   .inputValidator(z.object({ request_id: z.string().uuid(), kind: z.enum(["compliance", "decision", "prequal"]) }))
   .handler(async ({ data, context }) => {
     const { sb, tenantId } = await vms(context);
     const r = await loadRequest(sb, data.request_id, tenantId);
-    const facts = await requestFacts(sb, r);
-    const ask = data.kind === "compliance"
-      ? `You are the Compliance officer doing extended due diligence. Suggest a decision and write the rationale.
-Return ONLY JSON: {"decision": "approve" | "conditional" | "reject", "conditions": "for conditional only — what must be done, one line", "due_days": 30, "rationale": ["3–5 bullets, each at most 18 words, citing the facts"]}`
-      : data.kind === "decision"
-      ? `You are the Purchasing Manager signing off. Write the reason for the decision. If anything is missing or adverse, list what the vendor must correct; otherwise summarise why it is acceptable.
-Return ONLY JSON: {"suggested": "approve" | "return" | "reject", "bullets": ["2–5 bullets, each at most 16 words"]}`
-      : `You are the assessor. Suggest a pre-qualification score 0–5 for each area from the facts (0 = no evidence, 3 = adequate, 5 = strong). Score only on evidence actually present. A document type label lists what it may cover (e.g. "ISO 9001 / 14001 / 45001") — credit only the standard named in the file name or number, never the others. Where there is no evidence, say so and score 0–2.
-Areas: ${PREQUAL_AREAS.map((a) => `${a.id}: ${a.label}`).join("; ")}.
-Return ONLY JSON: {"areas": {"legal": 0, ...}, "why": {"legal": "at most 12 words", ...}, "scope_fit": "one line"}`;
-    const res: any = await generateWithFallback({ contents: [{ role: "user", parts: [{ text: `${ask}\n\nFACTS:\n${facts}` }] }],
-      config: { responseMimeType: "application/json", maxOutputTokens: 1500, temperature: 0.2 } }, { tier: "fast" });
-    const out = parseJson(res.text ?? "") ?? {};
-    const bullets = (xs: any) => (Array.isArray(xs) ? xs : []).filter((x) => typeof x === "string" && x.trim()).map((x: string) => `- ${x.trim().replace(/^[-•*]\s*/, "")}`).join("\n");
-    if (data.kind === "compliance") {
-      const due = new Date(); due.setDate(due.getDate() + (Number(out.due_days) > 0 ? Math.min(Number(out.due_days), 180) : 30));
-      return { decision: ["approve", "conditional", "reject"].includes(out.decision) ? out.decision : "approve", conditions: String(out.conditions ?? ""), due: due.toISOString().slice(0, 10), text: bullets(out.rationale) };
-    }
-    if (data.kind === "decision") return { suggested: String(out.suggested ?? ""), text: bullets(out.bullets) };
-    const areas: Record<string, number> = {}; const why: Record<string, string> = {};
-    for (const a of PREQUAL_AREAS) {
-      const n = Number(out.areas?.[a.id]);
-      if (Number.isFinite(n)) areas[a.id] = Math.max(0, Math.min(5, Math.round(n)));
-      if (typeof out.why?.[a.id] === "string") why[a.id] = out.why[a.id].slice(0, 120);
-    }
-    return { areas, why, text: String(out.scope_fit ?? "") };
+    return runVmsAssist(sb, r, data.kind);
   });
 
 /** Finance's CTOS report, read: score and adverse records, as printed. */
