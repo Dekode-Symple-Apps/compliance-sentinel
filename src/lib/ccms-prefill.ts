@@ -85,3 +85,38 @@ export function recallForm(form: string): Record<string, any> | null {
 export function rememberForm(form: string, values: Record<string, any>) {
   write(FORM(form), values);
 }
+
+// ── Vendor Management: recent companies ──────────────────────────────────────
+// Each vendor request is remembered by company, so choosing a company name
+// brings back the rest of what was entered for it.
+
+const PROFILES = FORM("vms:companies");
+const SEED_COMPANIES: Record<string, any>[] = [
+  { kind: "onboarding", company_name: "Delima Mechanical & Electrical Sdn Bhd", registration_no: "201901045678 (1334567-M)", entity: "LSH BEST Builders Sdn Bhd",
+    category: "services", goods_services: "Testing, commissioning and maintenance of M&E systems", annual_spend: "450000",
+    justification: "No approved M&E commissioning vendor for the Klang Valley projects; needed before the LSH 33 handover.",
+    contact_name: "Nurul Aina", contact_email: "aina@delima-me.example" },
+  { kind: "subcontractor", company_name: "Kukuh Formwork & Scaffolding Sdn Bhd", registration_no: "201601023456 (1187654-P)", entity: "LSH BEST Builders Sdn Bhd",
+    category: "subcontractor", trade: "Formwork and scaffolding", project: "LSH 33 Block C", expected_value: "2400000",
+    justification: "Second formwork subcontractor to hold the Block C superstructure programme.",
+    contact_name: "Wong Chee Keong", contact_email: "ckwong@kukuh.example" },
+];
+const nameKey = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+
+/** Recent companies, newest first, with the demo ones after. */
+export function recallCompanies(kind?: string): Record<string, any>[] {
+  const mine = read<Record<string, any>[]>(PROFILES) ?? [];
+  const seen = new Set<string>();
+  return [...mine, ...SEED_COMPANIES].filter((p) => {
+    const k = nameKey(p.company_name ?? "");
+    if (!k || seen.has(k) || (kind && p.kind !== kind)) return false;
+    seen.add(k); return true;
+  }).slice(0, 8);
+}
+export function rememberCompany(values: Record<string, any>) {
+  const k = nameKey(values.company_name ?? "");
+  if (!k) return;
+  const mine = (read<Record<string, any>[]>(PROFILES) ?? []).filter((p) => nameKey(p.company_name ?? "") !== k);
+  // Only what was filled in — a blank never overwrites a remembered value.
+  write(PROFILES, [Object.fromEntries(Object.entries(values).filter(([, v]) => v !== "" && v != null)), ...mine].slice(0, 12));
+}

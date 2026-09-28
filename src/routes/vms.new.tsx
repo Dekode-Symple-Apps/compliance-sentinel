@@ -12,6 +12,8 @@ import { VENDOR_CATEGORIES, daysTo } from "@/lib/vms";
 import { RequiredDocsChecklist } from "@/components/vms-docs-checklist";
 import { LSH_ENTITIES } from "@/lib/ccms";
 import { Loader2 } from "lucide-react";
+import { FillButton } from "@/components/ccms-actions";
+import { recallCompanies, rememberCompany, recallForm, rememberForm } from "@/lib/ccms-prefill";
 
 export const Route = createFileRoute("/vms/new")({
   // ?vendor=<id> opens re-due diligence on that vendor (from Monitoring).
@@ -52,6 +54,28 @@ function NewVmsRequest() {
     setKind("redd"); pickVendor(startVendor);
   }, [startVendor, vendors.length]);
 
+  // Recent companies (this browser only): choosing one fills the rest of the form.
+  const [companies, setCompanies] = useState<Record<string, any>[]>([]);
+  useEffect(() => { if (kind !== "redd") setCompanies(recallCompanies(kind)); }, [kind]);
+  const FIELDS = ["company_name", "registration_no", "entity", "category", "goods_services", "annual_spend", "justification", "project", "trade", "expected_value", "contact_name", "contact_email"];
+  function applyCompany(p: Record<string, any>) {
+    setF((prev: any) => ({ ...prev, ...Object.fromEntries(FIELDS.filter((k) => p[k] != null && p[k] !== "").map((k) => [k, String(p[k])])),
+      ...(kind === "subcontractor" ? { category: "subcontractor" } : {}) }));
+  }
+  function onCompanyName(v: string) {
+    const hit = companies.find((p) => p.company_name.toLowerCase() === v.trim().toLowerCase());
+    if (hit) applyCompany(hit); else set("company_name", v);
+  }
+  function fillLast() {
+    if (kind === "redd") {
+      const id = recallForm("vms:redd")?.f?.vendor_id;
+      if (id && vendors.some((v: any) => v.id === id)) pickVendor(id);
+      else toast.message("Nothing saved yet — the vendor is remembered after the first re-due diligence request.");
+      return;
+    }
+    if (companies[0]) applyCompany(companies[0]);
+  }
+
   async function submit() {
     setBusy(true);
     try {
@@ -65,6 +89,8 @@ function NewVmsRequest() {
         project: f.project || null, trade: f.trade || null, expected_value: f.expected_value === "" ? null : Number(f.expected_value),
         contact_name: f.contact_name || v?.contact_name || null, contact_email: f.contact_email || v?.contact_email || null,
       } });
+      if (kind === "redd") rememberForm("vms:redd", { f: { vendor_id: f.vendor_id } });
+      else rememberCompany({ kind, ...Object.fromEntries(FIELDS.map((k) => [k, f[k]])) });
       qc.invalidateQueries({ queryKey: ["vms-requests"] });
       nav({ to: "/vms/$requestId", params: { requestId: r.id } });
     } catch (e: any) { toast.error(friendlyError(e)); } finally { setBusy(false); }
@@ -80,6 +106,7 @@ function NewVmsRequest() {
               {([["onboarding", "New Vendor"], ["subcontractor", "Subcontractor Pre-qualification"], ["redd", "Re-Due Diligence"]] as const).map(([k, l]) => (
                 <button key={k} onClick={() => setKind(k)} className={"rounded-md border px-3 py-1.5 text-sm " + (kind === k ? "border-gray-900 font-semibold" : "border-gray-200 text-gray-600")}>{l}</button>
               ))}
+              <div className="ml-auto self-center"><FillButton onClick={fillLast} /></div>
             </div>
             {kind === "redd" ? (
               <div className="space-y-3">
@@ -104,7 +131,18 @@ function NewVmsRequest() {
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-4">
-                <div><label className={LABEL}>Company name</label><input className={INPUT} value={f.company_name} onChange={(e) => set("company_name", e.target.value)} /></div>
+                <div><label className={LABEL}>Company name</label>
+                  <input className={INPUT} list="vms-companies" value={f.company_name} onChange={(e) => onCompanyName(e.target.value)} placeholder="Type, or pick a recent company" />
+                  <datalist id="vms-companies">{companies.map((p) => <option key={p.company_name} value={p.company_name} />)}</datalist>
+                  {!f.company_name && companies.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {companies.slice(0, 3).map((p) => (
+                        <button key={p.company_name} type="button" onClick={() => applyCompany(p)} title="Fill the form with this company's details"
+                          className="max-w-full truncate rounded border border-dashed border-gray-300 px-1.5 py-0.5 text-left text-xs text-gray-600 hover:border-gray-500 hover:text-gray-900">↺ {p.company_name}</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <div><label className={LABEL}>SSM registration no.</label><input className={INPUT} value={f.registration_no} onChange={(e) => set("registration_no", e.target.value)} /></div>
               </div>
             )}
