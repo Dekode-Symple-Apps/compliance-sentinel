@@ -8,7 +8,7 @@ import { documentText, parseJson } from "@/lib/ccms.functions";
 import { actorOf, assertTenant, requireRole, selfApproval } from "@/lib/actor";
 import { CCMS_ROLES, DEMO_SINGLE_USER, type CcmsRole } from "@/lib/ccms";
 import {
-  ABMS_QUESTIONS, DOC_TYPES, PASS_MARK, PORTAL_FORMS, PREQUAL_AREAS, VENDOR_CATEGORIES, addMonths, coiDates, daysTo, ddMonths, docTypeFromName, docsFor,
+  ABMS_QUESTIONS, DOC_TYPES, PASS_MARK, PORTAL_FORMS, PREQUAL_AREAS, afsRatios, validationRows, VENDOR_CATEGORIES, addMonths, coiDates, daysTo, ddMonths, docTypeFromName, docsFor,
   needsCompliance, prequalScore, screen,
 } from "@/lib/vms";
 
@@ -294,6 +294,8 @@ export const saveVendorPortal = createServerFn({ method: "POST" })
       // unmigrated database does not block the vendor's submission.
       await admin().from("ccms_vendors").update({ address: reg.address ?? null, contact_phone: reg.contact_phone ?? null, contact_designation: ab.designation ?? null }).eq("id", r.vendor_id);
       await admin().from("vms_events").insert({ request_id: r.id, vendor_id: r.vendor_id, event_type: "vendor_submitted", actor_name: `Vendor (${ab.signatory ?? ""})`, detail: `Registration submitted by the vendor.${ab.ctos_consent === "declined" ? " CTOS consent declined." : ""}` });
+      // Read every document now, so the reviewer opens a filled validation table.
+      await readAllDocuments(admin(), r.id);
     }
     return { ok: true };
   });
@@ -320,6 +322,15 @@ export const screenVmsRequest = createServerFn({ method: "POST" })
     const related = others.some((v: any) => v.related_party && (v.directors ?? []).some((d: any) => dirs.has(norm(d.name))))
       || r.abms?.answers?.lsh_relationship === "yes" || r.abms?.declaration_interest === "declared";
     const s = screen({ abms: r.abms, ctos: r.ctos, blacklisted, relatedPartyMatch: related, duplicates: dup.map((v: any) => v.name) });
+    // What was filled in against the documents, and the audited accounts.
+    await readAllDocuments(sb, r.id);
+    const { data: docs } = await sb.from("vms_documents").select("*").eq("request_id", r.id);
+    const differs = validationRows(r, docs ?? []).filter((x) => x.check === "differs");
+    for (const d of differs) s.reasons.push(`${d.label} in the form differs from the ${d.source?.label ?? "documents"}`);
+    const afsDoc = (docs ?? []).find((d: any) => d.doc_type === "afs" && d.extracted?.afs);
+    const afsFlags = afsDoc ? afsRatios(afsDoc.extracted.afs, r.annual_spend).flags : [];
+    for (const f of afsFlags) s.reasons.push(`Financial statements: ${f}`);
+    if ((differs.length || afsFlags.length) && s.rating === "low") s.rating = "medium";
     const status = blacklisted ? "rejected" : r.kind === "subcontractor" ? "assessment" : (r.ctos ? "assessment" : "screening");
     await sb.from("vms_requests").update({ screening: s, status, decision: blacklisted ? { outcome: "rejected", reason: "Blacklist hit", by: "Platform", at: new Date().toISOString() } : r.decision, updated_at: new Date().toISOString() }).eq("id", r.id);
     await sb.from("ccms_vendors").update({ risk_rating: s.rating, related_party: s.relatedParty, status: blacklisted ? "rejected" : undefined }).eq("id", r.vendor_id);
@@ -368,6 +379,55 @@ export const recordVmsConflictCheck = createServerFn({ method: "POST" })
 
 // ── step 8: verify documents (AI reads, a person confirms) ───────────────────
 
+/** Fields to read per document type, beyond number / issuer / holder / dates. */
+const DOC_FIELDS: Record<string, string> = {
+  ssm: `"fields": {"company_name": "", "registration_no": "as printed, new and old numbers", "address": "registered address", "incorporated": "yyyy-mm-dd"}`,
+  bank_letter: `"fields": {"bank_name": "", "account_no": "", "account_holder": "the name the account is held in"}`,
+  company_profile: `"fields": {"tin": "tax identification no.", "directors": ["full names"], "contact_name": "", "contact_designation": "", "contact_phone": "", "contact_email": "", "address": "office address"}`,
+  cidb: `"fields": {"grade": "e.g. G7", "registration_no": ""}`,
+};
+const AFS_PROMPT = `Read these audited financial statements. Figures in full ringgit (multiply by 1,000 when the statements are in RM'000). Only what is printed; null when absent.
+Return ONLY JSON: {"afs": {"fy_end": "yyyy-mm-dd", "prior_fy_end": "yyyy-mm-dd", "currency": "MYR", "auditor": "audit firm", "opinion": "unqualified" | "qualified" | "adverse" | "disclaimer", "going_concern": true/false (a material uncertainty or emphasis on going concern),
+ "current": {"revenue": 0, "gross_profit": 0, "profit_before_tax": 0, "net_profit": 0, "total_assets": 0, "current_assets": 0, "current_liabilities": 0, "total_liabilities": 0, "equity": 0, "cash": 0, "operating_cash_flow": 0},
+ "prior": { same keys for the comparative year }}, "number": "", "issuer": "the auditor", "holder": "the company", "issued": "date of the auditor's report yyyy-mm-dd", "expiry": ""}`;
+
+/** Reads one vendor document: the common fields, the type's own fields, and for
+ *  an AFS the financial statements. Plain function — the portal submission and
+ *  the reviewer's Read with AI both use it. */
+export async function readDocFields(doc: any): Promise<{ extracted: any; res: any }> {
+  const { text, pdfBase64 } = await documentText(doc);
+  const label = DOC_TYPES.find((d) => d.id === doc.doc_type)?.label ?? "certificate";
+  const afs = doc.doc_type === "afs";
+  const prompt = afs ? AFS_PROMPT : `Read this ${label} and extract, only as printed (never guess; empty string if absent).
+Return ONLY JSON: {"number": "certificate / policy / registration number", "issuer": "issuing body or insurer", "holder": "the company it is issued to", "issued": "yyyy-mm-dd", "expiry": "yyyy-mm-dd"${DOC_FIELDS[doc.doc_type] ? `, ${DOC_FIELDS[doc.doc_type]}` : ""}}`;
+  const parts: any[] = [{ text: prompt }];
+  if (pdfBase64) parts.push({ inlineData: { mimeType: "application/pdf", data: pdfBase64 } });
+  else if (text.trim()) parts.push({ text: text.slice(0, afs ? 80_000 : 40_000) });
+  else {
+    const resp = await fetch(doc.file_url); const buf = Buffer.from(await resp.arrayBuffer());
+    const mime = /\.png$/i.test(doc.file_name) ? "image/png" : /\.jpe?g$/i.test(doc.file_name) ? "image/jpeg" : "application/octet-stream";
+    if (mime.startsWith("image/")) parts.push({ inlineData: { mimeType: mime, data: buf.toString("base64") } });
+  }
+  const res: any = await generateWithFallback({ contents: [{ role: "user", parts }], config: { responseMimeType: "application/json", maxOutputTokens: afs ? 3000 : 1200, temperature: 0 } }, { tier: afs ? "quality" : "fast" });
+  const out = parseJson(res.text ?? "") ?? {};
+  const extracted: any = { number: String(out.number ?? ""), issuer: String(out.issuer ?? ""), holder: String(out.holder ?? ""), issued: out.issued || null, expiry: out.expiry || null };
+  if (out.fields && typeof out.fields === "object") extracted.fields = out.fields;
+  if (afs && out.afs && typeof out.afs === "object") extracted.afs = out.afs;
+  return { extracted, res };
+}
+
+/** Reads every unread document of a request, three at a time. Never throws. */
+async function readAllDocuments(db: any, requestId: string) {
+  const { data: docs } = await db.from("vms_documents").select("*").eq("request_id", requestId).is("extracted", null);
+  const todo = (docs ?? []) as any[];
+  for (let i = 0; i < todo.length; i += 3) {
+    await Promise.all(todo.slice(i, i + 3).map(async (d) => {
+      try { const { extracted } = await readDocFields(d); await db.from("vms_documents").update({ extracted }).eq("id", d.id); }
+      catch (e) { console.error("[vms] read failed", d.file_name, e); }
+    }));
+  }
+}
+
 export const readVmsDocument = createServerFn({ method: "POST" })
   .middleware([requireVms])
   .inputValidator(z.object({ document_id: z.string().uuid() }))
@@ -377,20 +437,7 @@ export const readVmsDocument = createServerFn({ method: "POST" })
     if (!doc) throw new Error("Document not found");
     const { data: v } = await sb.from("ccms_vendors").select("tenant_id").eq("id", doc.vendor_id).single();
     assertTenant(v?.tenant_id, tenantId);
-    const { text, pdfBase64 } = await documentText(doc);
-    const parts: any[] = [{ text: `Read this ${DOC_TYPES.find((d) => d.id === doc.doc_type)?.label ?? "certificate"} and extract, only as printed (never guess; empty string if absent):
-{"number": "certificate / policy / registration number", "issuer": "issuing body or insurer", "holder": "the company it is issued to", "issued": "yyyy-mm-dd", "expiry": "yyyy-mm-dd"}
-Return ONLY JSON.` }];
-    if (text.trim()) parts.push({ text: text.slice(0, 40_000) });
-    if (pdfBase64) parts.push({ inlineData: { mimeType: "application/pdf", data: pdfBase64 } });
-    if (!text.trim() && !pdfBase64) {
-      const resp = await fetch(doc.file_url); const buf = Buffer.from(await resp.arrayBuffer());
-      const mime = /\.png$/i.test(doc.file_name) ? "image/png" : /\.jpe?g$/i.test(doc.file_name) ? "image/jpeg" : "application/octet-stream";
-      if (mime.startsWith("image/")) parts.push({ inlineData: { mimeType: mime, data: buf.toString("base64") } });
-    }
-    const res: any = await generateWithFallback({ contents: [{ role: "user", parts }], config: { responseMimeType: "application/json", maxOutputTokens: 1024, temperature: 0 } }, { tier: "fast" });
-    const out = parseJson(res.text ?? "") ?? {};
-    const extracted = { number: String(out.number ?? ""), issuer: String(out.issuer ?? ""), holder: String(out.holder ?? ""), issued: out.issued || null, expiry: out.expiry || null };
+    const { extracted } = await readDocFields(doc);
     await sb.from("vms_documents").update({ extracted }).eq("id", doc.id);
     return extracted;
   });
@@ -751,6 +798,14 @@ async function requestFacts(sb: any, r: any) {
       return `${DOC_TYPES.find((t) => t.id === d.doc_type)?.label ?? d.doc_type}: file "${d.file_name}" (${bits})`;
     }).join("; ") || "none"}`,
     profile ? `Company profile (text): ${profile}` : "",
+    (() => {
+      const a = (docs ?? []).find((d: any) => d.doc_type === "afs" && d.extracted?.afs)?.extracted?.afs;
+      if (!a) return "Audited financial statements: not provided";
+      const k = afsRatios(a, r.annual_spend);
+      const m = (n?: number | null) => (n == null ? "—" : `RM${Math.round(n).toLocaleString()}`);
+      const pct = (n: number | null) => (n == null ? "—" : `${(n * 100).toFixed(1)}%`);
+      return `Audited financial statements (FY ${a.fy_end ?? "?"}, ${a.opinion ?? "?"} opinion${a.going_concern ? ", going-concern emphasis" : ""}): revenue ${m(a.current?.revenue)} (prior ${m(a.prior?.revenue)}, growth ${pct(k.growth)}), net profit ${m(a.current?.net_profit)} (margin ${pct(k.netMargin)}), equity ${m(a.current?.equity)}, current ratio ${k.currentRatio?.toFixed(2) ?? "—"}, debt-to-equity ${k.debtToEquity?.toFixed(2) ?? "—"}, operating cash flow ${m(a.current?.operating_cash_flow)}${k.flags.length ? `; flags: ${k.flags.join("; ")}` : "; no financial flags"}`;
+    })(),
     missing.length ? `Mandatory documents missing: ${missing.join("; ")}` : "All mandatory documents uploaded",
     r.assessment ? `Pre-qualification: ${r.assessment.total}% (${r.assessment.pass ? "pass" : "fail"})` : "",
     r.compliance ? `Compliance: ${r.compliance.decision}${r.compliance.conditions ? ` — conditions: ${r.compliance.conditions}` : ""}` : "",

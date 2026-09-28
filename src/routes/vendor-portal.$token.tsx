@@ -249,7 +249,7 @@ function VendorPortal() {
 
       <div className="flex gap-2">
         <Button variant="outline" disabled={!!busy} onClick={() => save(false)}>{busy === "save" ? <Loader2 className="size-4 animate-spin" /> : "Save draft"}</Button>
-        <Button disabled={!!busy} onClick={() => save(true)}>{busy === "submit" ? <Loader2 className="size-4 animate-spin" /> : "Submit registration"}</Button>
+        <Button disabled={!!busy} onClick={() => save(true)}>{busy === "submit" ? <><Loader2 className="size-4 animate-spin" /> Submitting — checking your documents…</> : "Submit registration"}</Button>
       </div>
     </Shell>
   );

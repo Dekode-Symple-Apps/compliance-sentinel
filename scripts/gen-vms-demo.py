@@ -18,7 +18,11 @@ COMPANIES = {
         address="No. 21, Jalan Pelukis U1/46, Temasya Industrial Park, 40150 Shah Alam, Selangor",
         business="Testing, commissioning and maintenance of mechanical and electrical (M&E) systems for commercial and residential buildings.",
         staff=36, directors=["Mohd Hafiz bin Ismail", "Chong Mei Ling"], clients="property developers, facility managers, hospitals",
-        tin="C 2471 0935 08", ctos=712, contact=("Nurul Aina binti Hashim", "Business Development Manager", "03-5510 2288", "aina@delima-me.example"),
+        tin="C 2471 0935 08", ctos=712,
+        afs=dict(cur=dict(revenue=12_400_000, cost=9_300_000, admin=1_650_000, finance=80_000, tax=370_000, ppe=4_800_000, receivables=2_900_000, cash=2_100_000, inventory=200_000,
+                          payables=2_150_000, st_borrow=450_000, lt_borrow=500_000, share=1_000_000, ocf=1_400_000, icf=-620_000, fcf=-210_000),
+                 pri=dict(revenue=10_800_000, cost=8_210_000, admin=1_500_000, finance=95_000, tax=260_000, ppe=4_450_000, receivables=2_500_000, cash=1_530_000, inventory=180_000,
+                          payables=1_990_000, st_borrow=480_000, lt_borrow=640_000, share=1_000_000, ocf=1_050_000, icf=-540_000, fcf=-260_000)), contact=("Nurul Aina binti Hashim", "Business Development Manager", "03-5510 2288", "aina@delima-me.example"),
         bank=("CIMB BANK BERHAD", "8603 4471 2290", "Shah Alam Branch", "15 March 2019"),
         insurer=("Allianz General Insurance Company (Malaysia) Berhad", "PL-2026-310554", "RM3,000,000", "1 January 2026", "31 December 2026"),
         extras=["iso", "calibration", "competency"],
@@ -28,7 +32,11 @@ COMPANIES = {
         address="Lot 7, Jalan Perusahaan 2, Kawasan Perindustrian Beranang, 43700 Beranang, Selangor",
         business="Formwork, falsework and scaffolding for high-rise residential and commercial construction.",
         staff=120, directors=["Wong Chee Keong", "Siti Rahmah binti Abdullah"], clients="main contractors on high-rise projects in the Klang Valley",
-        tin="C 2388 1164 02", ctos=655, contact=("Wong Chee Keong", "Managing Director", "03-8723 4410", "ckwong@kukuh.example"),
+        tin="C 2388 1164 02", ctos=688,
+        afs=dict(cur=dict(revenue=48_600_000, cost=39_400_000, admin=3_700_000, finance=310_000, tax=1_290_000, ppe=17_200_000, receivables=11_800_000, cash=5_900_000, inventory=800_000,
+                          payables=8_300_000, st_borrow=1_500_000, lt_borrow=4_400_000, share=5_000_000, ocf=4_600_000, icf=-2_900_000, fcf=-700_000),
+                 pri=dict(revenue=42_100_000, cost=34_300_000, admin=3_300_000, finance=340_000, tax=1_000_000, ppe=16_100_000, receivables=10_300_000, cash=4_900_000, inventory=700_000,
+                          payables=7_600_000, st_borrow=1_700_000, lt_borrow=5_300_000, share=5_000_000, ocf=3_800_000, icf=-2_500_000, fcf=-900_000)), contact=("Wong Chee Keong", "Managing Director", "03-8723 4410", "ckwong@kukuh.example"),
         bank=("PUBLIC BANK BERHAD", "3198 0056 7712", "Semenyih Branch", "4 July 2016"),
         insurer=("Etiqa General Insurance Berhad", "CAR-2026-882107", "RM5,000,000", "1 March 2026", "28 February 2027"),
         extras=["cidb", "competency", "iso"],
@@ -121,6 +129,8 @@ def build(folder, d):
         lines(c, H - 120, [("Holder", who), ("Employer", n), ("Competency", "Wireman, single and three phase (PW4)" if me else "Scaffolder, tubular and system scaffold"),
                            ("Certificate No.", "PW4-2021-18830" if me else "SKM-SCF-2022-07714"), ("Issued", "12 April 2021" if me else "9 August 2022"), ("Valid until", "11 April 2027" if me else "8 August 2027")])
         footer(c, "Demo document — invented certificate."); c.save()
+    afs_pdf(f(f"0{k} Audited financial statements FY2025.pdf"), d); k += 1
+
     # Finance's CTOS report — kept apart: Finance uploads it, not the vendor.
     fin = os.path.join(folder, "For Finance"); os.makedirs(fin, exist_ok=True)
     c = page(os.path.join(fin, "CTOS report.pdf"), "CTOS BUSINESS REPORT", "CTOS Data Systems Sdn Bhd · Confidential")
@@ -131,6 +141,73 @@ def build(folder, d):
     lines(c, y - 10, ["Summary: no adverse records found for the company or its directors."])
     footer(c, "Demo document — invented report."); c.save()
     return sorted(os.listdir(folder))
+
+
+def afs_figures(y):
+    gp = y["revenue"] - y["cost"]; pbt = gp - y["admin"] - y["finance"]; np_ = pbt - y["tax"]
+    ca = y["receivables"] + y["cash"] + y["inventory"]; ta = y["ppe"] + ca
+    cl = y["payables"] + y["st_borrow"]; tl = cl + y["lt_borrow"]; eq = ta - tl
+    return dict(gp=gp, pbt=pbt, np=np_, ca=ca, ta=ta, cl=cl, tl=tl, eq=eq)
+
+
+def afs_pdf(path, d):
+    """Audited financial statements, FY ended 31 December 2025 — unqualified, profitable, growing."""
+    n = d["name"]; c, p = d["afs"]["cur"], d["afs"]["pri"]; C, P = afs_figures(c), afs_figures(p)
+    m = lambda v: f"{v:,.0f}" if v >= 0 else f"({-v:,.0f})"
+    cv = canvas.Canvas(path, pagesize=A4)
+    def head(title):
+        cv.setFillColor(colors.HexColor("#1f2937")); cv.rect(0, H - 70, W, 70, stroke=0, fill=1)
+        cv.setFillColor(colors.white); cv.setFont("Helvetica-Bold", 13); cv.drawString(50, H - 40, n)
+        cv.setFont("Helvetica", 9); cv.drawString(50, H - 56, f"Registration No. {d['reg']} · {title}"); cv.setFillColor(colors.black)
+    def table(y, rows):
+        cv.setFont("Helvetica-Bold", 9.5); cv.drawString(50, y, "RM"); cv.drawRightString(430, y, "2025"); cv.drawRightString(530, y, "2024"); y -= 18
+        for r in rows:
+            if r is None: y -= 6; continue
+            bold = r[0].startswith("*"); label = r[0].lstrip("*")
+            cv.setFont("Helvetica-Bold" if bold else "Helvetica", 9.5)
+            cv.drawString(50, y, label); cv.drawRightString(430, y, m(r[1])); cv.drawRightString(530, y, m(r[2])); y -= 15
+        return y
+    # 1. auditor's report
+    head("Independent auditors' report")
+    t = cv.beginText(50, H - 110); t.setFont("Helvetica", 10); t.setLeading(15)
+    for line in [f"INDEPENDENT AUDITORS' REPORT TO THE MEMBERS OF {n}", "", "Opinion",
+                 f"We have audited the financial statements of {n}, which comprise the statement of",
+                 "financial position as at 31 December 2025, and the statements of profit or loss, changes in",
+                 "equity and cash flows for the financial year then ended.",
+                 "In our opinion, the financial statements give a true and fair view of the financial position",
+                 "of the Company as at 31 December 2025 and of its financial performance and cash flows for",
+                 "the year then ended in accordance with Malaysian Private Entities Reporting Standard and the",
+                 "requirements of the Companies Act 2016 in Malaysia.", "",
+                 "Basis for opinion",
+                 "We conducted our audit in accordance with approved standards on auditing in Malaysia and",
+                 "International Standards on Auditing. We believe that the audit evidence we have obtained is",
+                 "sufficient and appropriate to provide a basis for our opinion.", "",
+                 "Tan, Lee & Partners PLT (AF 001234) · Chartered Accountants", "Kuala Lumpur, 18 March 2026"]:
+        t.textLine(line)
+    cv.drawText(t); footer(cv, "Demo document — invented company, auditor and figures."); cv.showPage()
+    # 2. statement of financial position
+    head("Statement of financial position as at 31 December 2025")
+    table(H - 110, [("Property, plant and equipment", c["ppe"], p["ppe"]), ("Inventories", c["inventory"], p["inventory"]),
+                    ("Trade and other receivables", c["receivables"], p["receivables"]), ("Cash and bank balances", c["cash"], p["cash"]),
+                    ("*Total current assets", C["ca"], P["ca"]), ("*Total assets", C["ta"], P["ta"]), None,
+                    ("Trade and other payables", c["payables"], p["payables"]), ("Borrowings - current", c["st_borrow"], p["st_borrow"]),
+                    ("*Total current liabilities", C["cl"], P["cl"]), ("Borrowings - non-current", c["lt_borrow"], p["lt_borrow"]),
+                    ("*Total liabilities", C["tl"], P["tl"]), None,
+                    ("Share capital", c["share"], p["share"]), ("Retained earnings", C["eq"] - c["share"], P["eq"] - p["share"]),
+                    ("*Total equity", C["eq"], P["eq"]), ("*Total equity and liabilities", C["ta"], P["ta"])])
+    footer(cv, "Demo document — invented figures."); cv.showPage()
+    # 3. profit or loss
+    head("Statement of profit or loss for the financial year ended 31 December 2025")
+    table(H - 110, [("Revenue", c["revenue"], p["revenue"]), ("Cost of sales", -c["cost"], -p["cost"]), ("*Gross profit", C["gp"], P["gp"]),
+                    ("Administrative expenses", -c["admin"], -p["admin"]), ("Finance costs", -c["finance"], -p["finance"]),
+                    ("*Profit before tax", C["pbt"], P["pbt"]), ("Income tax expense", -c["tax"], -p["tax"]), ("*Profit for the financial year", C["np"], P["np"])])
+    footer(cv, "Demo document — invented figures."); cv.showPage()
+    # 4. cash flows
+    head("Statement of cash flows for the financial year ended 31 December 2025")
+    table(H - 110, [("*Net cash from operating activities", c["ocf"], p["ocf"]), ("Net cash used in investing activities", c["icf"], p["icf"]),
+                    ("Net cash used in financing activities", c["fcf"], p["fcf"]), ("*Net increase in cash", c["ocf"] + c["icf"] + c["fcf"], p["ocf"] + p["icf"] + p["fcf"]),
+                    ("*Cash and bank balances at end of year", c["cash"], p["cash"])])
+    footer(cv, "Demo document — invented figures."); cv.save()
 
 
 def renewal():

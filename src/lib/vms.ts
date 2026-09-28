@@ -35,6 +35,7 @@ export const DOC_TYPES: DocType[] = [
   row("abms_004", "ABMS-004 Questionnaire for Third Parties", true, "MMMMMMM"),
   row("abms_005", "ABMS-005 Third Party Integrity Pledge", true, "MMMMMMM"),
   row("bank_letter", "Bank account verification", false, "MMMMMMM"),
+  row("afs", "Audited financial statements (latest year)", false, "SSSSSSS"),
   row("insurance", "Insurance coverage certificates", true, "SMMMS-S"),
   row("licence", "Licences / permits for the goods or services", true, "CCCCCCC"),
   row("cidb", "CIDB registration (and Green Card)", true, "--CM---"),
@@ -62,6 +63,7 @@ const NAME_PATTERNS: [string, RegExp][] = [
   ["material_cert", /material|test report|mill cert/],
   ["insurance", /insuran|\bpolicy\b|\bcar\b|public liability/],
   ["bank_letter", /\bbank\b|account (confirmation|verification)/],
+  ["afs", /\bafs\b|audited|financial statement/],
   ["company_profile", /profile/],
   ["ssm", /\bssm\b|incorporat|suruhanjaya syarikat|\bform ?(9|24|49)\b|\bsection ?(14|17|58)\b/],
   ["licence", /licen[cs]e|permit/],
@@ -185,6 +187,100 @@ export function requestMilestones(r: any, docs: any[]): { stages: VmsStage[]; ne
     decision: { text: sub ? "Head of Contracts & Procurement: add to the Master Sub-Contractor List" : "Purchasing Manager: approve, return to vendor or reject", role: sub ? "head_contracts" : "purchasing_manager" },
   };
   return { stages, next: r.status === "rejected" || r.status === "approved" || r.status === "conditional" ? null : cur ? next[cur] ?? null : null };
+}
+
+// ── validation: what was filled in, checked against the documents ───────────
+// Three sources for each value — the requester's New Request, the vendor's
+// register form, and the uploaded documents (read by AI). A row is confirmed
+// only when every source that has the value agrees.
+
+export type Check = "match" | "differs" | "unconfirmed";
+export interface ValidationRow { key: string; label: string; requester?: string; vendor?: string; doc?: string; source?: { id: string; label: string; url: string }; check: Check }
+const words = (s: string) => s.toLowerCase().replace(/\b(sdn\.?\s*bhd\.?|berhad|bhd)\b/g, " sdnbhd ").replace(/[^a-z0-9@. ]+/g, " ").split(/\s+/).filter(Boolean);
+const regCore = (s: string) => (s.match(/\d{12}/)?.[0] ?? s.replace(/\D/g, ""));
+/** Same value, allowing for format: case, punctuation, the SSM new/old number, spacing. */
+export function sameValue(kind: string, a: string, b: string): boolean {
+  if (!a || !b) return true;
+  switch (kind) {
+    case "registration_no": return regCore(a) === regCore(b);
+    case "bank_account": return a.replace(/\D/g, "") === b.replace(/\D/g, "");
+    case "tin": return a.replace(/\s/g, "").toUpperCase() === b.replace(/\s/g, "").toUpperCase();
+    case "email": return a.trim().toLowerCase() === b.trim().toLowerCase();
+    case "directors": {
+      const set = (x: string) => x.split(/[;,\n]/).map((n) => words(n).join(" ")).filter(Boolean).sort().join("|");
+      return set(a) === set(b);
+    }
+    case "address": {
+      const A = new Set(words(a)), B = new Set(words(b));
+      const [small, big] = A.size <= B.size ? [A, B] : [B, A];
+      return [...small].filter((w) => big.has(w)).length >= Math.ceil(small.size * 0.8);
+    }
+    default: {
+      // Names: one contains the other ("Nurul Aina" / "Nurul Aina binti Hashim"; "CIMB Bank" / "CIMB BANK BERHAD").
+      const A = words(a), B = words(b);
+      const [small, big] = A.length <= B.length ? [A, B] : [B, A];
+      return small.every((w) => big.includes(w));
+    }
+  }
+}
+export function validationRows(r: any, docs: any[]): ValidationRow[] {
+  const reg = r.register ?? {};
+  const latest = (t: string) => docs.filter((d) => d.doc_type === t && d.status !== "superseded").sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+  const f = (t: string, k: string) => { const d = latest(t); const v = d?.extracted?.fields?.[k]; return d && v != null && v !== "" ? { v: Array.isArray(v) ? v.join(", ") : String(v), d } : null; };
+  const label = (t: string) => DOC_TYPES.find((x) => x.id === t)?.label ?? t;
+  const row = (key: string, text: string, kind: string, requester: any, vendor: any, found: { v: string; d: any } | null): ValidationRow => {
+    const req = requester ? String(requester) : undefined, ven = vendor ? String(vendor) : undefined, doc = found?.v;
+    const vals = [req, ven, doc].filter(Boolean) as string[];
+    const agree = vals.every((x) => vals.every((y) => sameValue(kind, x, y)));
+    return { key, label: text, requester: req, vendor: ven, doc,
+      source: found ? { id: found.d.id, label: label(found.d.doc_type), url: found.d.file_url } : undefined,
+      check: !agree ? "differs" : doc ? "match" : "unconfirmed" };
+  };
+  const directors = (reg.directors ?? []).map((d: any) => d.name).filter((n: string) => n?.trim()).join(", ");
+  return [
+    row("company_name", "Company name", "name", r.company_name, reg.company_name, f("ssm", "company_name")),
+    row("registration_no", "SSM registration no.", "registration_no", r.registration_no, reg.registration_no, f("ssm", "registration_no")),
+    row("tin", "Tax identification no. (TIN)", "tin", null, reg.tin, f("company_profile", "tin")),
+    row("address", "Registered address", "address", null, reg.address, f("ssm", "address") ?? f("company_profile", "address")),
+    row("directors", "Directors", "directors", null, directors, f("company_profile", "directors")),
+    row("bank_name", "Bank", "name", null, reg.bank_name, f("bank_letter", "bank_name")),
+    row("bank_account", "Bank account no.", "bank_account", null, reg.bank_account, f("bank_letter", "account_no")),
+    row("account_holder", "Account held in the company's name", "name", r.company_name, reg.company_name, f("bank_letter", "account_holder")),
+    row("contact_name", "Contact person", "name", r.contact_name, reg.contact_name, f("company_profile", "contact_name")),
+    row("contact_email", "Contact email", "email", r.contact_email, reg.contact_email, f("company_profile", "contact_email")),
+    row("contact_phone", "Contact phone", "tin", null, reg.contact_phone, f("company_profile", "contact_phone")),
+    ...(r.kind === "subcontractor" ? [row("cidb_grade", "CIDB grade", "name", null, reg.cidb_grade, f("cidb", "grade"))] : []),
+  ].filter((x) => x.requester || x.vendor || x.doc);
+}
+
+// ── audited financial statements ─────────────────────────────────────────────
+export interface AfsYear { revenue?: number | null; gross_profit?: number | null; profit_before_tax?: number | null; net_profit?: number | null; total_assets?: number | null; current_assets?: number | null; current_liabilities?: number | null; total_liabilities?: number | null; equity?: number | null; cash?: number | null; operating_cash_flow?: number | null }
+export interface Afs { fy_end?: string | null; prior_fy_end?: string | null; currency?: string; auditor?: string; opinion?: "unqualified" | "qualified" | "adverse" | "disclaimer" | string; going_concern?: boolean; current: AfsYear; prior: AfsYear }
+export const AFS_ITEMS: [keyof AfsYear, string][] = [
+  ["revenue", "Revenue"], ["gross_profit", "Gross profit"], ["profit_before_tax", "Profit before tax"], ["net_profit", "Net profit"],
+  ["total_assets", "Total assets"], ["current_assets", "Current assets"], ["current_liabilities", "Current liabilities"],
+  ["total_liabilities", "Total liabilities"], ["equity", "Shareholders' equity"], ["cash", "Cash and bank balances"], ["operating_cash_flow", "Operating cash flow"],
+];
+const ratio = (a?: number | null, b?: number | null) => (a != null && b != null && b !== 0 ? a / b : null);
+/** Ratios and flags a buyer looks at before relying on a vendor. */
+export function afsRatios(afs: Afs, annualSpend?: number | null) {
+  const c = afs.current ?? {}, p = afs.prior ?? {};
+  const r = {
+    growth: ratio(c.revenue != null && p.revenue != null ? c.revenue - p.revenue : null, p.revenue),
+    netMargin: ratio(c.net_profit, c.revenue),
+    currentRatio: ratio(c.current_assets, c.current_liabilities),
+    debtToEquity: ratio(c.total_liabilities, c.equity),
+    dependence: ratio(annualSpend ?? null, c.revenue),
+  };
+  const flags: string[] = [];
+  if (c.net_profit != null && c.net_profit < 0) flags.push("Loss-making in the latest year");
+  if (c.equity != null && c.equity < 0) flags.push("Negative shareholders' equity");
+  if (r.currentRatio != null && r.currentRatio < 1) flags.push(`Current ratio ${r.currentRatio.toFixed(2)} — below 1`);
+  if (afs.opinion && afs.opinion !== "unqualified") flags.push(`Auditor's opinion: ${afs.opinion}`);
+  if (afs.going_concern) flags.push("Going-concern emphasis in the auditor's report");
+  if (r.dependence != null && r.dependence > 0.1) flags.push(`Our annual spend is ${(r.dependence * 100).toFixed(0)}% of their revenue — dependence`);
+  if (c.operating_cash_flow != null && c.operating_cash_flow < 0) flags.push("Negative operating cash flow");
+  return { ...r, flags };
 }
 
 /** What to do next on a request, as buttons: each opens its section and, in

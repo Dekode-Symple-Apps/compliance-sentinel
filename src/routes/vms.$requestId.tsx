@@ -13,7 +13,7 @@ import {
 } from "@/lib/vms.functions";
 import { CcmsHeader, CARD, TD, StageBar, NoteText, friendlyError, useCcmsRole, uploadToStorage } from "@/components/ccms-widgets";
 import {
-  ABMS_QUESTIONS, DOC_TYPES, PASS_MARK, PREQUAL_AREAS, VENDOR_CATEGORIES, VMS_STATUS, docsFor, prequalScore, requestMilestones, vmsActions, type VmsAction,
+  ABMS_QUESTIONS, AFS_ITEMS, DOC_TYPES, PASS_MARK, PREQUAL_AREAS, VENDOR_CATEGORIES, VMS_STATUS, afsRatios, daysTo, docsFor, prequalScore, requestMilestones, sameValue, validationRows, vmsActions, type Afs, type VmsAction,
 } from "@/lib/vms";
 import { CCMS_ROLES, DEMO_SINGLE_USER, displayName, fmtMoneyPlain } from "@/lib/ccms";
 import { ArrowLeft, ChevronRight, Copy, Loader2, Sparkles, Star, Trash2, Upload } from "lucide-react";
@@ -101,7 +101,7 @@ function VmsRequestPage() {
             {r.status === "returned" && <p className="rounded-md border border-orange-300 px-3 py-2 text-sm text-orange-800">Returned to the vendor: {r.return_reason}</p>}
             {r.status === "rejected" && <p className="rounded-md border border-red-300 px-3 py-2 text-sm text-red-800">Rejected: {r.decision?.reason ?? r.compliance?.rationale}</p>}
             <InviteSection r={r} token={token} onDone={refresh} />
-            {r.submitted_by_vendor_at && <SubmissionSection r={r} />}
+            {r.submitted_by_vendor_at && <SubmissionSection r={r} documents={documents} onDone={refresh} />}
             {r.submitted_by_vendor_at && <ScreeningSection r={r} onDone={refresh} />}
             {r.screening && !r.screening.blacklisted && (sub ? <ConflictSection r={r} onDone={refresh} /> : <CtosSection r={r} onDone={refresh} />)}
             {r.submitted_by_vendor_at && <DocumentsSection r={r} documents={documents} onDone={refresh} />}
@@ -167,27 +167,140 @@ function InviteSection({ r, token, onDone }: { r: any; token: string | null; onD
   );
 }
 
-function SubmissionSection({ r }: { r: any }) {
+const CHECK: Record<string, { icon: string; text: string; tone: string }> = {
+  match: { icon: "✓", text: "Confirmed", tone: "text-emerald-700" },
+  differs: { icon: "⚠", text: "Differs", tone: "text-amber-700 font-semibold" },
+  unconfirmed: { icon: "—", text: "Not in documents", tone: "text-gray-500" },
+};
+const money = (n?: number | null) => (n == null ? "—" : Math.round(n).toLocaleString());
+
+/** What the vendor submitted, checked against what was filled in and what the
+ *  documents say — in tables, so the reviewer can confirm it is accurate. */
+function SubmissionSection({ r, documents, onDone }: { r: any; documents: any[]; onDone: () => void }) {
+  const [role] = useCcmsRole();
+  const readFn = useServerFn(readVmsDocument);
   const reg = r.register ?? {}, ab = r.abms ?? {};
-  const yes = ABMS_QUESTIONS.filter((q) => ab.answers?.[q.id] === "yes");
+  const docs = documents.filter((d) => d.status !== "superseded");
+  const rows = validationRows(r, docs);
+  const confirmed = rows.filter((x) => x.check === "match").length, differs = rows.filter((x) => x.check === "differs").length;
+  const unread = docs.filter((d) => !d.extracted);
+  const afsDoc = docs.find((d) => d.doc_type === "afs" && d.extracted?.afs);
+  const afs = afsDoc?.extracted?.afs as Afs | undefined;
+  const k = afs ? afsRatios(afs, r.annual_spend) : null;
+  const TH2 = "px-2 py-1.5 text-left text-xs font-medium uppercase tracking-wide text-gray-500";
+  const TD2 = "px-2 py-1.5 align-top";
+  const pct = (n: number | null) => (n == null ? "—" : `${(n * 100).toFixed(1)}%`);
   return (
-    <Section k="validation" title="What the vendor submitted" sub={`Signed by ${ab.signatory ?? "—"} (${ab.designation ?? "—"}) on ${ab.signed_date ?? "—"}`}>
-      <ul className="space-y-0.5">
-        <li><span className="text-gray-500">Company:</span> {reg.company_name} · SSM {reg.registration_no} · TIN {reg.tin}</li>
-        <li><span className="text-gray-500">Directors:</span> {(reg.directors ?? []).map((d: any) => d.name).join(", ") || "—"}</li>
-        <li><span className="text-gray-500">Bank:</span> {reg.bank_name} · account ending {String(reg.bank_account ?? "").slice(-4)}</li>
-        {reg.cidb_grade && <li><span className="text-gray-500">CIDB:</span> {reg.cidb_grade}</li>}
-        {(reg.project_references ?? []).filter((x: string) => x?.trim()).length > 0 && <li><span className="text-gray-500">References:</span> {reg.project_references.filter((x: string) => x?.trim()).join("; ")}</li>}
-      </ul>
-      <div className="pt-1">
-        <div className="font-semibold text-gray-900">Integrity forms</div>
-        <ul className="space-y-0.5">
-          {yes.length ? yes.map((q) => <li key={q.id} className="text-red-700">Yes — {q.text}</li>) : <li className="text-emerald-700">All five integrity questions answered No.</li>}
-          {ab.details && <li className="text-gray-700">Details: {ab.details}</li>}
-          <li>Declaration of interest: {ab.declaration_interest === "declared" ? <span className="text-red-700">declared — {ab.interest_details}</span> : "none"}</li>
-          <li>Integrity pledge: {ab.pledge ? "signed" : "—"} · CTOS consent: {ab.ctos_consent ?? "—"} · PDPA consent: {ab.pdpa ? "given" : "—"}</li>
-        </ul>
+    <Section k="validation" title="Vendor Details for Validation" sub={`What was filled in, checked against the documents. Signed by ${ab.signatory ?? "—"} (${ab.designation ?? "—"}) on ${ab.signed_date ?? "—"}.`}
+      right={unread.length > 0 && ["purchasing_executive", "contract_executive", "contract_manager"].includes(role) ? <AiLink label={`Read ${unread.length} Document${unread.length === 1 ? "" : "s"}`} run={async () => {
+        for (let i = 0; i < unread.length; i += 3) await Promise.all(unread.slice(i, i + 3).map((d) => readFn({ data: { document_id: d.id } }).catch(() => null)));
+        onDone();
+      }} /> : undefined}>
+      <div className={cn("rounded-md px-3 py-2 text-sm", differs ? "bg-amber-50 text-amber-900" : "bg-emerald-50 text-emerald-900")}>
+        {differs ? `⚠ ${differs} field${differs === 1 ? "" : "s"} differ from the documents — check before screening.` : `✓ ${confirmed} of ${rows.length} fields confirmed by the documents${confirmed < rows.length ? "; the rest are not stated in any document" : ""}.`}
       </div>
+
+      <div className="font-semibold text-gray-900 pt-1">Company details</div>
+      <div className="overflow-x-auto rounded-md border border-gray-200">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50"><tr><th className={TH2}>Field</th><th className={TH2}>Requester entered</th><th className={TH2}>Vendor entered</th><th className={TH2}>Found in document</th><th className={TH2}>Source</th><th className={TH2}>Check</th></tr></thead>
+          <tbody>
+            {rows.map((x) => (
+              <tr key={x.key} className={cn("border-t border-gray-100", x.check === "differs" && "bg-amber-50/60")}>
+                <td className={TD2 + " font-medium text-gray-700"}>{x.label}</td>
+                <td className={TD2 + " text-gray-900"}>{x.requester ?? <span className="text-gray-400">—</span>}</td>
+                <td className={TD2 + " text-gray-900"}>{x.vendor ?? <span className="text-gray-400">—</span>}</td>
+                <td className={TD2 + " text-gray-900"}>{x.doc ?? <span className="text-gray-400">—</span>}</td>
+                <td className={TD2}>{x.source ? <a href={x.source.url} target="_blank" rel="noreferrer" className="text-blue-700 hover:underline">{x.source.label}</a> : <span className="text-gray-400">—</span>}</td>
+                <td className={cn(TD2, "whitespace-nowrap", CHECK[x.check].tone)}>{CHECK[x.check].icon} {CHECK[x.check].text}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="font-semibold text-gray-900 pt-2">Documents</div>
+      <div className="overflow-x-auto rounded-md border border-gray-200">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50"><tr><th className={TH2}>Document</th><th className={TH2}>Number</th><th className={TH2}>Issuer</th><th className={TH2}>Issued to</th><th className={TH2}>Expiry</th><th className={TH2}>Status</th><th className={TH2} /></tr></thead>
+          <tbody>
+            {docs.map((d) => {
+              const x = d.extracted ?? {};
+              const expiry = d.expiry_date || x.expiry;
+              const expired = expiry && daysTo(expiry) < 0;
+              const nameOk = !x.holder || sameValue("name", x.holder, reg.company_name || r.company_name);
+              return (
+                <tr key={d.id} className={cn("border-t border-gray-100", (expired || !nameOk) && "bg-amber-50/60")}>
+                  <td className={TD2 + " text-gray-900"}>{DOC_TYPES.find((t) => t.id === d.doc_type)?.label ?? d.doc_type}</td>
+                  <td className={TD2}>{d.number || x.number || "—"}</td>
+                  <td className={TD2}>{d.issuer || x.issuer || "—"}</td>
+                  <td className={cn(TD2, !nameOk && "font-semibold text-amber-800")}>{x.holder || "—"}{!nameOk && " ⚠"}</td>
+                  <td className={cn(TD2, expired && "font-semibold text-red-700")}>{expiry ? `${expiry}${expired ? " (expired)" : ""}` : "—"}</td>
+                  <td className={cn(TD2, d.status === "verified" ? "text-emerald-700" : d.status === "rejected" ? "text-red-700" : "text-amber-700")}>{d.status}</td>
+                  <td className={TD2}><a href={d.file_url} target="_blank" rel="noreferrer" className="text-blue-700 hover:underline">View</a></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {afs && k && (
+        <>
+          <div className="flex items-baseline gap-2 pt-2"><span className="font-semibold text-gray-900">Financial standing</span>
+            <span className="text-sm text-gray-600">Audited FY {afs.fy_end ?? "—"} · {afs.auditor || "auditor —"} · {afs.opinion ?? "—"} opinion</span>
+            <a href={afsDoc.file_url} target="_blank" rel="noreferrer" className="ml-auto text-sm text-blue-700 hover:underline">View AFS</a></div>
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_260px]">
+            <div className="overflow-x-auto rounded-md border border-gray-200">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50"><tr><th className={TH2}>{afs.currency ?? "MYR"}</th><th className={TH2 + " text-right"}>FY {String(afs.fy_end ?? "").slice(0, 4) || "current"}</th><th className={TH2 + " text-right"}>FY {String(afs.prior_fy_end ?? "").slice(0, 4) || "prior"}</th><th className={TH2 + " text-right"}>Change</th></tr></thead>
+                <tbody>
+                  {AFS_ITEMS.map(([key, label]) => {
+                    const c = afs.current?.[key], p = afs.prior?.[key];
+                    const ch = c != null && p != null && p !== 0 ? (c - p) / Math.abs(p) : null;
+                    return (
+                      <tr key={key} className="border-t border-gray-100">
+                        <td className={TD2 + " text-gray-700"}>{label}</td>
+                        <td className={TD2 + " text-right tabular-nums text-gray-900"}>{money(c)}</td>
+                        <td className={TD2 + " text-right tabular-nums text-gray-600"}>{money(p)}</td>
+                        <td className={cn(TD2, "text-right tabular-nums", ch == null ? "text-gray-400" : ch >= 0 ? "text-emerald-700" : "text-red-700")}>{ch == null ? "—" : `${ch >= 0 ? "+" : ""}${(ch * 100).toFixed(1)}%`}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="space-y-2">
+              {([["Revenue growth", pct(k.growth), (k.growth ?? 0) >= 0], ["Net margin", pct(k.netMargin), (k.netMargin ?? 0) > 0], ["Current ratio", k.currentRatio?.toFixed(2) ?? "—", (k.currentRatio ?? 0) >= 1],
+                ["Debt to equity", k.debtToEquity?.toFixed(2) ?? "—", (k.debtToEquity ?? 0) <= 1.5], ["Our spend vs their revenue", pct(k.dependence), (k.dependence ?? 0) <= 0.1]] as [string, string, boolean][]).map(([l, v, ok]) => (
+                <div key={l} className={cn("flex items-center justify-between rounded-md border px-3 py-1.5 text-sm", ok ? "border-emerald-200 bg-emerald-50/50" : "border-amber-200 bg-amber-50/60")}>
+                  <span className="text-gray-700">{l}</span><span className={cn("font-semibold tabular-nums", ok ? "text-emerald-800" : "text-amber-800")}>{v}</span>
+                </div>
+              ))}
+              {k.flags.length ? <ul className="list-disc pl-5 text-sm text-amber-800">{k.flags.map((f) => <li key={f}>{f}</li>)}</ul> : <p className="text-sm text-emerald-700">✓ No financial flags.</p>}
+            </div>
+          </div>
+        </>
+      )}
+
+      <div className="font-semibold text-gray-900 pt-2">Integrity</div>
+      <div className="overflow-x-auto rounded-md border border-gray-200">
+        <table className="w-full text-sm"><tbody>
+          {ABMS_QUESTIONS.map((q) => (
+            <tr key={q.id} className="border-t border-gray-100 first:border-0">
+              <td className={TD2 + " text-gray-700"}>{q.text}</td>
+              <td className={cn(TD2, "w-20 font-semibold", ab.answers?.[q.id] === "yes" ? "text-red-700" : "text-emerald-700")}>{ab.answers?.[q.id] === "yes" ? "Yes" : ab.answers?.[q.id] === "no" ? "No" : "—"}</td>
+            </tr>
+          ))}
+          {([["Declaration of interest (ABMS-001)", ab.declaration_interest === "declared" ? `Declared — ${ab.interest_details ?? ""}` : "None to declare", ab.declaration_interest !== "declared"],
+            ["Integrity pledge (ABMS-005)", ab.pledge ? "Signed" : "—", !!ab.pledge], ["CTOS consent", ab.ctos_consent === "signed" ? "Given" : ab.ctos_consent ?? "—", ab.ctos_consent === "signed"],
+            ["PDPA consent", ab.pdpa ? "Given" : "—", !!ab.pdpa], ["Signed by", `${ab.signatory ?? "—"}, ${ab.designation ?? "—"} · ${ab.signed_date ?? "—"}`, true]] as [string, string, boolean][]).map(([l, v, ok]) => (
+            <tr key={l} className="border-t border-gray-100"><td className={TD2 + " text-gray-700"}>{l}</td><td className={cn(TD2, "font-semibold", ok ? "text-emerald-700" : "text-red-700")}>{v}</td></tr>
+          ))}
+          {ab.details && <tr className="border-t border-gray-100"><td className={TD2 + " text-gray-700"}>Details given</td><td className={TD2}>{ab.details}</td></tr>}
+        </tbody></table>
+      </div>
+      {(reg.project_references ?? []).filter((x: string) => x?.trim()).length > 0 && <p className="text-sm"><span className="text-gray-500">Project references:</span> {reg.project_references.filter((x: string) => x?.trim()).join("; ")}</p>}
     </Section>
   );
 }
