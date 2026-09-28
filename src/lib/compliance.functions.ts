@@ -111,7 +111,7 @@ import { REGULATION_FAMILIES, INTERNAL_DOC_TYPES as INTERNAL_DOC_TYPES_CONST, re
 // Allowed workspace identifiers — shared across every workspace-scoped input
 // validator. Declared up here so server fns defined anywhere in the file can
 // reference it in their .inputValidator() (evaluated at module load).
-const workspaceSchema = z.enum(["rmit", "fatf", "forms", "simplify", "simplify_v2", "layout", "policy", "credit_risk", "credit_risk_demo", "mbrs", "rspo"]);
+const workspaceSchema = z.enum(["rmit", "fatf", "forms", "simplify", "simplify_v2", "layout", "policy", "credit_risk", "credit_risk_demo", "mbrs", "rspo", "brand_compliance"]);
 
 // Guidance rows are keyed by workspace_id, plus synthetic sub-keys for flows
 // that need a second editable prompt within one workspace (v2 recommendation).
@@ -199,7 +199,7 @@ export const createReport = createServerFn({ method: "POST" })
     z.object({
       filename: z.string(),
       fileUrl: z.string().nullable(),
-      workspace: z.enum(["rmit", "fatf", "forms", "simplify", "simplify_v2", "layout", "policy", "credit_risk", "credit_risk_demo", "mbrs", "rspo"]).default("rmit"),
+      workspace: z.enum(["rmit", "fatf", "forms", "simplify", "simplify_v2", "layout", "policy", "credit_risk", "credit_risk_demo", "mbrs", "rspo", "brand_compliance"]).default("rmit"),
       customTitle: z.string().optional(),
       notes: z.string().optional(),
       detected: z
@@ -534,7 +534,7 @@ export const createRegulatoryReport = createServerFn({ method: "POST" })
     z.object({
       filename: z.string(),
       fileUrl: z.string().nullable(),
-      workspace: z.enum(["rmit", "fatf", "forms", "simplify", "simplify_v2", "layout", "policy", "credit_risk", "credit_risk_demo", "mbrs", "rspo"]).default("rmit"),
+      workspace: z.enum(["rmit", "fatf", "forms", "simplify", "simplify_v2", "layout", "policy", "credit_risk", "credit_risk_demo", "mbrs", "rspo", "brand_compliance"]).default("rmit"),
       customTitle: z.string().optional(),
       notes: z.string().optional(),
       detected: z
@@ -1847,7 +1847,7 @@ export const createSop = createServerFn({ method: "POST" })
       title: z.string().min(2).max(200),
       doc_type: z.enum(["sop", "rmit", "rmit_reg", "fatf", "circular", "it_policy", "policy", "form"]),
       version: z.string().min(1).max(20),
-      workspace: z.enum(["rmit", "fatf", "forms", "simplify", "simplify_v2", "layout", "policy", "credit_risk", "credit_risk_demo", "mbrs", "rspo"]).default("rmit"),
+      workspace: z.enum(["rmit", "fatf", "forms", "simplify", "simplify_v2", "layout", "policy", "credit_risk", "credit_risk_demo", "mbrs", "rspo", "brand_compliance"]).default("rmit"),
       summary: z.string().max(2000).optional(),
       tags: z.array(z.string().max(40)).max(20).optional(),
       file_url: z.string().nullable().optional(),
@@ -1958,7 +1958,7 @@ export const clearWorkspace = createServerFn({ method: "POST" })
   .inputValidator(
     z.object({
       scope: z.enum(["analyses", "kb", "all"]),
-      workspace: z.enum(["rmit", "fatf", "forms", "simplify", "simplify_v2", "layout", "policy", "credit_risk", "credit_risk_demo", "mbrs", "rspo"]).default("rmit"),
+      workspace: z.enum(["rmit", "fatf", "forms", "simplify", "simplify_v2", "layout", "policy", "credit_risk", "credit_risk_demo", "mbrs", "rspo", "brand_compliance"]).default("rmit"),
     })
   )
   .handler(async ({ data, context }) => {
@@ -2366,7 +2366,7 @@ function escapeHtml(s: string): string {
  */
 export const getChunkCounts = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({ workspace: z.enum(["rmit", "fatf", "forms", "simplify", "simplify_v2", "layout", "policy", "credit_risk", "credit_risk_demo", "mbrs", "rspo"]).default("rmit") }))
+  .inputValidator(z.object({ workspace: z.enum(["rmit", "fatf", "forms", "simplify", "simplify_v2", "layout", "policy", "credit_risk", "credit_risk_demo", "mbrs", "rspo", "brand_compliance"]).default("rmit") }))
   .handler(async ({ data, context }) => {
     const supabase = context.supabase;
     const { tenantId } = await getCallerTenant(context.userId);
@@ -2656,7 +2656,7 @@ function applyPageOverrides(formId: string, impacts: any[]): any[] {
 export const createFormUpdateReport = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(z.object({
-    workspace: z.enum(["rmit", "fatf", "forms", "simplify", "simplify_v2", "layout", "policy", "credit_risk", "credit_risk_demo", "mbrs", "rspo"]).default("forms"),
+    workspace: z.enum(["rmit", "fatf", "forms", "simplify", "simplify_v2", "layout", "policy", "credit_risk", "credit_risk_demo", "mbrs", "rspo", "brand_compliance"]).default("forms"),
     formId: z.string().min(1),                  // e.g. "FGROP 037/2016"
     friendlyName: z.string().optional(),         // e.g. "Account Opening Application Form"
     customTitle: z.string().optional(),

@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { BrandSubmissionsList } from "@/components/brand-pages";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState, useEffect } from "react";
@@ -74,6 +75,7 @@ function ReportsRoute() {
   if (workspace === "credit_risk" || workspace === "credit_risk_demo") return <CreditRiskReportsList />;
   if (workspace === "mbrs") return <MbrsReportsList />;
   if (workspace === "rspo") return <RspoReportsList />;
+  if (workspace === "brand_compliance") return <BrandSubmissionsList />;
   return <ReportsList />;
 }
 

@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { BrandDashboard } from "@/components/brand-pages";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
@@ -53,7 +54,16 @@ import {
   Cell,
 } from "recharts";
 
-export const Route = createFileRoute("/")({ component: Dashboard });
+export const Route = createFileRoute("/")({ component: DashboardRoute });
+
+/** Branding Compliance has its own dashboard; every other workspace uses the one below. */
+function DashboardRoute() {
+  const [workspace] = useWorkspace();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (mounted && workspace === "brand_compliance") return <BrandDashboard />;
+  return <Dashboard />;
+}
 
 interface ReportRow {
   id: string;

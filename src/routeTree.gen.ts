@@ -41,6 +41,7 @@ import { Route as CcmsRepositoryRouteImport } from './routes/ccms.repository'
 import { Route as CcmsNewRouteImport } from './routes/ccms.new'
 import { Route as CcmsContractsRouteImport } from './routes/ccms.contracts'
 import { Route as CcmsContractIdRouteImport } from './routes/ccms.$contractId'
+import { Route as BrandReportIdRouteImport } from './routes/brand.$reportId'
 import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
 import { Route as AmsNewRouteImport } from './routes/ams.new'
 import { Route as AmsDriversRouteImport } from './routes/ams.drivers'
@@ -213,6 +214,11 @@ const CcmsContractIdRoute = CcmsContractIdRouteImport.update({
   path: '/ccms/$contractId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BrandReportIdRoute = BrandReportIdRouteImport.update({
+  id: '/brand/$reportId',
+  path: '/brand/$reportId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthCallbackRoute = AuthCallbackRouteImport.update({
   id: '/auth/callback',
   path: '/auth/callback',
@@ -279,6 +285,7 @@ export interface FileRoutesByFullPath {
   '/ams/drivers': typeof AmsDriversRoute
   '/ams/new': typeof AmsNewRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/brand/$reportId': typeof BrandReportIdRoute
   '/ccms/$contractId': typeof CcmsContractIdRoute
   '/ccms/contracts': typeof CcmsContractsRoute
   '/ccms/new': typeof CcmsNewRoute
@@ -324,6 +331,7 @@ export interface FileRoutesByTo {
   '/ams/drivers': typeof AmsDriversRoute
   '/ams/new': typeof AmsNewRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/brand/$reportId': typeof BrandReportIdRoute
   '/ccms/$contractId': typeof CcmsContractIdRoute
   '/ccms/contracts': typeof CcmsContractsRoute
   '/ccms/new': typeof CcmsNewRoute
@@ -370,6 +378,7 @@ export interface FileRoutesById {
   '/ams/drivers': typeof AmsDriversRoute
   '/ams/new': typeof AmsNewRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/brand/$reportId': typeof BrandReportIdRoute
   '/ccms/$contractId': typeof CcmsContractIdRoute
   '/ccms/contracts': typeof CcmsContractsRoute
   '/ccms/new': typeof CcmsNewRoute
@@ -417,6 +426,7 @@ export interface FileRouteTypes {
     | '/ams/drivers'
     | '/ams/new'
     | '/auth/callback'
+    | '/brand/$reportId'
     | '/ccms/$contractId'
     | '/ccms/contracts'
     | '/ccms/new'
@@ -462,6 +472,7 @@ export interface FileRouteTypes {
     | '/ams/drivers'
     | '/ams/new'
     | '/auth/callback'
+    | '/brand/$reportId'
     | '/ccms/$contractId'
     | '/ccms/contracts'
     | '/ccms/new'
@@ -507,6 +518,7 @@ export interface FileRouteTypes {
     | '/ams/drivers'
     | '/ams/new'
     | '/auth/callback'
+    | '/brand/$reportId'
     | '/ccms/$contractId'
     | '/ccms/contracts'
     | '/ccms/new'
@@ -553,6 +565,7 @@ export interface RootRouteChildren {
   AmsDriversRoute: typeof AmsDriversRoute
   AmsNewRoute: typeof AmsNewRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
+  BrandReportIdRoute: typeof BrandReportIdRoute
   CcmsContractIdRoute: typeof CcmsContractIdRoute
   CcmsContractsRoute: typeof CcmsContractsRoute
   CcmsNewRoute: typeof CcmsNewRoute
@@ -814,6 +827,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CcmsContractIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/brand/$reportId': {
+      id: '/brand/$reportId'
+      path: '/brand/$reportId'
+      fullPath: '/brand/$reportId'
+      preLoaderRoute: typeof BrandReportIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/auth/callback': {
       id: '/auth/callback'
       path: '/auth/callback'
@@ -916,6 +936,7 @@ const rootRouteChildren: RootRouteChildren = {
   AmsDriversRoute: AmsDriversRoute,
   AmsNewRoute: AmsNewRoute,
   AuthCallbackRoute: AuthCallbackRoute,
+  BrandReportIdRoute: BrandReportIdRoute,
   CcmsContractIdRoute: CcmsContractIdRoute,
   CcmsContractsRoute: CcmsContractsRoute,
   CcmsNewRoute: CcmsNewRoute,

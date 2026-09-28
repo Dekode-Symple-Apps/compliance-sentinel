@@ -26,11 +26,22 @@ export interface PdfHighlight {
   kind: "edit" | "critical" | "high" | "medium" | "info" | "input";
 }
 
+/** A region on a page, for breaches with no text to anchor on (a stretched
+ *  logo, an off-palette banner). box is [ymin, xmin, ymax, xmax] in 0–1000. */
+export interface PdfBox {
+  id: string;
+  page: number;
+  box: [number, number, number, number];
+  kind: PdfHighlight["kind"];
+  label?: string;
+}
+
 interface PdfViewerProps {
   /** Public URL of the converted PDF. */
   fileUrl: string | null;
   className?: string;
   highlights?: PdfHighlight[];
+  boxes?: PdfBox[];
   activeId?: string | null;
   onSelect?: (id: string) => void;
   onAnchorStatus?: (status: Record<string, boolean>) => void;
@@ -109,7 +120,11 @@ interface PageEntry {
   items: any[];
 }
 
-export function PdfViewer({ fileUrl, className, highlights, activeId, onSelect, onAnchorStatus, focusPage }: PdfViewerProps) {
+const BOX_COLORS: Record<PdfHighlight["kind"], string> = {
+  input: "168,85,247", critical: "220,38,38", high: "234,88,12", medium: "217,119,6", info: "2,132,199", edit: "5,150,105",
+};
+
+export function PdfViewer({ fileUrl, className, highlights, boxes, activeId, onSelect, onAnchorStatus, focusPage }: PdfViewerProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
@@ -342,11 +357,51 @@ export function PdfViewer({ fileUrl, className, highlights, activeId, onSelect, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pagesReady, (highlights ?? []).map((h) => `${h.id} ${h.kind} ${h.text}`).join("|")]);
 
+  // ── Pass 2b: region boxes (visual breaches) ────────────────────────────────
+  const boxKey = (boxes ?? []).map((b) => `${b.id} ${b.page} ${b.kind} ${b.box.join(",")}`).join("|");
+  useEffect(() => {
+    const pages = pagesRef.current;
+    if (!pages.length) return;
+    for (const p of pages) p.div.querySelectorAll("[data-box]").forEach((el) => el.remove());
+    for (const b of boxes ?? []) {
+      const page = pages[b.page - 1];
+      if (!page) continue;
+      const W = page.viewport.width, H = page.viewport.height;
+      const [ymin, xmin, ymax, xmax] = b.box.map((v) => Math.max(0, Math.min(1000, v)));
+      const rgb = BOX_COLORS[b.kind] ?? BOX_COLORS.medium;
+      const el = document.createElement("div");
+      el.dataset.box = b.id;
+      el.dataset.boxKind = b.kind;
+      el.style.cssText =
+        `position:absolute;left:${(xmin / 1000) * W}px;top:${(ymin / 1000) * H}px;width:${((xmax - xmin) / 1000) * W}px;height:${((ymax - ymin) / 1000) * H}px;` +
+        `border:2px solid rgba(${rgb},0.85);background:rgba(${rgb},0.06);border-radius:3px;cursor:pointer;`;
+      if (b.label) {
+        const tag = document.createElement("span");
+        tag.textContent = b.label;
+        tag.style.cssText = `position:absolute;left:-2px;top:-18px;padding:0 5px;font:600 11px/16px system-ui,sans-serif;color:#fff;background:rgba(${rgb},0.95);border-radius:3px;white-space:nowrap;`;
+        el.appendChild(tag);
+      }
+      el.addEventListener("click", () => onSelectRef.current?.(b.id));
+      page.div.appendChild(el);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pagesReady, boxKey]);
+
   // ── Active highlight: stronger fill + outline + scroll into view ───────────
   useEffect(() => {
     const pages = pagesRef.current;
     if (!pages.length) return;
     let first: HTMLElement | null = null;
+    for (const p of pages) {
+      p.div.querySelectorAll<HTMLElement>("[data-box]").forEach((el) => {
+        const rgb = BOX_COLORS[(el.dataset.boxKind ?? "medium") as PdfHighlight["kind"]] ?? BOX_COLORS.medium;
+        const on = !!activeId && el.dataset.box === activeId;
+        el.style.borderWidth = on ? "3px" : "2px";
+        el.style.background = `rgba(${rgb},${on ? 0.16 : 0.06})`;
+        el.style.boxShadow = on ? `0 0 0 4px rgba(${rgb},0.25)` : "none";
+        if (on && !first) first = el;
+      });
+    }
     for (const p of pages) {
       p.div.querySelectorAll<HTMLElement>("[data-hl]").forEach((el) => {
         const kind = (el.dataset.hlKind ?? "medium") as PdfHighlight["kind"];
@@ -365,7 +420,7 @@ export function PdfViewer({ fileUrl, className, highlights, activeId, onSelect, 
     // re-scroll the PDF back to the selected finding on every parent render —
     // e.g. mid-keystroke while typing a decision input.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId, pagesReady, (highlights ?? []).map((h) => `${h.id} ${h.kind} ${h.text}`).join("|")]);
+  }, [activeId, pagesReady, boxKey, (highlights ?? []).map((h) => `${h.id} ${h.kind} ${h.text}`).join("|")]);
 
   // ── Page-only jump: no quote to highlight, just a page reference ──────────
   // Runs once per (fileUrl, focusPage) pair — pages render progressively, so

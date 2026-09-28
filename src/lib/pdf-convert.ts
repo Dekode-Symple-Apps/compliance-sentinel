@@ -53,3 +53,8 @@ export async function convertDocxToPdf(fileUrl: string): Promise<Buffer> {
   if (!pdfResp.ok) throw new Error(`Could not download the converted PDF (${pdfResp.status}).`);
   return Buffer.from(await pdfResp.arrayBuffer());
 }
+
+/** Any Office or image file CloudConvert reads (pptx, docx, xlsx…) → PDF bytes.
+ *  The job above imports by URL and lets CloudConvert detect the input type,
+ *  so it is not docx-specific; this name says so for new callers. */
+export const convertToPdf = convertDocxToPdf;

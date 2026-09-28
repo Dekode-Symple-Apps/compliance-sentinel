@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-export type WorkspaceId = "rmit" | "fatf" | "forms" | "simplify" | "simplify_v2" | "layout" | "policy" | "credit_risk" | "credit_risk_demo" | "mbrs" | "rspo";
+export type WorkspaceId = "rmit" | "fatf" | "forms" | "simplify" | "simplify_v2" | "layout" | "policy" | "credit_risk" | "credit_risk_demo" | "mbrs" | "rspo" | "brand_compliance";
 
 export const WORKSPACES: Record<WorkspaceId, {
   id: WorkspaceId;
@@ -97,6 +97,14 @@ export const WORKSPACES: Record<WorkspaceId, {
     tagline: "SCC licence review · certificate, audit report & PRISMA cross-check",
     color: "text-lime-700",
     bgColor: "bg-lime-100",
+  },
+  brand_compliance: {
+    id: "brand_compliance",
+    name: "Branding Compliance",
+    short: "Branding",
+    tagline: "Agency materials checked against the state brand guideline",
+    color: "text-red-700",
+    bgColor: "bg-yellow-100",
   },
 };
 
