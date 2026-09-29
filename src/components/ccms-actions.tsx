@@ -63,8 +63,8 @@ export function RememberedTextarea({ field, value, onChange, placeholder }: { fi
 function Chip({ value, onPick }: { value: string; onPick: (v: string) => void }) {
   return (
     <button type="button" onClick={() => onPick(value)} title="Use the last value"
-      className="mt-1 block max-w-full truncate rounded border border-dashed border-gray-300 px-1.5 py-0.5 text-left text-xs text-gray-600 hover:border-gray-500 hover:text-gray-900">
-      ↺ {value}
+      className="mt-1 block w-full min-w-0 rounded border border-dashed border-gray-300 px-1.5 py-0.5 text-left text-xs text-gray-600 hover:border-gray-500 hover:text-gray-900">
+      <span className="line-clamp-2 break-words">↺ Last used: {value.replace(/\s*\n\s*/g, " ")}</span>
     </button>
   );
 }
