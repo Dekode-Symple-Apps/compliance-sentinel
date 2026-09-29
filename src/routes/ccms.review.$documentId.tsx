@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { DocViewer, type DocHighlight } from "@/components/doc-viewer";
 import { PdfViewer } from "@/components/pdf-viewer";
 import {
-  addCcmsComment, compareCcmsAward, decideCcmsDifference, exportCcmsDocumentWithComments, getCcmsDocument, recordCcmsReview, reviewCcmsDocument, setCcmsCommentStatus, draftCcmsReturnNote } from "@/lib/ccms.functions";
+  addCcmsComment, compareCcmsAward, decideCcmsComment, decideCcmsDifference, exportCcmsDocumentWithComments, getCcmsDocument, recordCcmsReview, reviewCcmsDocument, setCcmsCommentStatus, draftCcmsReturnNote } from "@/lib/ccms.functions";
 import { CcmsHeader, StatusBadge, OutcomeText, CARD, useCcmsRole, SeverityIcon, CostChip, AiDraftButton } from "@/components/ccms-widgets";
 import { friendlyError } from "@/components/ccms-widgets";
 import { AI_ROLE, CCMS_ROLES, COMPARISON_AREAS, CONTRACT_TYPES, DECISION_LABEL, DEMO_SINGLE_USER, displayName, flowOf, stageTitle, roleLabel, templateById, type CcmsRole, type Decision, type Stage } from "@/lib/ccms";
@@ -17,7 +17,7 @@ import { CommentBody } from "@/components/ccms-execution";
 import { RememberedTextarea } from "@/components/ccms-actions";
 import { remember } from "@/lib/ccms-prefill";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ArrowLeft, Loader2, MessageSquarePlus, RefreshCw, Check, RotateCcw, Lock, Quote, Download, Bot } from "lucide-react";
+import { ArrowLeft, Loader2, MessageSquarePlus, RefreshCw, Check, RotateCcw, Lock, Quote, Download, Bot, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/ccms/review/$documentId")({
@@ -80,6 +80,10 @@ function ReviewScreen() {
   const comments: any[] = data!.comments.filter((x: any) => !x.document_id || x.document_id === doc.id);
   const threads = comments.filter((x) => !x.parent_id);
   const openCount = threads.filter((x) => x.status === "open").length;
+  // Accept / reject decisions on this version's review items — the accepted review.
+  const decisions: Record<string, any> = doc.ai_review?.decisions ?? {};
+  const acceptedCount = threads.filter((t) => decisions[t.id]?.decision === "accepted").length;
+  const pendingCount = threads.filter((t) => !decisions[t.id]).length;
   const devRows = (deviation?.clauses ?? []) as any[];
   const devCount = devRows.filter((c) => c.status !== "same").length;
   const loaMissing = (loa?.items ?? []).filter((i: any) => i.status !== "present").length;
@@ -113,12 +117,12 @@ function ReviewScreen() {
   async function download() {
     setExporting(true);
     try {
-      const r: any = await exportFn({ data: { document_id: doc.id, include_resolved: true } });
+      const r: any = await exportFn({ data: { document_id: doc.id, mode: "accepted" } });
       const bytes = Uint8Array.from(atob(r.base64), (ch) => ch.charCodeAt(0));
       const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }));
       const a = document.createElement("a"); a.href = url; a.download = r.fileName; a.click();
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
-      toast.success(`${r.comments} comment${r.comments === 1 ? "" : "s"} added${r.loose + r.unplaced ? ` — ${r.loose + r.unplaced} attached to the nearest paragraph` : ""}`);
+      toast.success(`Accepted review downloaded: ${r.comments} item${r.comments === 1 ? "" : "s"}${r.loose + r.unplaced ? ` (${r.loose + r.unplaced} attached to the nearest paragraph)` : ""}`);
     } catch (e: any) { toast.error(friendlyError(e)); } finally { setExporting(false); }
   }
 
@@ -134,7 +138,7 @@ function ReviewScreen() {
           <div className="ml-auto flex items-center gap-2">
             <Button variant="outline" size="sm" onMouseDown={(e) => e.preventDefault()} onClick={commentOnSelection} className="gap-1.5"><Quote className="size-4" /> Comment on selected text</Button>
             {isDocx
-              ? <Button variant="outline" size="sm" onClick={download} disabled={exporting} className="gap-1.5">{exporting ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />} Download with comments</Button>
+              ? <Button variant="outline" size="sm" onClick={download} disabled={exporting} className="gap-1.5">{exporting ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />} Download Accepted Review{acceptedCount ? ` (${acceptedCount})` : ""}</Button>
               : <Button asChild variant="outline" size="sm" className="gap-1.5"><a href={doc.file_url} target="_blank" rel="noreferrer"><Download className="size-4" /> Download PDF</a></Button>}
             <Button variant="outline" size="sm" onClick={rerun} disabled={running} className="gap-1.5">{running ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />} {review ? "Re-run AI review" : "Run AI review"}</Button>
           </div>
@@ -155,7 +159,7 @@ function ReviewScreen() {
                 ...(isClientAward ? [["tender", `Tender ${(doc.comparison?.items ?? []).filter((i: any) => i.status !== "matches").length}`]] : []),
                 ["findings", `Findings ${review?.findings?.length ?? 0}`],
                 ...(isClientAward ? [] : [["template", tpl ? `Template ${devCount}` : "Template"]]),
-                ...(loa ? [["loa", `LoA items ${loaMissing}`]] : []), ["comments", `Comments ${openCount}`]] as [Tab, string][]).map(([k, l]) => (
+                ...(loa ? [["loa", `LoA items ${loaMissing}`]] : []), ["comments", `Action Items ${pendingCount}`]] as [Tab, string][]).map(([k, l]) => (
                 <button key={k} onClick={() => setTab(k)} className={cn("flex-1 px-3 py-2.5 text-sm", tab === k ? "border-b-2 border-gray-900 font-semibold text-gray-900" : "text-gray-600")}>{l}</button>
               ))}
             </div>
@@ -238,7 +242,7 @@ function ReviewScreen() {
               )}
 
               {tab === "comments" && (
-                <Comments contractId={contract.id} documentId={doc.id} threads={threads} all={comments} composer={composer} setComposer={setComposer} onDone={refresh}
+                <Comments contractId={contract.id} documentId={doc.id} threads={threads} all={comments} decisions={decisions} composer={composer} setComposer={setComposer} onDone={refresh} onDownload={isDocx ? download : undefined} exporting={exporting}
                   focusThread={focusThread} onLocate={(t) => { const h = threadHighlight(t); if (h) focus(h); }} />
               )}
             </div>
@@ -257,95 +261,135 @@ function CommentLink({ n, onClick }: { n: number; onClick: () => void }) {
   );
 }
 
-function Comments({ contractId, documentId, threads, all, composer, setComposer, onDone, focusThread, onLocate }: {
-  contractId: string; documentId: string; threads: any[]; all: any[]; composer: Anchor | null; setComposer: (a: Anchor | null) => void; onDone: () => void;
-  focusThread: string | null; onLocate: (t: any) => void;
+type ItemDecision = "accepted" | "rejected";
+/** Review items: each AI suggestion or reviewer comment is accepted or
+ *  rejected. The accepted ones are the review that goes back to the
+ *  counterparty — "Download Accepted Review" exports only those. */
+function Comments({ contractId, documentId, threads, all, decisions, composer, setComposer, onDone, focusThread, onLocate, onDownload, exporting }: {
+  contractId: string; documentId: string; threads: any[]; all: any[]; decisions: Record<string, any>; composer: Anchor | null; setComposer: (a: Anchor | null) => void; onDone: () => void;
+  focusThread: string | null; onLocate: (t: any) => void; onDownload?: () => void; exporting?: boolean;
 }) {
   const [role] = useCcmsRole();
   const addFn = useServerFn(addCcmsComment);
-  const statusFn = useServerFn(setCcmsCommentStatus);
+  const decideFn = useServerFn(decideCcmsComment);
   const [body, setBody] = useState("");
-  const [reply, setReply] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState(false);
-  const [show, setShow] = useState<"open" | "all">("open");
+  const [note, setNote] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const [show, setShow] = useState<"pending" | ItemDecision | "all">("pending");
   const [who, setWho] = useState<"everyone" | "ai" | "people">("everyone");
-  // Bring a thread opened from a finding or a highlight into view.
+  const [adding, setAdding] = useState(false);
+  const stateOf = (t: any): "pending" | ItemDecision => decisions[t.id]?.decision ?? "pending";
+  const count = (k: "pending" | ItemDecision) => threads.filter((t) => stateOf(t) === k).length;
+  // Bring an item opened from a finding or a highlight into view.
   useEffect(() => {
     if (!focusThread) return;
     const t = threads.find((x) => x.id === focusThread);
-    if (t?.status === "resolved") setShow("all");
+    if (t && stateOf(t) !== "pending") setShow("all");
     requestAnimationFrame(() => document.getElementById(`thread-${focusThread}`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
   }, [focusThread]);
+  useEffect(() => { if (composer) setAdding(true); }, [composer]);
 
-  async function post(parent?: string) {
-    const text = parent ? reply[parent] : body;
-    if (!text?.trim()) return;
-    setBusy(true);
+  async function post() {
+    if (!body.trim()) return;
+    setBusy("new");
     try {
-      await addFn({ data: { contract_id: contractId, document_id: documentId, parent_id: parent ?? null, body: text.trim(), acting_role: role,
-        ...(parent ? { anchor_type: "general" } : { anchor_type: composer?.anchor_type ?? "general", anchor_ref: composer?.anchor_ref ?? null, quote: composer?.quote ?? null }) } });
-      if (parent) setReply((r) => ({ ...r, [parent]: "" })); else { setBody(""); setComposer(null); }
-      onDone();
-    } catch (e: any) { toast.error(friendlyError(e)); } finally { setBusy(false); }
+      await addFn({ data: { contract_id: contractId, document_id: documentId, parent_id: null, body: body.trim(), acting_role: role, anchor_type: composer?.anchor_type ?? "general", anchor_ref: composer?.anchor_ref ?? null, quote: composer?.quote ?? null } });
+      setBody(""); setComposer(null); setAdding(false); onDone();
+    } catch (e: any) { toast.error(friendlyError(e)); } finally { setBusy(null); }
   }
-  async function setStatus(id: string, status: "open" | "resolved") {
-    try { await statusFn({ data: { comment_id: id, status, acting_role: role } }); onDone(); } catch (e: any) { toast.error(friendlyError(e)); }
+  async function decide(t: any, decision: ItemDecision | "pending") {
+    setBusy(t.id);
+    try {
+      await decideFn({ data: { comment_id: t.id, decision, note: note[t.id] ?? null, acting_role: role } });
+      toast.success(decision === "accepted" ? "Accepted — goes into the review" : decision === "rejected" ? "Rejected — left out of the review" : "Back to pending");
+      setNote((n) => ({ ...n, [t.id]: "" })); onDone();
+    } catch (e: any) { toast.error(friendlyError(e)); } finally { setBusy(null); }
   }
 
-  const shown = threads.filter((t) => (show === "all" || t.status === "open") &&
-    (who === "everyone" || (who === "ai") === (t.acting_role === AI_ROLE)));
+  const shown = threads.filter((t) => (show === "all" || stateOf(t) === show) && (who === "everyone" || (who === "ai") === (t.acting_role === AI_ROLE)));
+  const accepted = count("accepted");
   return (
     <div className="space-y-3">
-      <div className={CARD + " p-3 space-y-2"}>
-        <div className="text-sm font-semibold text-gray-900">New comment as {CCMS_ROLES[role]}</div>
-        {composer?.anchor_ref && <div className="text-sm text-gray-700">On: {composer.anchor_ref}</div>}
-        {composer?.quote && <blockquote className="border-l-2 border-gray-300 pl-2 text-sm text-gray-600 line-clamp-3">{composer.quote}</blockquote>}
-        <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="What needs to change, or what needs confirming" className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm min-h-20" />
-        <div className="flex gap-2">
-          <Button size="sm" disabled={busy || !body.trim()} onClick={() => post()}>Post</Button>
-          {composer && <Button size="sm" variant="outline" onClick={() => setComposer(null)}>Clear anchor</Button>}
+      <div className={CARD + " p-3"}>
+        <div className="flex items-center gap-3 text-sm">
+          <div className="flex-1">
+            <div className="font-semibold text-gray-900">Accepted review</div>
+            <div className="text-gray-600"><span className="text-emerald-700 font-medium">{accepted} accepted</span> · {count("rejected")} rejected · <span className={count("pending") ? "text-amber-700 font-medium" : ""}>{count("pending")} to decide</span></div>
+          </div>
+          {onDownload && <Button size="sm" disabled={!accepted || exporting} onClick={onDownload} className="gap-1.5">{exporting ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />} Download</Button>}
         </div>
+        <p className="mt-1.5 text-xs text-gray-500">Only accepted items go into the Word file sent to the counterparty.</p>
       </div>
-      <div className="flex gap-2">
-        {(["open", "all"] as const).map((s) => <button key={s} onClick={() => setShow(s)} className={cn("rounded-md border px-2.5 py-1 text-sm", show === s ? "border-gray-900 font-semibold" : "border-gray-200 text-gray-600")}>{s === "open" ? "Open" : "All"}</button>)}
+
+      {adding ? (
+        <div className={CARD + " p-3 space-y-2"}>
+          <div className="text-sm font-semibold text-gray-900">New item as {CCMS_ROLES[role]}</div>
+          {composer?.anchor_ref && <div className="text-sm text-gray-700">On: {composer.anchor_ref}</div>}
+          {composer?.quote && <blockquote className="border-l-2 border-gray-300 pl-2 text-sm text-gray-600 line-clamp-3">{composer.quote}</blockquote>}
+          <textarea autoFocus value={body} onChange={(e) => setBody(e.target.value)} placeholder="What needs to change, or what needs confirming" className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm min-h-20" />
+          <div className="flex gap-2">
+            <Button size="sm" disabled={busy === "new" || !body.trim()} onClick={post}>Add Item</Button>
+            <Button size="sm" variant="outline" onClick={() => { setAdding(false); setComposer(null); setBody(""); }}>Cancel</Button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" onClick={() => setAdding(true)} className="w-full rounded-md border border-dashed border-gray-300 px-3 py-2 text-left text-sm text-gray-600 hover:border-gray-500">+ Add your own item</button>
+      )}
+
+      <div className="flex flex-wrap gap-1.5">
+        {([["pending", "To decide"], ["accepted", "Accepted"], ["rejected", "Rejected"], ["all", "All"]] as const).map(([k, l]) => (
+          <button key={k} onClick={() => setShow(k)} className={cn("rounded-md border px-2.5 py-1 text-sm", show === k ? "border-gray-900 font-semibold" : "border-gray-200 text-gray-600")}>
+            {l}{k !== "all" && <span className="ml-1 text-gray-500">{count(k)}</span>}
+          </button>
+        ))}
         <select value={who} onChange={(e) => setWho(e.target.value as any)} className="ml-auto rounded-md border border-gray-200 bg-white px-2 py-1 text-sm">
           <option value="everyone">Everyone</option><option value="ai">AI Reviewer</option><option value="people">Reviewers</option>
         </select>
       </div>
-      {shown.length === 0 && <p className="text-sm text-gray-500">No {show === "open" ? "open " : ""}threads.</p>}
-      {shown.map((t) => (
-        <div key={t.id} id={`thread-${t.id}`} className={cn(CARD, "p-3", t.status === "resolved" && "opacity-75", focusThread === t.id && "ring-2 ring-gray-900")}>
-          <div className="flex items-center gap-2 text-sm">
-            {t.acting_role === AI_ROLE && <Bot className="size-4 text-gray-600" />}
-            <span className="font-semibold text-gray-900">{roleLabel(t.acting_role)}</span>
-            <span className="text-gray-500">{t.acting_role === AI_ROLE ? "" : `${displayName(t.author_name)} · `}{format(new Date(t.created_at), "d MMM, HH:mm")}</span>
-            <span className={cn("ml-auto text-sm", t.status === "open" ? "text-amber-700 font-semibold" : "text-emerald-700")}>{t.status === "open" ? "Open" : "Resolved"}</span>
-          </div>
-          {t.anchor_ref && <div className="mt-1 text-sm text-gray-600">On: {t.anchor_ref}</div>}
-          {t.quote && (
-            <button onClick={() => onLocate(t)} className="mt-1 block w-full text-left border-l-2 border-gray-300 pl-2 text-sm text-gray-600 hover:border-gray-900" title="Show in the document">
-              <span className="line-clamp-2">{t.quote}</span>
-            </button>
-          )}
-          <div className="mt-1.5"><CommentBody body={t.body} severity={t.severity} /></div>
-          {all.filter((r) => r.parent_id === t.id).map((r) => (
-            <div key={r.id} className="mt-2 ml-3 border-l border-gray-200 pl-3">
-              <div className="text-sm"><span className="font-semibold text-gray-900">{roleLabel(r.acting_role)}</span> <span className="text-gray-500">{displayName(r.author_name)} · {format(new Date(r.created_at), "d MMM, HH:mm")}</span></div>
-              <p className="text-sm text-gray-900 whitespace-pre-wrap">{r.body}</p>
+      {shown.length === 0 && <p className="text-sm text-gray-500">{show === "pending" ? "Nothing left to decide." : "None here."}</p>}
+      {shown.map((t) => {
+        const st = stateOf(t); const d = decisions[t.id];
+        return (
+          <div key={t.id} id={`thread-${t.id}`} className={cn(CARD, "p-3", st === "rejected" && "opacity-70", focusThread === t.id && "ring-2 ring-gray-900")}>
+            <div className="flex items-center gap-2 text-sm">
+              {t.acting_role === AI_ROLE && <Bot className="size-4 text-gray-600" />}
+              <span className="font-semibold text-gray-900">{t.acting_role === AI_ROLE ? "AI suggestion" : roleLabel(t.acting_role)}</span>
+              <span className="text-gray-500">{t.acting_role === AI_ROLE ? "" : `${displayName(t.author_name)} · `}{format(new Date(t.created_at), "d MMM, HH:mm")}</span>
+              <span className={cn("ml-auto rounded-full border px-2 py-0.5 text-xs font-semibold",
+                st === "accepted" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : st === "rejected" ? "border-gray-200 bg-gray-50 text-gray-600" : "border-amber-200 bg-amber-50 text-amber-800")}>
+                {st === "accepted" ? "Accepted" : st === "rejected" ? "Rejected" : "To decide"}
+              </span>
             </div>
-          ))}
-          {t.status === "resolved" && <div className="mt-1 text-sm text-gray-500">Resolved by {displayName(t.resolved_by_name)}{t.resolved_at ? ` · ${format(new Date(t.resolved_at), "d MMM")}` : ""}</div>}
-          <div className="mt-2 flex gap-2">
-            {t.status === "open" && (
-              <>
-                <input value={reply[t.id] ?? ""} onChange={(e) => setReply((r) => ({ ...r, [t.id]: e.target.value }))} onKeyDown={(e) => e.key === "Enter" && post(t.id)} placeholder="Reply" className="flex-1 rounded-md border border-gray-300 px-2 py-1 text-sm" />
-                <Button size="sm" variant="outline" className="gap-1" onClick={() => setStatus(t.id, "resolved")}><Check className="size-4" /> Resolve</Button>
-              </>
+            {t.anchor_ref && <div className="mt-1 text-sm text-gray-600">On: {t.anchor_ref.replace(/^Finding:\s*/, "")}</div>}
+            {t.quote && (
+              <button onClick={() => onLocate(t)} className="mt-1 block w-full text-left border-l-2 border-gray-300 pl-2 text-sm text-gray-600 hover:border-gray-900" title="Show in the document">
+                <span className="line-clamp-2">{t.quote}</span>
+              </button>
             )}
-            {t.status === "resolved" && <Button size="sm" variant="outline" className="gap-1" onClick={() => setStatus(t.id, "open")}><RotateCcw className="size-4" /> Reopen</Button>}
+            <div className="mt-1.5"><CommentBody body={t.body} severity={t.severity} /></div>
+            {all.filter((r) => r.parent_id === t.id).map((r) => (
+              <div key={r.id} className="mt-2 ml-3 border-l border-gray-200 pl-3">
+                <div className="text-sm"><span className="font-semibold text-gray-900">{roleLabel(r.acting_role)}</span> <span className="text-gray-500">{displayName(r.author_name)} · {format(new Date(r.created_at), "d MMM, HH:mm")}</span></div>
+                <p className="text-sm text-gray-900 whitespace-pre-wrap">{r.body}</p>
+              </div>
+            ))}
+            {st === "pending" ? (
+              <div className="mt-2 space-y-2">
+                <input value={note[t.id] ?? ""} onChange={(e) => setNote((n) => ({ ...n, [t.id]: e.target.value }))} placeholder="Note (optional) — added to the comment if accepted" className="w-full rounded-md border border-gray-300 px-2 py-1 text-sm" />
+                <div className="flex gap-2">
+                  <Button size="sm" disabled={busy === t.id} onClick={() => decide(t, "accepted")} className="gap-1 bg-emerald-700 hover:bg-emerald-800">{busy === t.id ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} Accept</Button>
+                  <Button size="sm" variant="outline" disabled={busy === t.id} onClick={() => decide(t, "rejected")} className="gap-1"><X className="size-4" /> Reject</Button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-2 flex items-center gap-2 text-sm text-gray-600">
+                <span className="flex-1">{st === "accepted" ? "Accepted" : "Rejected"} by {displayName(d?.by)}{d?.at ? ` · ${format(new Date(d.at), "d MMM, HH:mm")}` : ""}{d?.note ? ` — ${d.note}` : ""}</span>
+                <Button size="sm" variant="ghost" disabled={busy === t.id} onClick={() => decide(t, "pending")} className="gap-1 text-gray-600"><RotateCcw className="size-3.5" /> Undo</Button>
+              </div>
+            )}
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -411,7 +455,7 @@ function OutcomeDialog({ stage, contract, lite, openThreads, onClose, onDone }: 
           <DialogDescription>{contract.reference_number} · {stage.reason}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
-          {mineOpen > 0 && <p className="flex gap-1.5 text-sm text-amber-800"><SeverityIcon severity="caution" className="mt-0.5" /> {mineOpen} open comment thread{mineOpen === 1 ? "" : "s"} on this version. {lite ? "Approval records them as noted." : "\"Cleared\" requires them resolved."}</p>}
+          {mineOpen > 0 && <p className="flex gap-1.5 text-sm text-amber-800"><SeverityIcon severity="caution" className="mt-0.5" /> {mineOpen} action item{mineOpen === 1 ? "" : "s"} still to accept or reject on this version. {lite ? "Approval records them as noted." : "\"Cleared\" needs each one decided."}</p>}
           {!lite && (
             <div className="flex flex-wrap gap-3 text-sm">
               {([["cleared", "Cleared"], ["cleared_with_comments", "Cleared with Comments"], ["not_cleared", "Not Cleared · Return"]] as const).map(([k, l]) => (

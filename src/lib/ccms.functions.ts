@@ -537,6 +537,7 @@ export const reviewCcmsDocument = createServerFn({ method: "POST" })
         runKeyTerms(doc.file_name, text, pdfBase64).catch(() => null),
       ]);
       if (kt?.out) (ai_review as any).terms = draftTerms(kt.out, contract);
+      if (doc.ai_review?.decisions) (ai_review as any).decisions = doc.ai_review.decisions; // decisions survive a re-run
       const tpl = templateById(contract.template_id);
       await sb.from("ccms_documents").update({ ai_review, deviation, loa_check, ai_review_status: "done" }).eq("id", doc.id);
       const threads = await syncAiThreads(sb, contract.id, doc.id, ai_review.findings);
@@ -653,6 +654,34 @@ export const setCcmsCommentStatus = createServerFn({ method: "POST" })
 // ---------------------------------------------------------------------------
 // Reviewer outcomes and approvals
 // ---------------------------------------------------------------------------
+
+/** Accept or reject a review item (an AI suggestion or a reviewer's comment).
+ *  The decisions are the accepted review of that document version — kept with
+ *  its review, and what "Download Accepted Review" exports. Deciding closes the
+ *  item; "pending" reopens it. */
+export const decideCcmsComment = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({ comment_id: z.string().uuid(), decision: z.enum(["accepted", "rejected", "pending"]), note: z.string().max(1000).optional().nullable(), acting_role: roleSchema }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await ccms(context);
+    const { data: c } = await sb.from("ccms_comments").select("*").eq("id", data.comment_id).single();
+    if (!c || c.parent_id) throw new Error("Item not found.");
+    const contract = await loadContract(sb, c.contract_id, tenantId);
+    if (!c.document_id) throw new Error("This comment is not on a document.");
+    const { data: doc } = await sb.from("ccms_documents").select("id,ai_review,version,file_name").eq("id", c.document_id).single();
+    const now = new Date().toISOString();
+    const decisions = { ...(doc?.ai_review?.decisions ?? {}) };
+    if (data.decision === "pending") delete decisions[c.id];
+    else decisions[c.id] = { decision: data.decision, by: userName, role: data.acting_role, at: now, note: data.note?.trim() || null };
+    await sb.from("ccms_documents").update({ ai_review: { ...(doc?.ai_review ?? {}), decisions } }).eq("id", c.document_id);
+    await sb.from("ccms_comments").update(data.decision === "pending"
+      ? { status: "open", resolved_by_name: null, resolved_at: null }
+      : { status: "resolved", resolved_by_name: userName, resolved_at: now }).eq("id", c.id);
+    const what = (c.anchor_ref ?? "").replace(/^Finding:\s*/, "") || String(c.body).slice(0, 60);
+    await logEvent(sb, { contract_id: contract.id, event_type: "review_item", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
+      detail: `${data.decision === "pending" ? "Reopened" : data.decision === "accepted" ? "Accepted" : "Rejected"} review item on v${doc?.version ?? "?"}: ${what}${data.note?.trim() ? ` — ${data.note.trim()}` : ""}.` });
+    return { ok: true };
+  });
 
 export const recordCcmsReview = createServerFn({ method: "POST" })
   .middleware([requireCcms])
@@ -777,7 +806,7 @@ const wordDate = (iso: string) =>
 
 export const exportCcmsDocumentWithComments = createServerFn({ method: "POST" })
   .middleware([requireCcms])
-  .inputValidator(z.object({ document_id: z.string().uuid(), include_resolved: z.boolean().default(true) }))
+  .inputValidator(z.object({ document_id: z.string().uuid(), include_resolved: z.boolean().default(true), mode: z.enum(["accepted", "all"]).default("accepted") }))
   .handler(async ({ data, context }) => {
     const { sb, tenantId, userId, userName } = await ccms(context);
     const { data: doc } = await sb.from("ccms_documents").select("*").eq("id", data.document_id).single();
@@ -790,28 +819,34 @@ export const exportCcmsDocumentWithComments = createServerFn({ method: "POST" })
       throw new Error("Download with comments is available for Word (.docx) drafts. For a PDF, use the comment list on the review screen.");
     }
     const { data: all } = await sb.from("ccms_comments").select("*").eq("document_id", doc.id).order("created_at");
-    const threads = (all ?? []).filter((c: any) => !c.parent_id && (data.include_resolved || c.status === "open"));
+    // The accepted review: only the items accepted on this version, unless everything is asked for.
+    const decisions: Record<string, any> = doc.ai_review?.decisions ?? {};
+    const threads = (all ?? []).filter((c: any) => !c.parent_id && (data.mode === "accepted" ? decisions[c.id]?.decision === "accepted" : data.include_resolved || c.status === "open"));
+    if (data.mode === "accepted" && !threads.length) throw new Error("Nothing accepted yet — accept the items to send, then download.");
     const stamp = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kuala_Lumpur" });
     const comments: AnchoredComment[] = threads.map((t: any) => {
       const replies = (all ?? []).filter((r: any) => r.parent_id === t.id)
         .map((r: any) => `— ${roleLabel(r.acting_role)} (${displayName(r.author_name)}, ${stamp(r.created_at)}): ${r.body}`);
       const heading = t.anchor_ref ? `${t.anchor_ref}\n` : "";
-      const footer = t.status === "resolved" ? `\n[Resolved by ${displayName(t.resolved_by_name)}${t.resolved_at ? `, ${stamp(t.resolved_at)}` : ""}]` : "";
+      const d = decisions[t.id];
+      const footer = data.mode === "accepted" && d
+        ? `${d.note ? `\nNote: ${d.note}` : ""}\n[Accepted by ${displayName(d.by)}, ${stamp(d.at)}]`
+        : t.status === "resolved" ? `\n[Resolved by ${displayName(t.resolved_by_name)}${t.resolved_at ? `, ${stamp(t.resolved_at)}` : ""}]` : "";
       return {
         quote: t.quote ?? "",
         fallback: (t.anchor_ref ?? "").replace(/^(Finding|Clause|Added clause):?\s*/, "").split(/[—:]/)[0].trim(),
         text: heading + t.body + (replies.length ? `\n${replies.join("\n")}` : "") + footer,
         author: t.acting_role === AI_ROLE ? "AI Reviewer" : `${roleLabel(t.acting_role)} — ${displayName(t.author_name)}`,
         dateIso: wordDate(t.created_at),
-        done: t.status === "resolved",
+        done: data.mode === "accepted" ? false : t.status === "resolved", // accepted items go out as open comments to act on
       };
     });
     const out = addAnchoredCommentsToDocx(buffer, comments);
     await logEvent(sb, { contract_id: contract.id, event_type: "export", actor_id: userId, actor_name: userName,
-      detail: `Downloaded ${doc.file_name} v${doc.version} with ${comments.length} comment(s).` });
+      detail: data.mode === "accepted" ? `Downloaded the accepted review of v${doc.version}: ${comments.length} item(s).` : `Downloaded ${doc.file_name} v${doc.version} with ${comments.length} comment(s).` });
     const base = doc.file_name.replace(/\.docx$/i, "");
     return {
-      fileName: `${base} — ${contract.reference_number} review comments.docx`,
+      fileName: `${base} — ${contract.reference_number} ${data.mode === "accepted" ? "accepted review" : "review comments"}.docx`,
       base64: out.buffer.toString("base64"),
       comments: comments.length, exact: out.exact, loose: out.loose, unplaced: out.unplaced,
     };

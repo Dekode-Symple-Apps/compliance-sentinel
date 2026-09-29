@@ -72,7 +72,7 @@ function ContractDetail() {
   type Node = { key: string; label: string; badge?: React.ReactNode; show?: boolean; children?: Node[] };
   const tree: Node[] = [
     { key: "documents", label: "Documents", badge: documents.length },
-    { key: "comments", label: "Comments", badge: openNow ? <span className="text-amber-700">{openNow} open</span> : onCurrent.length || undefined },
+    { key: "comments", label: "Action Items", badge: openNow ? <span className="text-amber-700">{openNow} to decide</span> : onCurrent.length || undefined },
     { key: "review", label: "Review & Approval", badge: blocking.length ? <SeverityIcon severity="red_flag" className="size-3.5" /> : flags.length ? <SeverityIcon severity="caution" className="size-3.5" /> : undefined },
     { key: "details", label: "Details" },
     { key: "obligations", label: "Obligations", badge: obl.length ? openOf() || undefined : undefined, children: (Object.keys(OBLIGATION_CATEGORIES) as ObligationCategory[]).map((k) => ({
@@ -159,7 +159,7 @@ function ContractDetail() {
               )}
 
               {cur === "comments" && (
-                <Panel title="Comments" sub={openNow ? `${openNow} open on the current version` : `${onCurrent.length} on the current version`}>
+                <Panel title="Action Items" sub={openNow ? `${openNow} to accept or reject on the current version` : `${onCurrent.length} on the current version, all decided`}>
 
             {threads.length === 0 ? <p className="p-4 text-sm text-gray-500">No comments yet.</p> : (
               <>
