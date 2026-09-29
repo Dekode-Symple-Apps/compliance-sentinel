@@ -104,7 +104,7 @@ function ContractDetail() {
             <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50/60 px-4 py-3 text-sm">
               <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-emerald-600 text-xs text-white">✓</span>
               <div><div className="font-semibold text-emerald-900">Cleared and approved straight-through</div>
-                <div className="text-emerald-800">{(route[0]?.note ?? "").replace(/^Straight-through:\s*/, "")} No one needed to review or approve it; it goes straight to signing.</div></div>
+                <div className="text-emerald-800">{(route[0]?.note ?? "").replace(/^Straight-through:\s*/, "").replace(/;\s*risk \d+/, "; low risk")} No one needed to review or approve it; it goes straight to signing.</div></div>
             </div>
           )}
 

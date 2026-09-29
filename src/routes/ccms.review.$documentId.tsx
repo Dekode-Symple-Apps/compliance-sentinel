@@ -134,7 +134,7 @@ function ReviewScreen() {
           <Link to="/ccms/$contractId" params={{ contractId: contract.id }} className="inline-flex items-center gap-1 text-sm text-gray-600 hover:underline"><ArrowLeft className="size-4" /> {contract.reference_number}</Link>
           <StatusBadge status={contract.status} contract={contract} />
           <CostChip log={contract.cost_log ?? []} />
-          {review && <span className="text-sm text-gray-700">Risk <b>{review.riskScore}</b> · {review.findings?.length ?? 0} findings{tpl ? ` · ${devCount} deviation${devCount === 1 ? "" : "s"}` : " · no template"}{loa ? ` · ${loaMissing} LoA item${loaMissing === 1 ? "" : "s"} missing` : ""}</span>}
+          {review && <span className="text-sm text-gray-700"><b>{review.findings?.length ?? 0}</b> finding{(review.findings?.length ?? 0) === 1 ? "" : "s"}{tpl ? ` · ${devCount} deviation${devCount === 1 ? "" : "s"}` : " · no template"}{loa ? ` · ${loaMissing} LoA item${loaMissing === 1 ? "" : "s"} missing` : ""}</span>}
           <div className="ml-auto flex items-center gap-2">
             <Button variant="outline" size="sm" onMouseDown={(e) => e.preventDefault()} onClick={commentOnSelection} className="gap-1.5"><Quote className="size-4" /> Comment on selected text</Button>
             {isDocx

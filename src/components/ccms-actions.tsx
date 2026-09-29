@@ -240,7 +240,7 @@ function UploadForm({ a, c, close, refresh, done }: FormProps) {
       <div className="space-y-3">
         <div className="flex items-center gap-2 rounded-md border border-gray-200 p-3 text-sm">
           <SeverityIcon severity={result.verdict === "compliant" ? "info" : result.verdict} />
-          <span>Risk <b>{result.riskScore}</b> · {result.findings} finding{result.findings === 1 ? "" : "s"} · {result.threads} comment thread{result.threads === 1 ? "" : "s"} opened</span>
+          <span><b>{result.findings}</b> finding{result.findings === 1 ? "" : "s"} · {result.threads} action item{result.threads === 1 ? "" : "s"} to decide</span>
         </div>
         {result.straightThrough && <p className="rounded-md border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-sm text-emerald-900">✓ Cleared and approved straight-through — routine, low value, clean draft, approved vendor. Ready to sign.</p>}
         <Footer>

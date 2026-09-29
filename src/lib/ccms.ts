@@ -284,7 +284,7 @@ export function straightThrough(
     [STRAIGHT_THROUGH.types.includes(c.contract_type), `routine ${t?.label ?? c.contract_type}`, `${t?.label ?? c.contract_type} is not a routine type`],
     [(c.value_myr ?? Infinity) <= STRAIGHT_THROUGH.maxValueMyr, `value RM${(c.value_myr ?? 0).toLocaleString()} within Director authority`, `value over RM${STRAIGHT_THROUGH.maxValueMyr.toLocaleString()}`],
     [!!review && review.verdict === "compliant", "AI review compliant", `AI verdict ${review?.verdict ?? "not reviewed"}`],
-    [!!review && (review.riskScore ?? 100) <= STRAIGHT_THROUGH.maxRisk, `risk ${review?.riskScore ?? "—"}`, `risk ${review?.riskScore ?? "—"} over ${STRAIGHT_THROUGH.maxRisk}`],
+    [!!review && (review.riskScore ?? 100) <= STRAIGHT_THROUGH.maxRisk, "low risk", "risk above the straight-through limit"],
     [serious === 0, minor ? `no red flags (${minor} minor point${minor === 1 ? "" : "s"} noted for signing)` : "no red flags or cautions", `${serious} red-flag finding(s)`],
     [!!vendor && vendor.status === "approved" && vendor.risk_rating !== "high" && !vendor.related_party, "approved, low-risk vendor", "vendor not approved, high risk or related"],
     [other.length === 0, "no platform flags", `flags: ${other.map((f) => FLAG_META[f.key]?.label ?? f.key).join(", ")}`],
