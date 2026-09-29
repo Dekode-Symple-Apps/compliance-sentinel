@@ -3,8 +3,9 @@ low-risk vendor, on complete and balanced terms — the AI finds it clean, so it
 is cleared and approved without waiting, then signed, stamped and filed.
 
   python3 scripts/gen-ccms-supply-demo.py →
-    ~/Desktop/01. Demo Data/Commercial CMS/10 Supply Agreement - Sinar Precast - draft.docx
-    ~/Desktop/01. Demo Data/Commercial CMS/11 Supply Agreement - Sinar Precast - signed and stamped.docx
+    ~/Desktop/01. Demo Data/Commercial CMS/2 Straight-through - Sinar Precast supply/
+      Step 1 - Upload Draft on New Request - supply agreement.docx
+      Step 2 - Upload Signed Copy - signed and stamped.docx
 Invented details; entity particulars are the demo values in src/lib/ccms.ts.
 """
 import os
@@ -12,7 +13,8 @@ from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-D = os.path.expanduser("~/Desktop/01. Demo Data/Commercial CMS/")
+D = os.path.expanduser("~/Desktop/01. Demo Data/Commercial CMS/2 Straight-through - Sinar Precast supply/")
+os.makedirs(D, exist_ok=True)
 
 CLAUSES = [
     ("Supply", [
@@ -103,5 +105,5 @@ def build(path, signed):
     doc.save(path); print(path)
 
 
-build(D + "10 Supply Agreement - Sinar Precast - draft.docx", signed=False)
-build(D + "11 Supply Agreement - Sinar Precast - signed and stamped.docx", signed=True)
+build(D + "Step 1 - Upload Draft on New Request - supply agreement.docx", signed=False)
+build(D + "Step 2 - Upload Signed Copy - signed and stamped.docx", signed=True)

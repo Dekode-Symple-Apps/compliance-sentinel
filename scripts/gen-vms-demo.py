@@ -1,8 +1,14 @@
-"""Demo document sets for Vendor Management onboarding, one folder per company,
-matching the demo companies the New Request form offers (src/lib/ccms-prefill.ts).
+"""Demo document sets for Vendor Management, one scenario folder each, matching
+the demo companies the New Request form offers (src/lib/ccms-prefill.ts).
 Every name, number and person is invented.
 
-  python3 scripts/gen-vms-demo.py  → ~/Desktop/01. Demo Data/Vendor Management/<company>/
+  python3 scripts/gen-vms-demo.py  → ~/Desktop/01. Demo Data/Vendor Management/
+    1 New vendor - Delima Mechanical & Electrical/
+        Vendor uploads in the portal/01–08 …pdf     (dropped into Upload All at Once)
+        Finance uploads - CTOS report/CTOS report.pdf
+    2 Subcontractor - Kukuh Formwork & Scaffolding/
+        Vendor uploads in the portal/01–08 …pdf     (no CTOS: subcontractors get the Accounts conflict check)
+    3 Renewal - Bayu Kuasa insurance/Bayu Kuasa - insurance renewal 2026-27.pdf
 """
 import os
 from reportlab.lib.pagesizes import A4
@@ -13,7 +19,7 @@ OUT = os.path.expanduser("~/Desktop/01. Demo Data/Vendor Management")
 W, H = A4
 
 COMPANIES = {
-    "Delima Mechanical & Electrical (New Vendor)": dict(
+    "1 New vendor - Delima Mechanical & Electrical": dict(finance_ctos=True,
         name="DELIMA MECHANICAL & ELECTRICAL SDN BHD", reg="201901045678 (1334567-M)", incorporated="8 May 2019",
         address="No. 21, Jalan Pelukis U1/46, Temasya Industrial Park, 40150 Shah Alam, Selangor",
         business="Testing, commissioning and maintenance of mechanical and electrical (M&E) systems for commercial and residential buildings.",
@@ -27,7 +33,7 @@ COMPANIES = {
         insurer=("Allianz General Insurance Company (Malaysia) Berhad", "PL-2026-310554", "RM3,000,000", "1 January 2026", "31 December 2026"),
         extras=["iso", "calibration", "competency"],
     ),
-    "Kukuh Formwork & Scaffolding (Subcontractor)": dict(
+    "2 Subcontractor - Kukuh Formwork & Scaffolding": dict(finance_ctos=False,
         name="KUKUH FORMWORK & SCAFFOLDING SDN BHD", reg="201601023456 (1187654-P)", incorporated="22 June 2016",
         address="Lot 7, Jalan Perusahaan 2, Kawasan Perindustrian Beranang, 43700 Beranang, Selangor",
         business="Formwork, falsework and scaffolding for high-rise residential and commercial construction.",
@@ -68,8 +74,10 @@ def footer(c, text):
 
 
 def build(folder, d):
-    os.makedirs(folder, exist_ok=True)
-    f = lambda n: os.path.join(folder, n)
+    # What the vendor uploads in the portal, apart from what Finance uploads.
+    uploads = os.path.join(folder, "Vendor uploads in the portal")
+    os.makedirs(uploads, exist_ok=True)
+    f = lambda n: os.path.join(uploads, n)
     n = d["name"]
 
     c = page(f("01 SSM certificate.pdf"), "SURUHANJAYA SYARIKAT MALAYSIA", "Companies Commission of Malaysia · Companies Act 2016")
@@ -132,7 +140,10 @@ def build(folder, d):
     afs_pdf(f(f"0{k} Audited financial statements FY2025.pdf"), d); k += 1
 
     # Finance's CTOS report — kept apart: Finance uploads it, not the vendor.
-    fin = os.path.join(folder, "For Finance"); os.makedirs(fin, exist_ok=True)
+    # Subcontractors get the Accounts conflict check instead, so no report.
+    if not d.get("finance_ctos", True):
+        return sorted(os.listdir(uploads))
+    fin = os.path.join(folder, "Finance uploads - CTOS report"); os.makedirs(fin, exist_ok=True)
     c = page(os.path.join(fin, "CTOS report.pdf"), "CTOS BUSINESS REPORT", "CTOS Data Systems Sdn Bhd · Confidential")
     y = lines(c, H - 110, [("Subject", n), ("Registration No.", d["reg"]), ("Report date", "25 September 2026"),
                            ("CTOS score", f'{d["ctos"]} (range 300–850)'), ("Litigation (as defendant)", "None found"),
@@ -140,7 +151,7 @@ def build(folder, d):
                            ("Trade references", "3 references, all prompt payers"), ("Banking facilities", "No arrears reported")])
     lines(c, y - 10, ["Summary: no adverse records found for the company or its directors."])
     footer(c, "Demo document — invented report."); c.save()
-    return sorted(os.listdir(folder))
+    return sorted(os.listdir(uploads)) + ["Finance uploads - CTOS report/CTOS report.pdf"]
 
 
 def afs_figures(y):
@@ -213,7 +224,7 @@ def afs_pdf(path, d):
 def renewal():
     """Bayu Kuasa's public liability policy runs to 31 Oct 2026 — its renewal,
     for the Monitoring "Upload Renewal" step."""
-    fin = os.path.join(OUT, "Renewals"); os.makedirs(fin, exist_ok=True)
+    fin = os.path.join(OUT, "3 Renewal - Bayu Kuasa insurance"); os.makedirs(fin, exist_ok=True)
     path = os.path.join(fin, "Bayu Kuasa - insurance renewal 2026-27.pdf")
     c = page(path, "CERTIFICATE OF INSURANCE · RENEWAL", "Tokio Marine Insurans (Malaysia) Berhad")
     lines(c, H - 120, [("Insured", "BAYU KUASA ENGINEERING SDN BHD"), ("Policy No.", "PL-2027-778412"), ("Cover", "Public liability"),

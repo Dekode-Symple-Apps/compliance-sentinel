@@ -2,14 +2,17 @@
 for the in-review demo: the AI reads its obligations while Legal, Finance and
 the approver work (payment, retention, bond, insurance, LADs, defects period).
 
-  python3 scripts/gen-ccms-loa-demo.py → ~/Desktop/01. Demo Data/Commercial CMS/12 Letter of Award - Teguh Piling - Block C substructure.docx
+  python3 scripts/gen-ccms-loa-demo.py →
+    ~/Desktop/01. Demo Data/Commercial CMS/4 Letter of Award in review - Teguh Piling Block C/
+      Upload Draft on New Request - Letter of Award, Block C.docx
 Invented details; entity particulars are the demo values in src/lib/ccms.ts.
 """
 import os
 from docx import Document
 from docx.shared import Pt
 
-OUT = os.path.expanduser("~/Desktop/01. Demo Data/Commercial CMS/12 Letter of Award - Teguh Piling - Block C substructure.docx")
+OUT = os.path.expanduser("~/Desktop/01. Demo Data/Commercial CMS/4 Letter of Award in review - Teguh Piling Block C/Upload Draft on New Request - Letter of Award, Block C.docx")
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
 doc = Document(); st = doc.styles["Normal"]; st.font.name = "Times New Roman"; st.font.size = Pt(11)
 def p(t, bold=False):
     para = doc.add_paragraph(); r = para.add_run(t); r.bold = bold

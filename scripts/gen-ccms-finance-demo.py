@@ -4,7 +4,8 @@ milestone payments, retention — for Finance to validate and clear while the
 contract is in review.
 
   python3 scripts/gen-ccms-finance-demo.py →
-    ~/Desktop/01. Demo Data/Commercial CMS/13 Supply Agreement - Sinar Precast - Block D (payment terms).docx
+    ~/Desktop/01. Demo Data/Commercial CMS/3 Finance clears payment terms - Sinar Precast Block D/
+      Upload Draft on New Request - supply agreement with payment schedule.docx
 Invented details; entity particulars are the demo values in src/lib/ccms.ts.
 """
 import os
@@ -12,7 +13,8 @@ from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-OUT = os.path.expanduser("~/Desktop/01. Demo Data/Commercial CMS/13 Supply Agreement - Sinar Precast - Block D (payment terms).docx")
+OUT = os.path.expanduser("~/Desktop/01. Demo Data/Commercial CMS/3 Finance clears payment terms - Sinar Precast Block D/Upload Draft on New Request - supply agreement with payment schedule.docx")
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
 
 CLAUSES = [
     ("Supply", [

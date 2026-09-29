@@ -3,14 +3,17 @@ the obligations demo (File to Repository extracts one Finance obligation per
 milestone). Invented parties' details; entity particulars are the demo values
 in src/lib/ccms.ts.
 
-  python3 scripts/gen-ccms-service-demo.py → ~/Desktop/01. Demo Data/Commercial CMS/9 IT Service Agreement - Awan Digital - signed and stamped.docx
+  python3 scripts/gen-ccms-service-demo.py →
+    ~/Desktop/01. Demo Data/Commercial CMS/6 Obligations - Awan Digital IT service/
+      Already filed as CC-2026-0009 - signed IT service agreement (reference).docx
 """
 import os
 from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-OUT = os.path.expanduser("~/Desktop/01. Demo Data/Commercial CMS/9 IT Service Agreement - Awan Digital - signed and stamped.docx")
+OUT = os.path.expanduser("~/Desktop/01. Demo Data/Commercial CMS/6 Obligations - Awan Digital IT service/Already filed as CC-2026-0009 - signed IT service agreement (reference).docx")
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
 doc = Document()
 st = doc.styles["Normal"]; st.font.name = "Times New Roman"; st.font.size = Pt(11)
 
