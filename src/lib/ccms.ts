@@ -403,6 +403,32 @@ export const defaultPic = (cat: ObligationCategory, owner?: string) =>
 export interface Obligation {
   id: string; text: string; category: ObligationCategory; pic: string; due_date: string | null; trigger?: string;
   amount?: number | null; percent?: number | null; status: "open" | "done"; done_by?: string | null; done_at?: string | null; auto?: string;
+  /** Confirmed by the department during review: the AI read it right. Carried into the repository. */
+  validated_by?: string | null; validated_at?: string | null;
+}
+/** Who validates each department's obligations; the first is who "Acting as" switches to. */
+export const VALIDATE_ROLES: Record<ObligationCategory, CcmsRole[]> = {
+  finance: ["finance", "accounts"],
+  legal: ["legal", "contract_executive"],
+  business: ["requestor", "contract_manager", "head_of_department", "operations_manager", "contract_executive"],
+};
+const oblKey = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+/** The same obligation read again (a re-run, a new version, the signed copy):
+ *  same department and either the same amount or the same wording. */
+export const sameObligation = (a: Obligation, b: Obligation) =>
+  a.category === b.category && ((a.amount != null && a.amount === b.amount) || oblKey(a.text) === oblKey(b.text));
+/** Validations from an earlier reading kept on the matching obligations of a new one. */
+export function carryValidation(next: Obligation[], prev: Obligation[] | null | undefined): Obligation[] {
+  const done = normalizeObligations(prev ?? []).filter((o) => o.validated_by);
+  if (!done.length) return next;
+  const used = new Set<string>();
+  return next.map((o) => {
+    if (o.validated_by) return o;
+    const m = done.find((p) => !used.has(p.id) && sameObligation(o, p));
+    if (!m) return o;
+    used.add(m.id);
+    return { ...o, validated_by: m.validated_by, validated_at: m.validated_at };
+  });
 }
 /** A category from the wording, for obligations saved before categories existed. */
 export function categoryOf(text: string): ObligationCategory {
@@ -414,7 +440,9 @@ const isoDay = (d: Date) => d.toISOString().slice(0, 10);
 /** A payment we make (an instalment or milestone with an amount), not security
  *  the counterparty gives (bond, guarantee) or money it pays us. */
 export const isPayment = (o: Obligation) =>
-  o.category === "finance" && o.amount != null && !/^(deliver|provide|submit|obtain|maintain|furnish|procure)\b/i.test(o.text.trim());
+  o.category === "finance" && o.amount != null
+  // "Supplier shall deliver a bond…" is security, like "Deliver a bond…": read past the party.
+  && !/^(deliver|provide|submit|obtain|maintain|furnish|procure)\b/i.test(o.text.trim().replace(/^(the\s+)?[a-z]+\s+(shall|must|will|to)\s+/i, ""));
 /** Old (text) or new (object) obligations → objects with category, PIC and status. */
 export function normalizeObligations(list: any[] | null | undefined, owner?: string): Obligation[] {
   return (list ?? []).filter(Boolean).map((x: any, i: number) => {
@@ -426,6 +454,7 @@ export function normalizeObligations(list: any[] | null | undefined, owner?: str
       amount: typeof o.amount === "number" ? o.amount : o.amount ? Number(o.amount) || null : null,
       percent: typeof o.percent === "number" ? o.percent : o.percent ? Number(o.percent) || null : null,
       status: o.status === "done" ? "done" : "open", done_by: o.done_by ?? null, done_at: o.done_at ?? null, auto: o.auto,
+      validated_by: o.validated_by ?? null, validated_at: o.validated_at ?? null,
     } as Obligation;
   }).filter((o) => o.text);
 }
@@ -459,6 +488,11 @@ export function departmentRequired(c: { contract_type: string; approval_route?: 
 /** Each department's steps on a contract, ticked as they are done. Steps that
  *  do not apply to this contract are left out. */
 export interface CheckItem { label: string; done: boolean; note?: string }
+const validatedItem = (dept: string, xs: Obligation[]): CheckItem => {
+  const n = xs.filter((o) => o.validated_by).length;
+  const who = [...new Set(xs.map((o) => o.validated_by).filter(Boolean))].map((x) => displayName(x!)).join(", ");
+  return { label: `${dept} obligations validated`, done: n === xs.length, note: n === xs.length ? `${n} of ${xs.length}${who ? ` · ${who}` : ""}` : `${n} of ${xs.length} validated` };
+};
 export function departmentChecklist(c: any, cat: ObligationCategory, obl: Obligation[]): CheckItem[] {
   const route: Stage[] = c.approval_route ?? [];
   const lite = flowOf(c) === "lite";
@@ -474,7 +508,7 @@ export function departmentChecklist(c: any, cat: ObligationCategory, obl: Obliga
     const secs: Security[] = c.securities ?? [];
     items.push(
       !!fin && { label: "Finance Review", done: decided(fin), note: by(fin) },
-      pays.length > 0 && { label: "Payment schedule captured", done: true, note: `${pays.length} instalment${pays.length === 1 ? "" : "s"}` },
+      mine.length > 0 && validatedItem("Finance", mine),
       secs.some((x) => x.required) && { label: "Bonds and insurance on file", done: paymentReady(secs) },
       !lite && !!c.signed_date && { label: "Stamp duty paid", done: !!c.stamping?.stamped_date, note: c.stamping?.certificate_no },
       filed && pays.length > 0 && { label: "Payments made", done: pays.every((o) => o.status === "done"), note: doneOf(pays) },
@@ -484,6 +518,7 @@ export function departmentChecklist(c: any, cat: ObligationCategory, obl: Obliga
     items.push(
       { label: "Request raised", done: true, note: `${displayName(c.requestor_name)} · ${String(c.created_at ?? "").slice(0, 10)}` },
       { label: "Contract owner", done: !!contractOwner(c), note: contractOwner(c) || undefined },
+      mine.length > 0 && validatedItem("Business", mine),
       ...approvals.map((s) => ({ label: `${s.label} approval`, done: decided(s), note: by(s) })),
       { label: "Signed", done: !!c.signed_date, note: c.signed_date ?? undefined },
       { label: "Filed to the repository", done: filed, note: c.expiry_date ? `expires ${c.expiry_date}` : undefined },
@@ -493,6 +528,7 @@ export function departmentChecklist(c: any, cat: ObligationCategory, obl: Obliga
     const legal = route.find((s) => s.key === "legal");
     items.push(
       !!legal && { label: legal.label, done: decided(legal), note: by(legal) },
+      mine.length > 0 && validatedItem("Legal", mine),
       { label: "Signed", done: !!c.signed_date, note: (c.signatories ?? []).map((x: any) => x.name).join(", ") || undefined },
       !lite && { label: "Stamped", done: !!c.stamping?.stamped_date, note: c.stamping?.certificate_no },
       { label: "Filed to the repository", done: filed },

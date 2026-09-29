@@ -12,7 +12,8 @@ import {
   addCcmsComment, compareCcmsAward, decideCcmsComment, decideCcmsCommentsBulk, decideCcmsDifference, exportCcmsDocumentWithComments, getCcmsDocument, recordCcmsReview, reviewCcmsDocument, setCcmsCommentStatus, draftCcmsReturnNote } from "@/lib/ccms.functions";
 import { CcmsHeader, StatusBadge, OutcomeText, CARD, useCcmsRole, SeverityIcon, CostChip, AiDraftButton } from "@/components/ccms-widgets";
 import { friendlyError } from "@/components/ccms-widgets";
-import { AI_ROLE, CCMS_ROLES, COMPARISON_AREAS, CONTRACT_TYPES, DECISION_LABEL, DEMO_SINGLE_USER, displayName, flowOf, stageTitle, roleLabel, templateById, type CcmsRole, type Decision, type Stage, itemDepartment } from "@/lib/ccms";
+import { AI_ROLE, CCMS_ROLES, COMPARISON_AREAS, CONTRACT_TYPES, DECISION_LABEL, DEMO_SINGLE_USER, OBLIGATION_CATEGORIES, contractOwner, displayName, flowOf, normalizeObligations, stageTitle, roleLabel, templateById, type CcmsRole, type Decision, type Obligation, type ObligationCategory, type Stage, itemDepartment } from "@/lib/ccms";
+import { ObligationRows, ValidateAllButton } from "@/components/ccms-obligations";
 import { CommentBody } from "@/components/ccms-execution";
 import { RememberedTextarea } from "@/components/ccms-actions";
 import { remember } from "@/lib/ccms-prefill";
@@ -87,6 +88,9 @@ function ReviewScreen() {
   const devRows = (deviation?.clauses ?? []) as any[];
   const devCount = devRows.filter((c) => c.status !== "same").length;
   const loaMissing = (loa?.items ?? []).filter((i: any) => i.status !== "present").length;
+  // The draft's obligations, read with the review: each department validates its own.
+  const obligations: Obligation[] = !contract.repository && review?.terms ? normalizeObligations(review.terms.obligations, contractOwner(contract)) : [];
+  const toValidate = obligations.filter((o) => !o.validated_by).length;
 
   async function rerun() {
     setRunning(true);
@@ -144,7 +148,7 @@ function ReviewScreen() {
           </div>
         </div>
 
-        <OutcomeBar contract={contract} role={role} openThreadsByRole={threads.filter((x) => x.status === "open")} findings={review?.findings ?? []} onDone={refresh} />
+        <OutcomeBar contract={contract} role={role} openThreadsByRole={threads.filter((x) => x.status === "open")} findings={review?.findings ?? []} obligations={obligations} onDone={refresh} />
 
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_480px] h-[calc(100vh-13rem)]">
           <div className="min-w-0 overflow-auto border-r border-gray-200">
@@ -159,7 +163,7 @@ function ReviewScreen() {
                 ...(isClientAward ? [["tender", `Tender ${(doc.comparison?.items ?? []).filter((i: any) => i.status !== "matches").length}`]] : []),
                 ["findings", `Findings ${review?.findings?.length ?? 0}`],
                 ...(isClientAward ? [] : [["template", tpl ? `Template ${devCount}` : "Template"]]),
-                ...(loa ? [["loa", `LoA items ${loaMissing}`]] : []), ["comments", `Action Items ${pendingCount}`]] as [Tab, string][]).map(([k, l]) => (
+                ...(loa ? [["loa", `LoA items ${loaMissing}`]] : []), ["comments", `Action Items ${pendingCount + toValidate}`]] as [Tab, string][]).map(([k, l]) => (
                 <button key={k} onClick={() => setTab(k)} className={cn("flex-1 px-3 py-2.5 text-sm", tab === k ? "border-b-2 border-gray-900 font-semibold text-gray-900" : "text-gray-600")}>{l}</button>
               ))}
             </div>
@@ -242,7 +246,7 @@ function ReviewScreen() {
               )}
 
               {tab === "comments" && (
-                <Comments contractId={contract.id} documentId={doc.id} threads={threads} all={comments} decisions={decisions} route={contract.approval_route ?? []} findings={review?.findings ?? []} composer={composer} setComposer={setComposer} onDone={refresh} onDownload={isDocx ? download : undefined} exporting={exporting}
+                <Comments contract={contract} obligations={obligations} contractId={contract.id} documentId={doc.id} threads={threads} all={comments} decisions={decisions} route={contract.approval_route ?? []} findings={review?.findings ?? []} composer={composer} setComposer={setComposer} onDone={refresh} onDownload={isDocx ? download : undefined} exporting={exporting}
                   focusThread={focusThread} onLocate={(t) => { const h = threadHighlight(t); if (h) focus(h); }} />
               )}
             </div>
@@ -265,8 +269,8 @@ type ItemDecision = "accepted" | "rejected";
 /** Review items: each AI suggestion or reviewer comment is accepted or
  *  rejected. The accepted ones are the review that goes back to the
  *  counterparty — "Download Accepted Review" exports only those. */
-function Comments({ contractId, documentId, threads, all, decisions, route, findings, composer, setComposer, onDone, focusThread, onLocate, onDownload, exporting }: {
-  contractId: string; documentId: string; threads: any[]; all: any[]; decisions: Record<string, any>; route: Stage[]; findings: any[]; composer: Anchor | null; setComposer: (a: Anchor | null) => void; onDone: () => void;
+function Comments({ contract, obligations, contractId, documentId, threads, all, decisions, route, findings, composer, setComposer, onDone, focusThread, onLocate, onDownload, exporting }: {
+  contract: any; obligations: Obligation[]; contractId: string; documentId: string; threads: any[]; all: any[]; decisions: Record<string, any>; route: Stage[]; findings: any[]; composer: Anchor | null; setComposer: (a: Anchor | null) => void; onDone: () => void;
   focusThread: string | null; onLocate: (t: any) => void; onDownload?: () => void; exporting?: boolean;
 }) {
   const [role] = useCcmsRole();
@@ -373,6 +377,7 @@ function Comments({ contractId, documentId, threads, all, decisions, route, find
           })}
         </div>
       )}
+      <ObligationsToValidate contract={contract} documentId={documentId} obligations={obligations} dept={dept} onDone={onDone} />
       {shown.length === 0 && <p className="text-sm text-gray-500">{show === "pending" ? "Nothing left to decide." : "None here."}</p>}
       {shown.map((t) => {
         const st = stateOf(t); const d = decisions[t.id];
@@ -422,9 +427,48 @@ function Comments({ contractId, documentId, threads, all, decisions, route, find
   );
 }
 
+/** The draft's obligations, read by the AI with the review. Nothing to accept or
+ *  reject: the department validates each one (amount, date, who), and the
+ *  contract page shows it validated. The review filter picks the department. */
+function ObligationsToValidate({ contract, documentId, obligations, dept, onDone }: { contract: any; documentId: string; obligations: Obligation[]; dept: string; onDone: () => void }) {
+  const [open, setOpen] = useState(true);
+  const cats = (Object.keys(OBLIGATION_CATEGORIES) as ObligationCategory[]).filter((k) => dept === "all" || dept === k);
+  const list = obligations.filter((o) => cats.includes(o.category));
+  if (!list.length) return null;
+  const done = list.filter((o) => o.validated_by).length;
+  return (
+    <div className={CARD}>
+      <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm">
+        <span className="font-semibold text-gray-900">Obligations to validate</span>
+        <span className={cn("rounded-full border px-2 py-0.5 text-xs font-semibold", done === list.length ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800")}>{done} of {list.length} validated</span>
+        <span className="ml-auto text-xs text-gray-500">{open ? "Hide" : "Show"}</span>
+      </button>
+      {open && (
+        <>
+          <p className="border-t border-gray-100 px-3 py-2 text-xs text-gray-500">Read from this draft by the AI. Check each against the contract; validated ones show as validated on the contract page and carry into the repository when filed.</p>
+          {cats.map((k) => {
+            const mine = list.filter((o) => o.category === k);
+            if (!mine.length) return null;
+            return (
+              <div key={k} className="border-t border-gray-100">
+                <div className="flex items-center gap-2 px-3 pt-2 text-sm">
+                  <span className="font-medium text-gray-900">{OBLIGATION_CATEGORIES[k]}</span>
+                  <span className="text-xs text-gray-500">PIC {[...new Set(mine.map((o) => o.pic))].join(", ")}</span>
+                  <span className="ml-auto"><ValidateAllButton c={contract} list={mine} documentId={documentId} onChanged={onDone} /></span>
+                </div>
+                <ObligationRows rows={mine.map((o) => ({ o, c: contract }))} onChanged={onDone} validate documentId={documentId} compact />
+              </div>
+            );
+          })}
+        </>
+      )}
+    </div>
+  );
+}
+
 /** Where each review stands, and a button per pending review. The decision
  *  itself is a pop-up, opened here or straight from the contract's milestone. */
-function OutcomeBar({ contract, role, openThreadsByRole, findings, onDone }: { contract: any; role: CcmsRole; openThreadsByRole: any[]; findings: any[]; onDone: () => void }) {
+function OutcomeBar({ contract, role, openThreadsByRole, findings, obligations, onDone }: { contract: any; role: CcmsRole; openThreadsByRole: any[]; findings: any[]; obligations: Obligation[]; onDone: () => void }) {
   const [, setRole] = useCcmsRole();
   const route: Stage[] = contract.approval_route ?? [];
   const stages = route.filter((s) => s.kind === "review");
@@ -453,17 +497,19 @@ function OutcomeBar({ contract, role, openThreadsByRole, findings, onDone }: { c
           );
         })}
       </div>
-      {open && <OutcomeDialog stage={open} contract={contract} lite={lite} openThreads={openThreadsByRole} findings={findings} onClose={() => setOpen(null)} onDone={onDone} />}
+      {open && <OutcomeDialog stage={open} contract={contract} lite={lite} openThreads={openThreadsByRole} findings={findings} obligations={obligations} onClose={() => setOpen(null)} onDone={onDone} />}
     </div>
   );
 }
 
-function OutcomeDialog({ stage, contract, lite, openThreads, findings, onClose, onDone }: { stage: Stage; contract: any; lite: boolean; openThreads: any[]; findings: any[]; onClose: () => void; onDone: () => void }) {
+function OutcomeDialog({ stage, contract, lite, openThreads, findings, obligations, onClose, onDone }: { stage: Stage; contract: any; lite: boolean; openThreads: any[]; findings: any[]; obligations: Obligation[]; onClose: () => void; onDone: () => void }) {
   const recordFn = useServerFn(recordCcmsReview);
   const draftFn = useServerFn(draftCcmsReturnNote);
   // Only this review's items: Legal's for Legal Vetting, Finance's for Finance Review.
   const mineOpen = openThreads.filter((t) => itemDepartment(t, findings, contract.approval_route ?? []) === stage.key).length;
-  const [outcome, setOutcome] = useState<"cleared" | "cleared_with_comments" | "not_cleared">(mineOpen ? "cleared_with_comments" : "cleared");
+  // …and this review's obligations still to validate (Finance's schedule for Finance Review).
+  const unvalidated = lite ? 0 : obligations.filter((o) => o.category === stage.key && !o.validated_by).length;
+  const [outcome, setOutcome] = useState<"cleared" | "cleared_with_comments" | "not_cleared">(mineOpen || unvalidated ? "cleared_with_comments" : "cleared");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   async function submit(o: typeof outcome) {
@@ -485,6 +531,7 @@ function OutcomeDialog({ stage, contract, lite, openThreads, findings, onClose, 
         </DialogHeader>
         <div className="space-y-3">
           {mineOpen > 0 && <p className="flex gap-1.5 text-sm text-amber-800"><SeverityIcon severity="caution" className="mt-0.5" /> {mineOpen} action item{mineOpen === 1 ? "" : "s"} still to accept or reject on this version. {lite ? "Approval records them as noted." : "\"Cleared\" needs each one decided."}</p>}
+          {unvalidated > 0 && <p className="flex gap-1.5 text-sm text-amber-800"><SeverityIcon severity="caution" className="mt-0.5" /> {unvalidated} {stage.key} obligation{unvalidated === 1 ? "" : "s"} still to validate under Action Items. "Cleared" needs them validated.</p>}
           {!lite && (
             <div className="flex flex-wrap gap-3 text-sm">
               {([["cleared", "Cleared"], ["cleared_with_comments", "Cleared with Comments"], ["not_cleared", "Not Cleared · Return"]] as const).map(([k, l]) => (

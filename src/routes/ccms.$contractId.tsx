@@ -9,7 +9,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { CommentBody, ConfirmationRecord, ExecutionRecord, LifecycleRecord, Milestones } from "@/components/ccms-execution";
 import { ActionDialog } from "@/components/ccms-actions";
 import { deleteCcmsContract, getCcmsContract, setCcmsOwner } from "@/lib/ccms.functions";
-import { CATEGORY_TINT, ObligationRows } from "@/components/ccms-obligations";
+import { CATEGORY_TINT, ObligationRows, ValidateAllButton } from "@/components/ccms-obligations";
 import { toast } from "sonner";
 import {
   CcmsHeader, StatusBadge, OutcomeText, SlaText, Section, CostChip, SeverityIcon, CARD, TH, TD, fmtMoney, useCcmsRole, useConfirm, NoteText } from "@/components/ccms-widgets";
@@ -248,7 +248,7 @@ function ContractDetail() {
               )}
 
               {cur === "obligations" && <ObligationsOverview c={c} obl={obl} fromDraft={fromDraft} go={go} />}
-              {cur.startsWith("ob-") && <DepartmentView cat={cur.slice(3) as ObligationCategory} c={{ ...c, __draftTerms: draftDoc?.terms }} vendor={vendor} obl={obl} fromDraft={fromDraft} reviewDocId={current?.id} onChanged={refresh} />}
+              {cur.startsWith("ob-") && <DepartmentView cat={cur.slice(3) as ObligationCategory} c={{ ...c, __draftTerms: draftDoc?.terms }} vendor={vendor} obl={obl} fromDraft={fromDraft} draftDocId={draftDoc?.id} reviewDocId={current?.id} onChanged={refresh} />}
 
               {cur === "confirmation" && client && <Panel title="Confirmation Letter"><ConfirmationRecord c={c} documents={documents} /></Panel>}
               {cur === "signing" && after && <Panel title="Signing & Repository" sub={c.expiry_date ? `expires ${c.expiry_date}` : c.signed_date ? `signed ${c.signed_date}` : undefined}><ExecutionRecord c={c} /></Panel>}
@@ -421,7 +421,7 @@ const NOT_FILED = <p className="px-4 py-6 text-sm text-gray-500">Obligations com
 function ObligationsOverview({ c, obl, fromDraft, go }: { c: any; obl: Obligation[]; fromDraft: boolean; go: (k: string) => void }) {
   if (!obl.length) return <Panel title="Obligations">{NOT_FILED}</Panel>;
   return (
-    <Panel title="Obligations" sub={fromDraft ? "From the draft under review · confirmed when filed" : `${obl.filter((o) => o.status === "open").length} open · ${obl.filter((o) => o.status === "done").length} done`}>
+    <Panel title="Obligations" sub={fromDraft ? `From the draft under review · ${obl.filter((o) => o.validated_by).length} of ${obl.length} validated` : `${obl.filter((o) => o.status === "open").length} open · ${obl.filter((o) => o.status === "done").length} done`}>
       <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-3">
         {(Object.keys(OBLIGATION_CATEGORIES) as ObligationCategory[]).map((k) => {
           const mine = obl.filter((o) => o.category === k);
@@ -438,6 +438,7 @@ function ObligationsOverview({ c, obl, fromDraft, go }: { c: any; obl: Obligatio
               <div className="flex items-center justify-between"><span className="font-semibold">{OBLIGATION_CATEGORIES[k]}</span><span className="text-xs">PIC {[...new Set(mine.map((o) => o.pic))].join(", ") || "—"}</span></div>
               <div className="mt-1 text-2xl font-semibold">{open.length}<span className="ml-1 text-sm font-normal">open</span></div>
               <div className="text-xs">{soon ? `${soon} due within 30 days` : next ? `Next: ${next.due_date}` : "Nothing dated"}</div>
+              {fromDraft && <div className="mt-1 text-xs font-medium">{mine.filter((o) => o.validated_by).length === mine.length ? "✓ All validated" : `${mine.filter((o) => o.validated_by).length} of ${mine.length} validated`}</div>}
             </button>
           );
         })}
@@ -448,7 +449,7 @@ function ObligationsOverview({ c, obl, fromDraft, go }: { c: any; obl: Obligatio
 
 /** One department's view of the contract: its checklist, the facts it works
  *  with (only those with a value), its obligations and the records behind them. */
-function DepartmentView({ cat, c, vendor, obl, fromDraft, reviewDocId, onChanged }: { cat: ObligationCategory; c: any; vendor: any; obl: Obligation[]; fromDraft: boolean; reviewDocId?: string; onChanged: () => void }) {
+function DepartmentView({ cat, c, vendor, obl, fromDraft, draftDocId, reviewDocId, onChanged }: { cat: ObligationCategory; c: any; vendor: any; obl: Obligation[]; fromDraft: boolean; draftDocId?: string; reviewDocId?: string; onChanged: () => void }) {
   const mine = obl.filter((o) => o.category === cat).sort((a, b) => String(a.due_date ?? "9999").localeCompare(String(b.due_date ?? "9999")));
   const req = departmentRequired(c, cat);
   const checklist = departmentChecklist(c, cat, obl);
@@ -543,8 +544,10 @@ function DepartmentView({ cat, c, vendor, obl, fromDraft, reviewDocId, onChanged
         {cat === "business" && c.scope_summary && <div className="border-t border-gray-100 px-4 py-3 text-sm"><span className="text-gray-500">Scope · </span><span className="whitespace-pre-wrap text-gray-900">{c.scope_summary}</span></div>}
       </Panel>
       {mine.length > 0 && (
-        <Panel title={`${OBLIGATION_CATEGORIES[cat]} obligations`} sub={fromDraft ? `From the draft under review · confirmed when filed · PIC ${pics}` : `${mine.filter((o) => o.status === "open").length} open · PIC ${pics}`}>
-          <ObligationRows rows={mine.map((o) => ({ o, c }))} onChanged={onChanged} readOnly={fromDraft} />
+        <Panel title={`${OBLIGATION_CATEGORIES[cat]} obligations`}
+          sub={fromDraft ? `Read from the draft · ${mine.filter((o) => o.validated_by).length} of ${mine.length} validated · PIC ${pics}` : `${mine.filter((o) => o.status === "open").length} open · PIC ${pics}`}
+          right={fromDraft ? <ValidateAllButton c={c} list={mine} documentId={draftDocId} onChanged={onChanged} /> : undefined}>
+          <ObligationRows rows={mine.map((o) => ({ o, c }))} onChanged={onChanged} validate={fromDraft} documentId={draftDocId} />
         </Panel>
       )}
       {extra}

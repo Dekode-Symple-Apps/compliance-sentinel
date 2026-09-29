@@ -14,7 +14,7 @@ import {
   CONTRACT_TYPES, CCMS_ROLES, DEMO_SINGLE_USER, flowOf, LSH_ENTITIES, LOA_ITEMS, BLOCKING_FLAGS, AI_ROLE, roleLabel,
   buildRoute, computeFlags, nextApproval, reviewsDone, templateById, toMyr, fillNda, displayName,
   COMPARISON_AREAS, defaultSecurities, SECURITY_TYPES, APPROVAL_BANDS, type Security, type KeyTerms,
-  autoObligations, contractOwner, normalizeObligations, straightThrough, STP_ACTOR, itemDepartment,
+  autoObligations, contractOwner, normalizeObligations, straightThrough, STP_ACTOR, itemDepartment, carryValidation, VALIDATE_ROLES, type ObligationCategory,
   type CcmsRole, type Flag, type Stage, type VendorLite,
 } from "@/lib/ccms";
 
@@ -536,7 +536,13 @@ export const reviewCcmsDocument = createServerFn({ method: "POST" })
         runDraftReview(contract, vendor, doc.file_name, text, pdfBase64),
         runKeyTerms(doc.file_name, text, pdfBase64).catch(() => null),
       ]);
-      if (kt?.out) (ai_review as any).terms = draftTerms(kt.out, contract);
+      if (kt?.out) {
+        const terms = draftTerms(kt.out, contract);
+        // Validations survive a re-run, and a new version keeps those of the last one.
+        const prev = doc.ai_review?.terms?.obligations ?? (await latestDraftTerms(sb, contract.id, doc.id))?.obligations;
+        terms.obligations = carryValidation(terms.obligations, prev);
+        (ai_review as any).terms = terms;
+      }
       if (doc.ai_review?.decisions) (ai_review as any).decisions = doc.ai_review.decisions; // decisions survive a re-run
       const tpl = templateById(contract.template_id);
       await sb.from("ccms_documents").update({ ai_review, deviation, loa_check, ai_review_status: "done" }).eq("id", doc.id);
@@ -750,6 +756,12 @@ export const recordCcmsReview = createServerFn({ method: "POST" })
       }
       const open = [own ? `${own} of your own` : "", ai ? `${ai} AI suggestion${ai === 1 ? "" : "s"} for this review` : ""].filter(Boolean);
       if (open.length) throw new Error(`Action items still to accept or reject (${open.join(", ")}). Decide them, or record "Cleared with comments".`);
+      // …and this review's obligations validated: Finance's schedule for Finance Review.
+      if (flowOf(contract) !== "lite" && (data.stage === "finance" || data.stage === "legal")) {
+        const terms = await latestDraftTerms(sb, contract.id);
+        const left = normalizeObligations(terms?.obligations ?? []).filter((o) => o.category === data.stage && !o.validated_by).length;
+        if (left) throw new Error(`${left} ${data.stage} obligation${left === 1 ? "" : "s"} still to validate. Validate them, or record "Cleared with comments".`);
+      }
     }
     const now = new Date().toISOString();
     const nextRoute = route.map((s) => s.key === data.stage ? { ...s, status: data.outcome, decided_by: userName, decided_at: now, note: data.note ?? null } : s);
@@ -1232,6 +1244,13 @@ Obligations: up to 8, of either party, that someone must act on. finance = payin
   return { out: parseJson(res.text ?? "") ?? {}, res };
 }
 
+/** The newest draft or counterparty markup that has obligations read from it. */
+async function latestDraftTerms(sb: any, contractId: string, exceptId?: string): Promise<any | null> {
+  const { data } = await sb.from("ccms_documents").select("id,ai_review->terms").eq("contract_id", contractId)
+    .in("doc_role", ["draft", "counterparty"]).order("created_at", { ascending: false }).limit(6);
+  return (data ?? []).find((d: any) => d.id !== exceptId && d.terms)?.terms ?? null;
+}
+
 /** Key terms read from a draft: obligations (with instalment amounts) and dates. */
 export function draftTerms(out: any, contract: any) {
   const value = typeof out.value === "number" ? out.value : contract.value ?? null;
@@ -1275,7 +1294,7 @@ export const extractCcmsKeyTerms = createServerFn({ method: "POST" })
       start_date: out.start_date || contract.start_date || null,
       end_date,
       notice_period: String(out.notice_period ?? ""), renewal: String(out.renewal ?? ""), governing_law: String(out.governing_law ?? ""),
-      obligations: [...extracted, ...autoObligations(contract, end_date, extracted, owner)],
+      obligations: [...carryValidation(extracted, (await latestDraftTerms(sb, contract.id))?.obligations), ...autoObligations(contract, end_date, extracted, owner)],
     };
     return { terms, fromDocument: doc.file_name };
   });
@@ -1285,6 +1304,7 @@ const obligationSchema = z.object({
   pic: z.string().max(120).optional(), due_date: z.string().nullable().optional(), trigger: z.string().max(200).optional(),
   amount: z.number().nullable().optional(), percent: z.number().nullable().optional(), status: z.enum(["open", "done"]).optional(),
   done_by: z.string().nullable().optional(), done_at: z.string().nullable().optional(), auto: z.string().optional(),
+  validated_by: z.string().nullable().optional(), validated_at: z.string().nullable().optional(),
 });
 
 export const saveCcmsRepository = createServerFn({ method: "POST" })
@@ -1366,6 +1386,43 @@ export const updateCcmsObligation = createServerFn({ method: "POST" })
     await logEvent(sb, { contract_id: contract.id, event_type: "obligation", actor_id: userId, actor_name: userName, acting_role: null,
       detail: data.status ? `${data.status === "done" ? "Done" : "Reopened"}: ${o.text}` : `Obligation updated: ${o.text}${data.pic ? ` — PIC ${data.pic}` : ""}${data.due_date ? ` — due ${data.due_date}` : ""}` });
     return { ok: true };
+  });
+
+/** Validate obligations: the department confirms the AI read them right.
+ *  In review this marks the draft's obligations (and they carry into the
+ *  repository at filing); after filing it marks the filed ones. */
+export const validateCcmsObligations = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({
+    contract_id: z.string().uuid(), document_id: z.string().uuid().optional(),
+    ids: z.array(z.string().max(40)).min(1).max(40), validated: z.boolean(), acting_role: roleSchema,
+  }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await ccms(context);
+    const contract = await loadContract(sb, data.contract_id, tenantId);
+    const owner = contractOwner(contract);
+    let list: any[]; let save: (next: any[]) => Promise<void>;
+    if (contract.repository) {
+      list = normalizeObligations(contract.repository.obligations, owner);
+      save = async (next) => { await sb.from("ccms_contracts").update({ repository: { ...contract.repository, obligations: next } }).eq("id", contract.id); };
+    } else {
+      let q = sb.from("ccms_documents").select("id,ai_review").eq("contract_id", contract.id).in("doc_role", ["draft", "counterparty"]);
+      q = data.document_id ? q.eq("id", data.document_id) : q.order("created_at", { ascending: false });
+      const { data: docs } = await q.limit(6);
+      const doc = (docs ?? []).find((d: any) => d.ai_review?.terms);
+      if (!doc) throw new Error("No obligations have been read from this draft yet. Run the AI review.");
+      list = normalizeObligations(doc.ai_review.terms.obligations, owner);
+      save = async (next) => { await sb.from("ccms_documents").update({ ai_review: { ...doc.ai_review, terms: { ...doc.ai_review.terms, obligations: next } } }).eq("id", doc.id); };
+    }
+    const picked = list.filter((o) => data.ids.includes(o.id));
+    if (!picked.length) throw new Error("Obligation not found.");
+    for (const cat of new Set(picked.map((o) => o.category as ObligationCategory))) requireRole(data.acting_role, VALIDATE_ROLES[cat], `validate ${cat} obligations`);
+    const now = new Date().toISOString();
+    const next = list.map((o) => !data.ids.includes(o.id) ? o : { ...o, validated_by: data.validated ? userName : null, validated_at: data.validated ? now : null });
+    await save(next);
+    await logEvent(sb, { contract_id: contract.id, event_type: "obligation", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
+      detail: picked.length === 1 ? `${data.validated ? "Validated" : "Validation undone"}: ${picked[0].text}` : `${data.validated ? "Validated" : "Validation undone on"} ${picked.length} obligations.` });
+    return { changed: picked.length };
   });
 
 // ===========================================================================

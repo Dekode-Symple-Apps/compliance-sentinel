@@ -2,11 +2,11 @@ import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Check, Loader2, Plus, RotateCcw, Trash2 } from "lucide-react";
-import { updateCcmsObligation } from "@/lib/ccms.functions";
-import { friendlyError, fmtMoney } from "@/components/ccms-widgets";
+import { BadgeCheck, Check, Loader2, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { updateCcmsObligation, validateCcmsObligations } from "@/lib/ccms.functions";
+import { friendlyError, fmtMoney, useCcmsRole } from "@/components/ccms-widgets";
 import {
-  DEMO_PEOPLE, OBLIGATION_CATEGORIES, daysBetween, defaultPic, entityShort, obligationBucket,
+  DEMO_PEOPLE, DEMO_SINGLE_USER, OBLIGATION_CATEGORIES, VALIDATE_ROLES, daysBetween, defaultPic, displayName, entityShort, obligationBucket,
   type Obligation, type ObligationCategory,
 } from "@/lib/ccms";
 import { cn } from "@/lib/utils";
@@ -67,10 +67,54 @@ export function ObligationsEditor({ value, onChange, owner }: { value: Obligatio
   );
 }
 
-/** Obligations as a list with Mark Done — on the contract page and across contracts. */
-export function ObligationRows({ rows, showContract, onChanged, readOnly }: { rows: { o: Obligation; c: any }[]; showContract?: boolean; onChanged: () => void; readOnly?: boolean }) {
+/** Validate in review: the department confirms the AI read its obligations
+ *  right. "Acting as" follows the department in the demo. Returns the call. */
+export function useValidateObligations(onChanged: () => void) {
+  const fn = useServerFn(validateCcmsObligations);
+  const [role, setRole] = useCcmsRole();
+  const [busy, setBusy] = useState<string | null>(null);
+  async function validate(key: string, c: any, list: Obligation[], validated: boolean, documentId?: string) {
+    if (!list.length) return;
+    const allowed = VALIDATE_ROLES[list[0].category];
+    let acting = role;
+    if (!allowed.includes(role) && DEMO_SINGLE_USER) { acting = allowed[0]; setRole(acting); }
+    setBusy(key);
+    try {
+      await fn({ data: { contract_id: c.id, document_id: documentId, ids: list.map((o) => o.id), validated, acting_role: acting } });
+      toast.success(validated ? (list.length === 1 ? "Validated" : `${list.length} obligations validated`) : "Validation undone");
+      onChanged();
+    } catch (e) { toast.error(friendlyError(e)); } finally { setBusy(null); }
+  }
+  return { validate, busy };
+}
+
+/** Validate every obligation in the list still to validate. */
+export function ValidateAllButton({ c, list, documentId, onChanged, label }: { c: any; list: Obligation[]; documentId?: string; onChanged: () => void; label?: string }) {
+  const v = useValidateObligations(onChanged);
+  const left = list.filter((o) => !o.validated_by);
+  if (!left.length) return list.length ? <span className="inline-flex items-center gap-1 text-sm font-medium text-emerald-700"><BadgeCheck className="size-4" /> All validated</span> : null;
+  return (
+    <button type="button" disabled={v.busy === "all"} onClick={() => v.validate("all", c, left, true, documentId)}
+      className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300 px-2.5 py-1 text-sm font-medium text-emerald-800 hover:bg-emerald-50">
+      {v.busy === "all" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} Validate All{label ? ` · ${label}` : ""} ({left.length})
+    </button>
+  );
+}
+
+/** Who validated an obligation, as a small green mark. */
+export function ValidatedMark({ o }: { o: Obligation }) {
+  if (!o.validated_by) return null;
+  return <span className="inline-flex items-center gap-0.5 font-medium text-emerald-700" title={o.validated_at ? `Validated ${o.validated_at.slice(0, 10)}` : undefined}><BadgeCheck className="size-3.5" /> Validated · {displayName(o.validated_by)}</span>;
+}
+
+/** Obligations as a list with Mark Done — on the contract page and across contracts.
+ *  `validate` (in review): each row is confirmed by its department instead. */
+export function ObligationRows({ rows, showContract, onChanged, readOnly, validate, documentId, compact }: {
+  rows: { o: Obligation; c: any }[]; showContract?: boolean; onChanged: () => void; readOnly?: boolean; validate?: boolean; documentId?: string; compact?: boolean;
+}) {
   const fn = useServerFn(updateCcmsObligation);
   const [busy, setBusy] = useState<string | null>(null);
+  const v = useValidateObligations(onChanged);
   async function toggle(o: Obligation, c: any) {
     setBusy(o.id + c.id);
     try { await fn({ data: { contract_id: c.id, id: o.id, status: o.status === "done" ? "open" : "done" } }); toast.success(o.status === "done" ? "Reopened" : "Marked done"); onChanged(); }
@@ -89,10 +133,20 @@ export function ObligationRows({ rows, showContract, onChanged, readOnly }: { ro
               {o.amount != null && <span className="font-medium text-gray-700">{fmtMoney(o.amount, c.repository?.currency ?? c.currency)}{o.percent != null ? ` (${o.percent}%)` : ""}</span>}
               {showContract && <Link to="/ccms/$contractId" params={{ contractId: c.id }} className="text-blue-700 hover:underline">{c.reference_number}</Link>}
               {showContract && <span title={c.entity}>{entityShort(c.entity)} · {c.counterparty_name}</span>}
+              <ValidatedMark o={o} />
             </div>
           </div>
-          <div className="w-32 shrink-0 text-right"><DueText o={o} /></div>
-          {!readOnly && <button type="button" disabled={busy === o.id + c.id} onClick={() => toggle(o, c)}
+          <div className={cn("shrink-0 text-right", compact ? "w-24" : "w-32")}><DueText o={o} /></div>
+          {validate && (o.validated_by
+            ? <button type="button" title="Undo the validation" disabled={v.busy === o.id} onClick={() => v.validate(o.id, c, [o], false, documentId)}
+                className="inline-flex w-24 shrink-0 items-center justify-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-sm text-gray-600 hover:border-gray-400">
+                {v.busy === o.id ? <Loader2 className="size-4 animate-spin" /> : <><RotateCcw className="size-3.5" /> Undo</>}
+              </button>
+            : <button type="button" disabled={v.busy === o.id} onClick={() => v.validate(o.id, c, [o], true, documentId)}
+                className="inline-flex w-24 shrink-0 items-center justify-center gap-1 rounded-md border border-emerald-300 px-2 py-1 text-sm font-medium text-emerald-800 hover:bg-emerald-50">
+                {v.busy === o.id ? <Loader2 className="size-4 animate-spin" /> : <><Check className="size-4" /> Validate</>}
+              </button>)}
+          {!readOnly && !validate && <button type="button" disabled={busy === o.id + c.id} onClick={() => toggle(o, c)}
             className={cn("inline-flex w-28 shrink-0 items-center justify-center gap-1 rounded-md border px-2 py-1 text-sm", o.status === "done" ? "border-gray-200 text-gray-600 hover:border-gray-400" : "border-gray-300 text-gray-900 hover:border-gray-900")}>
             {busy === o.id + c.id ? <Loader2 className="size-4 animate-spin" /> : o.status === "done" ? <><RotateCcw className="size-3.5" /> Reopen</> : <><Check className="size-4" /> Mark Done</>}
           </button>}

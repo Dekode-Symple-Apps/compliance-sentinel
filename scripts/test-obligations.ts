@@ -1,5 +1,5 @@
 // Obligations: categories from wording, PIC defaults, automatic obligations, due buckets.
-import { isPayment, autoObligations, categoryOf, contractOwner, defaultPic, departmentChecklist, departmentRequired, entityShort, normalizeObligations, obligationBucket } from "../src/lib/ccms";
+import { carryValidation, sameObligation, isPayment, autoObligations, categoryOf, contractOwner, defaultPic, departmentChecklist, departmentRequired, entityShort, normalizeObligations, obligationBucket } from "../src/lib/ccms";
 let pass = 0, fail = 0;
 const check = (name: string, ok: boolean, detail = "") => { ok ? pass++ : fail++; console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  — " + detail : ""}`); };
 
@@ -39,13 +39,28 @@ const loaC = { contract_type: "letter_of_award", requestor_name: "Jeremy Teh", c
   { key: "approval", label: "Final Approval Committee", kind: "approval", status: "pending" }] } as any;
 check("Letter of Award: all three clear", ["legal", "finance", "business"].every((k) => departmentRequired(loaC, k as any).required));
 const finList = departmentChecklist(loaC, "finance", normalizeObligations([{ text: "Pay progress claims", category: "finance", amount: 100 }]));
-check("finance checklist: review pending, schedule captured", finList[0].label === "Finance Review" && !finList[0].done && finList.some((x) => x.label === "Payment schedule captured" && x.done), JSON.stringify(finList));
+check("finance checklist: review pending, schedule still to validate", finList[0].label === "Finance Review" && !finList[0].done && finList.some((x) => x.label === "Finance obligations validated" && !x.done), JSON.stringify(finList));
 check("legal checklist: vetting done by Irwin", departmentChecklist(loaC, "legal", [])[0].done && departmentChecklist(loaC, "legal", [])[0].note?.startsWith("Irwin") === true);
 check("NDA finance checklist is empty (nothing for Finance to do)", departmentChecklist(ndaC, "finance", []).length === 0);
 
 const mk = (text: string) => normalizeObligations([{ text, category: "finance", amount: 1000 }])[0];
 check("instalments are payments", isPayment(mk("Pay contract signing instalment")) && isPayment(mk("Pay UAT acceptance instalment")));
 check("a performance bond is not a payment", !isPayment(mk("Deliver on-demand performance bond bank guarantee")) && !isPayment(mk("Deliver performance bond of 5% of contract price")));
+check("\"Supplier shall deliver performance bond\" is not a payment", !isPayment(mk("Supplier shall deliver performance bond of five percent of contract price")) && isPayment(mk("Purchaser shall pay Batch 1 payment instalment")) && isPayment(mk("Purchaser shall release retention sum to Supplier")));
 check("an advance paid against a bond is a payment", isPayment(mk("Pay advance payment against advance payment bond")) && isPayment(mk("Release retention sum to Supplier")));
+
+// Validation in review carries to a re-run, a new version, and the signed copy.
+const v1 = normalizeObligations([{ text: "Pay advance payment against bond", category: "finance", amount: 128000, validated_by: "Dabraj", validated_at: "2026-09-29T10:00:00Z" },
+  { text: "Pay Batch 1 instalment", category: "finance", amount: 384000 }, { text: "Arrange stamping within 30 days", category: "legal", validated_by: "Irwin" }]);
+const reread = normalizeObligations([{ text: "Purchaser pays the advance payment (10%)", category: "finance", amount: 128000 },
+  { text: "Pay Batch 1 instalment", category: "finance", amount: 384000 }, { text: "Arrange  stamping within 30 days.", category: "legal" }, { text: "Pay retention", category: "finance", amount: 64000 }]);
+const carried = carryValidation(reread, v1);
+check("same amount keeps the validation (wording changed)", carried[0].validated_by === "Dabraj" && carried[0].validated_at === "2026-09-29T10:00:00Z");
+check("an unvalidated one stays unvalidated", !carried[1].validated_by && !carried[3].validated_by);
+check("same wording keeps the validation", carried[2].validated_by === "Irwin");
+check("a changed amount is not the same obligation", !sameObligation(normalizeObligations([{ text: "Pay advance", category: "finance", amount: 100 }])[0], normalizeObligations([{ text: "Pay advance payment", category: "finance", amount: 200 }])[0]));
+check("normalize keeps validated_by", normalizeObligations([{ text: "x y", validated_by: "Dabraj" }])[0].validated_by === "Dabraj");
+const finChk = departmentChecklist(loaC, "finance", carried);
+check("finance checklist counts validations", finChk.some((x) => x.label === "Finance obligations validated" && !x.done && x.note === "1 of 3 validated"), JSON.stringify(finChk));
 console.log(`\n${pass}/${pass + fail} obligation checks passed`);
 process.exit(fail ? 1 : 0);
