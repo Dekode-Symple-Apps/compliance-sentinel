@@ -140,7 +140,7 @@ function ContractDetail() {
                         <td className={TD + " text-gray-700"}>{displayName(d.uploaded_by_name)}<div className="text-sm text-gray-600">{format(new Date(d.created_at), "d MMM yyyy, HH:mm")}</div></td>
                         <td className={TD}>
                           {d.ai_review_status === "done"
-                            ? <span className="inline-flex items-center gap-1.5"><SeverityIcon severity={d.verdict === "compliant" ? "info" : d.verdict} /> Risk {d.riskScore ?? "—"}{d.findings ? <span className="text-gray-500"> · {d.findings.length} finding{d.findings.length === 1 ? "" : "s"}</span> : null}</span>
+                            ? <span className="inline-flex items-center gap-1.5"><SeverityIcon severity={d.verdict === "compliant" ? "info" : d.verdict} /> {d.findings ? `${d.findings.length} finding${d.findings.length === 1 ? "" : "s"}` : "Reviewed"}</span>
                             : <span className="text-gray-500">{d.doc_role === "executed" || d.doc_role === "tender" ? "—" : d.ai_review_status}</span>}
                         </td>
                         <td className={TD + " text-right"}>
