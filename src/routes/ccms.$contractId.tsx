@@ -547,7 +547,7 @@ function DepartmentView({ cat, c, vendor, obl, fromDraft, draftDocId, reviewDocI
         <Panel title={`${OBLIGATION_CATEGORIES[cat]} obligations`}
           sub={fromDraft ? `Read from the draft · ${mine.filter((o) => o.validated_by).length} of ${mine.length} validated · PIC ${pics}` : `${mine.filter((o) => o.status === "open").length} open · PIC ${pics}`}
           right={fromDraft ? <ValidateAllButton c={c} list={mine} documentId={draftDocId} onChanged={onChanged} /> : undefined}>
-          <ObligationRows rows={mine.map((o) => ({ o, c }))} onChanged={onChanged} validate={fromDraft} documentId={draftDocId} />
+          <ObligationRows rows={mine.map((o) => ({ o, c }))} onChanged={onChanged} validate={fromDraft} documentId={draftDocId} linkToDocument={fromDraft ? draftDocId : undefined} />
         </Panel>
       )}
       {extra}

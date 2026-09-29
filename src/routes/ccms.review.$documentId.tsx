@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { DocViewer, type DocHighlight } from "@/components/doc-viewer";
 import { PdfViewer } from "@/components/pdf-viewer";
 import {
-  addCcmsComment, compareCcmsAward, decideCcmsComment, decideCcmsCommentsBulk, decideCcmsDifference, exportCcmsDocumentWithComments, getCcmsDocument, recordCcmsReview, reviewCcmsDocument, setCcmsCommentStatus, draftCcmsReturnNote } from "@/lib/ccms.functions";
+  addCcmsComment, compareCcmsAward, rereadCcmsDraftObligations, decideCcmsComment, decideCcmsCommentsBulk, decideCcmsDifference, exportCcmsDocumentWithComments, getCcmsDocument, recordCcmsReview, reviewCcmsDocument, setCcmsCommentStatus, draftCcmsReturnNote } from "@/lib/ccms.functions";
 import { CcmsHeader, StatusBadge, OutcomeText, CARD, useCcmsRole, SeverityIcon, CostChip, AiDraftButton } from "@/components/ccms-widgets";
 import { friendlyError } from "@/components/ccms-widgets";
 import { AI_ROLE, CCMS_ROLES, COMPARISON_AREAS, CONTRACT_TYPES, DECISION_LABEL, DEMO_SINGLE_USER, OBLIGATION_CATEGORIES, contractOwner, displayName, flowOf, normalizeObligations, stageTitle, roleLabel, templateById, type CcmsRole, type Decision, type Obligation, type ObligationCategory, type Stage, itemDepartment } from "@/lib/ccms";
@@ -65,12 +65,23 @@ function ReviewScreen() {
     for (const c of deviation?.clauses ?? []) if (c.excerpt && c.status !== "same") out.push({ id: `c:${c.templateClauseId}`, text: c.excerpt, kind: c.severity === "high" ? "critical" : "medium" });
     for (const i of loa?.items ?? []) if (i.excerpt) out.push({ id: `l:${i.id}`, text: i.excerpt, kind: i.status === "present" ? "info" : "medium" });
     for (const i of doc?.comparison?.items ?? []) if (i.excerpt && i.status !== "matches") out.push({ id: `x:${i.id}`, text: i.excerpt, kind: i.severity === "high" ? "critical" : "medium" });
+    // Obligations, in green, while Action Items is open: where each one sits in the contract.
+    if (tab === "comments" && review?.terms) for (const o of normalizeObligations(review.terms.obligations)) if (o.excerpt) out.push({ id: `o:${o.id}`, text: o.excerpt, kind: "obligation" });
     // Reviewers' comments on selected text are highlighted too.
     for (const t of (data?.comments ?? []) as any[]) {
       if (!t.parent_id && t.acting_role !== AI_ROLE && t.quote && t.status === "open" && t.document_id === doc?.id) out.push({ id: `t:${t.id}`, text: t.quote, kind: "edit" });
     }
     return out;
-  }, [review, deviation, loa, data?.comments, doc?.id, doc?.comparison]);
+  }, [review, deviation, loa, data?.comments, doc?.id, doc?.comparison, tab]);
+
+  // Arriving with #obl-<id> (from the contract page): open Action Items at that obligation.
+  const { hash } = useLocation();
+  useEffect(() => {
+    const m = (hash || window.location.hash).match(/^#?obl-(.+)$/);
+    if (!m || !doc) return;
+    setTab("comments"); setTabChosen(true); setActive(`o:${m[1]}`);
+    requestAnimationFrame(() => setTimeout(() => document.getElementById(`obl-${m[1]}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 300));
+  }, [hash, doc?.id]);
 
   if (isLoading) return <AppShell><div className="p-10 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="size-4 animate-spin" /> Loading…</div></AppShell>;
   if (error || !doc) return <AppShell><div className="p-10 text-sm text-red-700">{(error as Error)?.message ?? "Not found"}</div></AppShell>;
@@ -107,8 +118,9 @@ function ReviewScreen() {
   const focus = (id: string) => {
     setActive(id);
     if (anchors[id] === false) toast.message("That passage could not be located in the document.");
-    // A highlight that belongs to a comment thread opens that thread.
+    // A highlight that belongs to a comment thread opens that thread; an obligation's, its row.
     if (id.startsWith("t:")) { setFocusThread(id.slice(2)); setTab("comments"); }
+    if (id.startsWith("o:")) requestAnimationFrame(() => document.getElementById(`obl-${id.slice(2)}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" }));
   };
   const aiThreadFor = (f: any) => threads.find((t) => t.acting_role === AI_ROLE && t.anchor_ref === `Finding: ${f.ref}`);
   const openThread = (id: string) => { setFocusThread(id); setTab("comments"); };
@@ -246,7 +258,7 @@ function ReviewScreen() {
               )}
 
               {tab === "comments" && (
-                <Comments contract={contract} obligations={obligations} contractId={contract.id} documentId={doc.id} threads={threads} all={comments} decisions={decisions} route={contract.approval_route ?? []} findings={review?.findings ?? []} composer={composer} setComposer={setComposer} onDone={refresh} onDownload={isDocx ? download : undefined} exporting={exporting}
+                <Comments contract={contract} obligations={obligations} onLocateObligation={(o) => focus(`o:${o.id}`)} activeId={active} located={anchors} contractId={contract.id} documentId={doc.id} threads={threads} all={comments} decisions={decisions} route={contract.approval_route ?? []} findings={review?.findings ?? []} composer={composer} setComposer={setComposer} onDone={refresh} onDownload={isDocx ? download : undefined} exporting={exporting}
                   focusThread={focusThread} onLocate={(t) => { const h = threadHighlight(t); if (h) focus(h); }} />
               )}
             </div>
@@ -269,8 +281,8 @@ type ItemDecision = "accepted" | "rejected";
 /** Review items: each AI suggestion or reviewer comment is accepted or
  *  rejected. The accepted ones are the review that goes back to the
  *  counterparty — "Download Accepted Review" exports only those. */
-function Comments({ contract, obligations, contractId, documentId, threads, all, decisions, route, findings, composer, setComposer, onDone, focusThread, onLocate, onDownload, exporting }: {
-  contract: any; obligations: Obligation[]; contractId: string; documentId: string; threads: any[]; all: any[]; decisions: Record<string, any>; route: Stage[]; findings: any[]; composer: Anchor | null; setComposer: (a: Anchor | null) => void; onDone: () => void;
+function Comments({ contract, obligations, onLocateObligation, activeId, located, contractId, documentId, threads, all, decisions, route, findings, composer, setComposer, onDone, focusThread, onLocate, onDownload, exporting }: {
+  contract: any; obligations: Obligation[]; onLocateObligation: (o: Obligation) => void; activeId: string | null; located: Record<string, boolean>; contractId: string; documentId: string; threads: any[]; all: any[]; decisions: Record<string, any>; route: Stage[]; findings: any[]; composer: Anchor | null; setComposer: (a: Anchor | null) => void; onDone: () => void;
   focusThread: string | null; onLocate: (t: any) => void; onDownload?: () => void; exporting?: boolean;
 }) {
   const [role] = useCcmsRole();
@@ -377,7 +389,7 @@ function Comments({ contract, obligations, contractId, documentId, threads, all,
           })}
         </div>
       )}
-      <ObligationsToValidate contract={contract} documentId={documentId} obligations={obligations} dept={dept} onDone={onDone} />
+      <ObligationsToValidate contract={contract} documentId={documentId} obligations={obligations} dept={dept} onDone={onDone} onLocate={onLocateObligation} activeId={activeId} located={located} />
       {shown.length === 0 && <p className="text-sm text-gray-500">{show === "pending" ? "Nothing left to decide." : "None here."}</p>}
       {shown.map((t) => {
         const st = stateOf(t); const d = decisions[t.id];
@@ -430,10 +442,28 @@ function Comments({ contract, obligations, contractId, documentId, threads, all,
 /** The draft's obligations, read by the AI with the review. Nothing to accept or
  *  reject: the department validates each one (amount, date, who), and the
  *  contract page shows it validated. The review filter picks the department. */
-function ObligationsToValidate({ contract, documentId, obligations, dept, onDone }: { contract: any; documentId: string; obligations: Obligation[]; dept: string; onDone: () => void }) {
+function ObligationsToValidate({ contract, documentId, obligations, dept, onDone, onLocate, activeId, located }: {
+  contract: any; documentId: string; obligations: Obligation[]; dept: string; onDone: () => void;
+  onLocate: (o: Obligation) => void; activeId: string | null; located: Record<string, boolean>;
+}) {
   const [open, setOpen] = useState(true);
+  const [role] = useCcmsRole();
+  const rereadFn = useServerFn(rereadCcmsDraftObligations);
+  const [reading, setReading] = useState(false);
+  async function reread() {
+    setReading(true);
+    try { const r: any = await rereadFn({ data: { document_id: documentId, acting_role: role } }); toast.success(`${r.count} obligations read, ${r.located} linked to the document`); onDone(); }
+    catch (e) { toast.error(friendlyError(e)); } finally { setReading(false); }
+  }
   const cats = (Object.keys(OBLIGATION_CATEGORIES) as ObligationCategory[]).filter((k) => dept === "all" || dept === k);
   const list = obligations.filter((o) => cats.includes(o.category));
+  // A draft reviewed before obligations were read with the review.
+  if (!obligations.length && !contract.repository) return (
+    <div className={CARD + " flex items-center gap-2 p-3 text-sm"}>
+      <span className="flex-1 text-gray-600">Obligations have not been read from this draft yet.</span>
+      <Button size="sm" variant="outline" disabled={reading} onClick={reread} className="gap-1.5">{reading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />} Read Obligations</Button>
+    </div>
+  );
   if (!list.length) return null;
   const done = list.filter((o) => o.validated_by).length;
   return (
@@ -445,7 +475,12 @@ function ObligationsToValidate({ contract, documentId, obligations, dept, onDone
       </button>
       {open && (
         <>
-          <p className="border-t border-gray-100 px-3 py-2 text-xs text-gray-500">Read from this draft by the AI. Check each against the contract; validated ones show as validated on the contract page and carry into the repository when filed.</p>
+          <p className="flex items-start gap-2 border-t border-gray-100 px-3 py-2 text-xs text-gray-500">
+            <span className="flex-1">Read from this draft by the AI and highlighted in green. Click one to see its wording; validated ones show as validated on the contract page and carry into the repository when filed.</span>
+            <button type="button" disabled={reading} onClick={reread} className="inline-flex shrink-0 items-center gap-1 text-blue-700 hover:underline" title="Read the obligations from this draft again; validations are kept">
+              {reading ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />} {reading ? "Reading…" : "Re-read"}
+            </button>
+          </p>
           {cats.map((k) => {
             const mine = list.filter((o) => o.category === k);
             if (!mine.length) return null;
@@ -456,7 +491,7 @@ function ObligationsToValidate({ contract, documentId, obligations, dept, onDone
                   <span className="text-xs text-gray-500">PIC {[...new Set(mine.map((o) => o.pic))].join(", ")}</span>
                   <span className="ml-auto"><ValidateAllButton c={contract} list={mine} documentId={documentId} onChanged={onDone} /></span>
                 </div>
-                <ObligationRows rows={mine.map((o) => ({ o, c: contract }))} onChanged={onDone} validate documentId={documentId} compact />
+                <ObligationRows rows={mine.map((o) => ({ o, c: contract }))} onChanged={onDone} validate documentId={documentId} compact onLocate={onLocate} activeId={activeId} located={located} />
               </div>
             );
           })}

@@ -1235,8 +1235,8 @@ export async function runKeyTerms(fileName: string, text: string, pdfBase64?: st
 Return ONLY JSON:
 {"parties": "both parties' names, short", "value": <number or null>, "currency": "MYR", "start_date": "yyyy-mm-dd or null", "end_date": "yyyy-mm-dd or null (the date it expires; compute from a stated term if the start date is stated)",
  "notice_period": "e.g. 30 days' written notice, or empty", "renewal": "how it renews, at most 12 words, or empty", "governing_law": "short",
- "obligations": [{"text": "the obligation, at most 15 words", "category": "finance" | "business" | "legal", "due_date": "yyyy-mm-dd when the contract fixes or lets you compute the date, else null", "trigger": "the event or timing it depends on, at most 10 words", "percent": <number or null>, "amount": <number or null>}]}
-Obligations: up to 8, of either party, that someone must act on. finance = paying, invoicing, deposits, retention, fees; legal = notices, stamping, confidentiality returns, data breaches, compliance; business = delivery, performance, reporting, renewal. A payment schedule gives one finance obligation per milestone, with its percent and amount (percent × contract value).`;
+ "obligations": [{"text": "the obligation, at most 15 words", "category": "finance" | "business" | "legal", "due_date": "yyyy-mm-dd when the contract fixes or lets you compute the date, else null", "trigger": "the event or timing it depends on, at most 10 words", "percent": <number or null>, "amount": <number or null>, "clause": "where it is: the clause number or schedule, e.g. 4.2 or Schedule 2", "excerpt": "EXACT verbatim text that states it, 5-25 words, copied character for character from ONE paragraph so it can be highlighted; for a row of a payment schedule table, copy the WHOLE row (milestone, percentage, amount, due) in order, cells separated by one space"}]}
+Obligations: up to 8, of either party, that someone must act on. finance = paying, invoicing, deposits, retention, fees, and the bonds, guarantees and insurance a party must provide; legal = notices, stamping, confidentiality returns, data breaches, compliance; business = delivery, performance, reporting, renewal. A payment schedule gives one finance obligation per milestone, with its percent and amount (percent × contract value).`;
   const parts: any[] = [{ text: prompt }];
   if (text.trim()) parts.push({ text: `CONTRACT (${fileName}):\n${text.slice(0, 120_000)}` });
   if (pdfBase64) parts.push({ inlineData: { mimeType: "application/pdf", data: pdfBase64 } });
@@ -1305,6 +1305,7 @@ const obligationSchema = z.object({
   amount: z.number().nullable().optional(), percent: z.number().nullable().optional(), status: z.enum(["open", "done"]).optional(),
   done_by: z.string().nullable().optional(), done_at: z.string().nullable().optional(), auto: z.string().optional(),
   validated_by: z.string().nullable().optional(), validated_at: z.string().nullable().optional(),
+  clause: z.string().max(60).optional(), excerpt: z.string().max(400).optional(),
 });
 
 export const saveCcmsRepository = createServerFn({ method: "POST" })
@@ -1386,6 +1387,29 @@ export const updateCcmsObligation = createServerFn({ method: "POST" })
     await logEvent(sb, { contract_id: contract.id, event_type: "obligation", actor_id: userId, actor_name: userName, acting_role: null,
       detail: data.status ? `${data.status === "done" ? "Done" : "Reopened"}: ${o.text}` : `Obligation updated: ${o.text}${data.pic ? ` — PIC ${data.pic}` : ""}${data.due_date ? ` — due ${data.due_date}` : ""}` });
     return { ok: true };
+  });
+
+/** Read a draft's obligations again (with where each sits in the document),
+ *  without re-running the review. Validations already made are kept. */
+export const rereadCcmsDraftObligations = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({ document_id: z.string().uuid(), acting_role: roleSchema }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await ccms(context);
+    const { data: doc } = await sb.from("ccms_documents").select("*").eq("id", data.document_id).single();
+    if (!doc || !["draft", "counterparty"].includes(doc.doc_role)) throw new Error("Obligations are read from a draft under review.");
+    const contract = await loadContract(sb, doc.contract_id, tenantId);
+    if (contract.repository) throw new Error("This contract is filed; its obligations are in the repository.");
+    const { text, pdfBase64 } = await documentText(doc);
+    const { out, res } = await runKeyTerms(doc.file_name, text, pdfBase64);
+    const terms = draftTerms(out, contract);
+    terms.obligations = carryValidation(terms.obligations, doc.ai_review?.terms?.obligations);
+    await sb.from("ccms_documents").update({ ai_review: { ...(doc.ai_review ?? {}), terms } }).eq("id", doc.id);
+    const model = res.modelVersion ?? (await getDefaultModel());
+    await sb.from("ccms_contracts").update({ cost_log: [...(contract.cost_log ?? []).slice(-49), costEntry("Draft obligations", res, model)] }).eq("id", contract.id);
+    await logEvent(sb, { contract_id: contract.id, event_type: "obligation", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
+      detail: `Obligations read again from v${doc.version}: ${terms.obligations.length} found.` });
+    return { count: terms.obligations.length, located: terms.obligations.filter((o) => o.excerpt).length };
   });
 
 /** Validate obligations: the department confirms the AI read them right.

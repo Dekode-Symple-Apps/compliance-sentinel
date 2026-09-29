@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { BadgeCheck, Check, Loader2, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { BadgeCheck, Check, FileSearch, Loader2, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { updateCcmsObligation, validateCcmsObligations } from "@/lib/ccms.functions";
 import { friendlyError, fmtMoney, useCcmsRole } from "@/components/ccms-widgets";
 import {
@@ -109,8 +109,12 @@ export function ValidatedMark({ o }: { o: Obligation }) {
 
 /** Obligations as a list with Mark Done — on the contract page and across contracts.
  *  `validate` (in review): each row is confirmed by its department instead. */
-export function ObligationRows({ rows, showContract, onChanged, readOnly, validate, documentId, compact }: {
+export function ObligationRows({ rows, showContract, onChanged, readOnly, validate, documentId, compact, onLocate, activeId, located, linkToDocument }: {
   rows: { o: Obligation; c: any }[]; showContract?: boolean; onChanged: () => void; readOnly?: boolean; validate?: boolean; documentId?: string; compact?: boolean;
+  /** Beside the document: clicking an obligation highlights its wording. */
+  onLocate?: (o: Obligation) => void; activeId?: string | null; located?: Record<string, boolean>;
+  /** Away from the document: "Show in document" opens the review at the wording. */
+  linkToDocument?: string;
 }) {
   const fn = useServerFn(updateCcmsObligation);
   const [busy, setBusy] = useState<string | null>(null);
@@ -124,15 +128,24 @@ export function ObligationRows({ rows, showContract, onChanged, readOnly, valida
   return (
     <ul className="divide-y divide-gray-100">
       {rows.map(({ o, c }) => (
-        <li key={c.id + o.id} className={cn("flex items-start gap-3 px-4 py-2.5 text-sm", o.status === "done" && "opacity-60", obligationBucket(o) === "overdue" && "bg-red-50/40")}>
+        <li key={c.id + o.id} id={`obl-${o.id}`} className={cn("flex items-start gap-3 px-4 py-2.5 text-sm", o.status === "done" && "opacity-60", obligationBucket(o) === "overdue" && "bg-red-50/40", activeId === `o:${o.id}` && "bg-emerald-50 ring-2 ring-inset ring-emerald-600")}>
           <div className="min-w-0 flex-1">
-            <div className={cn("text-gray-900", o.status === "done" && "line-through")}>{o.text}</div>
+            {onLocate && o.excerpt
+              ? <button type="button" onClick={() => onLocate(o)} title="Show in the document" className={cn("text-left text-gray-900 hover:underline", o.status === "done" && "line-through")}>{o.text}</button>
+              : <div className={cn("text-gray-900", o.status === "done" && "line-through")}>{o.text}</div>}
             <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-gray-500">
               <CategoryChip c={o.category} />
               <span>PIC {o.pic}</span>
               {o.amount != null && <span className="font-medium text-gray-700">{fmtMoney(o.amount, c.repository?.currency ?? c.currency)}{o.percent != null ? ` (${o.percent}%)` : ""}</span>}
               {showContract && <Link to="/ccms/$contractId" params={{ contractId: c.id }} className="text-blue-700 hover:underline">{c.reference_number}</Link>}
               {showContract && <span title={c.entity}>{entityShort(c.entity)} · {c.counterparty_name}</span>}
+              {o.clause && <span className="text-gray-600">{/^\d/.test(o.clause) ? `Clause ${o.clause}` : o.clause}</span>}
+              {o.excerpt && located?.[`o:${o.id}`] === false && <span className="text-gray-400">not located</span>}
+              {o.excerpt && linkToDocument && (
+                <Link to="/ccms/review/$documentId" params={{ documentId: linkToDocument }} hash={`obl-${o.id}`} className="inline-flex items-center gap-0.5 text-blue-700 hover:underline">
+                  <FileSearch className="size-3.5" /> Show in document
+                </Link>
+              )}
               <ValidatedMark o={o} />
             </div>
           </div>

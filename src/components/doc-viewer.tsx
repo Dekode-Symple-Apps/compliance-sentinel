@@ -27,7 +27,7 @@ export interface DocHighlight {
    *  place it applies. */
   altText?: string;
   /** Highlight style bucket — maps to a ::highlight() rule. */
-  kind: "edit" | "critical" | "high" | "medium" | "info";
+  kind: "edit" | "critical" | "high" | "medium" | "info" | "obligation";
 }
 
 export type AnchorStatus = Record<string, boolean>;
@@ -173,6 +173,7 @@ const HIGHLIGHT_CSS = `
 ::highlight(dv-high)     { background-color: rgba(249, 115, 22, 0.26); }
 ::highlight(dv-medium)   { background-color: rgba(234, 179, 8, 0.28); }
 ::highlight(dv-info)     { background-color: rgba(59, 130, 246, 0.20); }
+::highlight(dv-obligation) { background-color: rgba(16, 185, 129, 0.22); }
 ::highlight(dv-active)   { background-color: rgba(139, 92, 246, 0.45); }
 `;
 
@@ -333,7 +334,11 @@ export function DocViewer({
     const ranges = new Map<string, Range>();
     const status: AnchorStatus = {};
     for (const h of highlights) {
-      const range = findRange(index, h.text) || (h.altText ? findRange(index, h.altText) : null);
+      let range = findRange(index, h.text) || (h.altText ? findRange(index, h.altText) : null);
+      // An obligation quoted from a table cell (a payment schedule's milestone)
+      // highlights its whole row: milestone, percentage, amount and due date.
+      const row = h.kind === "obligation" ? range?.startContainer.parentElement?.closest("tr") : null;
+      if (row && range) { range = document.createRange(); range.selectNodeContents(row); }
       status[h.id] = !!range;
       if (!range) continue;
       ranges.set(h.id, range);

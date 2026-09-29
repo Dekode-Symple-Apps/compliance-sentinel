@@ -405,6 +405,8 @@ export interface Obligation {
   amount?: number | null; percent?: number | null; status: "open" | "done"; done_by?: string | null; done_at?: string | null; auto?: string;
   /** Confirmed by the department during review: the AI read it right. Carried into the repository. */
   validated_by?: string | null; validated_at?: string | null;
+  /** Where it is in the contract ("4.2", "Schedule 2") and its exact wording there, to highlight it. */
+  clause?: string; excerpt?: string;
 }
 /** Who validates each department's obligations; the first is who "Acting as" switches to. */
 export const VALIDATE_ROLES: Record<ObligationCategory, CcmsRole[]> = {
@@ -455,6 +457,7 @@ export function normalizeObligations(list: any[] | null | undefined, owner?: str
       percent: typeof o.percent === "number" ? o.percent : o.percent ? Number(o.percent) || null : null,
       status: o.status === "done" ? "done" : "open", done_by: o.done_by ?? null, done_at: o.done_at ?? null, auto: o.auto,
       validated_by: o.validated_by ?? null, validated_at: o.validated_at ?? null,
+      clause: o.clause ? String(o.clause).slice(0, 60) : undefined, excerpt: o.excerpt ? String(o.excerpt).slice(0, 400) : undefined,
     } as Obligation;
   }).filter((o) => o.text);
 }

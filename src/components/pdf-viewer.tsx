@@ -23,7 +23,7 @@ export interface PdfHighlight {
   text: string;
   /** Fallback anchor if `text` can't be located. */
   altText?: string;
-  kind: "edit" | "critical" | "high" | "medium" | "info" | "input";
+  kind: "edit" | "critical" | "high" | "medium" | "info" | "input" | "obligation";
 }
 
 /** A region on a page, for breaches with no text to anchor on (a stretched
@@ -101,6 +101,7 @@ const KIND_COLORS: Record<PdfHighlight["kind"], [string, string]> = {
   medium:   ["rgba(245,158,11,0.3)",  "rgba(245,158,11,0.52)"],
   info:     ["rgba(56,189,248,0.28)", "rgba(56,189,248,0.5)"],
   edit:     ["rgba(16,185,129,0.28)", "rgba(16,185,129,0.5)"],
+  obligation: ["rgba(16,185,129,0.22)", "rgba(16,185,129,0.45)"],
 };
 
 function normText(s: string): string {
@@ -121,7 +122,7 @@ interface PageEntry {
 }
 
 const BOX_COLORS: Record<PdfHighlight["kind"], string> = {
-  input: "168,85,247", critical: "220,38,38", high: "234,88,12", medium: "217,119,6", info: "2,132,199", edit: "5,150,105",
+  input: "168,85,247", critical: "220,38,38", high: "234,88,12", medium: "217,119,6", info: "2,132,199", edit: "5,150,105", obligation: "5,150,105",
 };
 
 export function PdfViewer({ fileUrl, className, highlights, boxes, activeId, onSelect, onAnchorStatus, focusPage }: PdfViewerProps) {
