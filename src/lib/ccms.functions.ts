@@ -14,7 +14,7 @@ import {
   CONTRACT_TYPES, CCMS_ROLES, DEMO_SINGLE_USER, flowOf, LSH_ENTITIES, LOA_ITEMS, BLOCKING_FLAGS, AI_ROLE, roleLabel,
   buildRoute, computeFlags, nextApproval, reviewsDone, templateById, toMyr, fillNda, displayName,
   COMPARISON_AREAS, defaultSecurities, SECURITY_TYPES, APPROVAL_BANDS, type Security, type KeyTerms,
-  autoObligations, contractOwner, normalizeObligations, straightThrough, STP_ACTOR,
+  autoObligations, contractOwner, normalizeObligations, straightThrough, STP_ACTOR, itemDepartment,
   type CcmsRole, type Flag, type Stage, type VendorLite,
 } from "@/lib/ccms";
 
@@ -740,12 +740,16 @@ export const recordCcmsReview = createServerFn({ method: "POST" })
     if (data.outcome === "cleared") {
       const { count: own } = await sb.from("ccms_comments").select("id", { count: "exact", head: true })
         .eq("contract_id", contract.id).eq("acting_role", owner).eq("status", "open").is("parent_id", null);
-      const { count: ai } = latest?.[0]
-        ? await sb.from("ccms_comments").select("id", { count: "exact", head: true })
-            .eq("document_id", latest[0].id).eq("acting_role", AI_ROLE).eq("status", "open").is("parent_id", null)
-        : { count: 0 };
-      const open = [own ? `${own} of your own` : "", ai ? `${ai} from the AI Reviewer on the latest draft` : ""].filter(Boolean);
-      if (open.length) throw new Error(`Comment threads are still open (${open.join(", ")}). Resolve them, or record "Cleared with comments".`);
+      // Only this review's action items hold it: Legal's for Legal Vetting, Finance's for Finance Review.
+      let ai = 0;
+      if (latest?.[0]) {
+        const { data: items } = await sb.from("ccms_comments").select("id,acting_role,anchor_ref,body")
+          .eq("document_id", latest[0].id).eq("acting_role", AI_ROLE).eq("status", "open").is("parent_id", null);
+        const { data: rev } = await sb.from("ccms_documents").select("ai_review->findings").eq("id", latest[0].id).single();
+        ai = (items ?? []).filter((t: any) => itemDepartment(t, (rev as any)?.findings ?? [], route) === data.stage).length;
+      }
+      const open = [own ? `${own} of your own` : "", ai ? `${ai} AI suggestion${ai === 1 ? "" : "s"} for this review` : ""].filter(Boolean);
+      if (open.length) throw new Error(`Action items still to accept or reject (${open.join(", ")}). Decide them, or record "Cleared with comments".`);
     }
     const now = new Date().toISOString();
     const nextRoute = route.map((s) => s.key === data.stage ? { ...s, status: data.outcome, decided_by: userName, decided_at: now, note: data.note ?? null } : s);

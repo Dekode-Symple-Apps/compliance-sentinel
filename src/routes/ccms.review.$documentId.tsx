@@ -12,7 +12,7 @@ import {
   addCcmsComment, compareCcmsAward, decideCcmsComment, decideCcmsCommentsBulk, decideCcmsDifference, exportCcmsDocumentWithComments, getCcmsDocument, recordCcmsReview, reviewCcmsDocument, setCcmsCommentStatus, draftCcmsReturnNote } from "@/lib/ccms.functions";
 import { CcmsHeader, StatusBadge, OutcomeText, CARD, useCcmsRole, SeverityIcon, CostChip, AiDraftButton } from "@/components/ccms-widgets";
 import { friendlyError } from "@/components/ccms-widgets";
-import { AI_ROLE, CCMS_ROLES, COMPARISON_AREAS, CONTRACT_TYPES, DECISION_LABEL, DEMO_SINGLE_USER, displayName, flowOf, stageTitle, roleLabel, templateById, type CcmsRole, type Decision, type Stage } from "@/lib/ccms";
+import { AI_ROLE, CCMS_ROLES, COMPARISON_AREAS, CONTRACT_TYPES, DECISION_LABEL, DEMO_SINGLE_USER, displayName, flowOf, stageTitle, roleLabel, templateById, type CcmsRole, type Decision, type Stage, itemDepartment } from "@/lib/ccms";
 import { CommentBody } from "@/components/ccms-execution";
 import { RememberedTextarea } from "@/components/ccms-actions";
 import { remember } from "@/lib/ccms-prefill";
@@ -144,7 +144,7 @@ function ReviewScreen() {
           </div>
         </div>
 
-        <OutcomeBar contract={contract} role={role} openThreadsByRole={threads.filter((x) => x.status === "open")} onDone={refresh} />
+        <OutcomeBar contract={contract} role={role} openThreadsByRole={threads.filter((x) => x.status === "open")} findings={review?.findings ?? []} onDone={refresh} />
 
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_480px] h-[calc(100vh-13rem)]">
           <div className="min-w-0 overflow-auto border-r border-gray-200">
@@ -242,7 +242,7 @@ function ReviewScreen() {
               )}
 
               {tab === "comments" && (
-                <Comments contractId={contract.id} documentId={doc.id} threads={threads} all={comments} decisions={decisions} composer={composer} setComposer={setComposer} onDone={refresh} onDownload={isDocx ? download : undefined} exporting={exporting}
+                <Comments contractId={contract.id} documentId={doc.id} threads={threads} all={comments} decisions={decisions} route={contract.approval_route ?? []} findings={review?.findings ?? []} composer={composer} setComposer={setComposer} onDone={refresh} onDownload={isDocx ? download : undefined} exporting={exporting}
                   focusThread={focusThread} onLocate={(t) => { const h = threadHighlight(t); if (h) focus(h); }} />
               )}
             </div>
@@ -265,8 +265,8 @@ type ItemDecision = "accepted" | "rejected";
 /** Review items: each AI suggestion or reviewer comment is accepted or
  *  rejected. The accepted ones are the review that goes back to the
  *  counterparty — "Download Accepted Review" exports only those. */
-function Comments({ contractId, documentId, threads, all, decisions, composer, setComposer, onDone, focusThread, onLocate, onDownload, exporting }: {
-  contractId: string; documentId: string; threads: any[]; all: any[]; decisions: Record<string, any>; composer: Anchor | null; setComposer: (a: Anchor | null) => void; onDone: () => void;
+function Comments({ contractId, documentId, threads, all, decisions, route, findings, composer, setComposer, onDone, focusThread, onLocate, onDownload, exporting }: {
+  contractId: string; documentId: string; threads: any[]; all: any[]; decisions: Record<string, any>; route: Stage[]; findings: any[]; composer: Anchor | null; setComposer: (a: Anchor | null) => void; onDone: () => void;
   focusThread: string | null; onLocate: (t: any) => void; onDownload?: () => void; exporting?: boolean;
 }) {
   const [role] = useCcmsRole();
@@ -277,10 +277,15 @@ function Comments({ contractId, documentId, threads, all, decisions, composer, s
   const [note, setNote] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [show, setShow] = useState<"pending" | ItemDecision | "all">("pending");
-  const [who, setWho] = useState<"everyone" | "ai" | "people">("everyone");
+  // Which review each item belongs to; the view follows whoever is acting.
+  const reviews = route.filter((st) => st.kind === "review");
+  const deptOf = (t: any) => itemDepartment(t, findings, route);
+  const mine = () => reviews.find((st) => st.role === role)?.key ?? "all";
+  const [dept, setDept] = useState<string>(mine);
+  useEffect(() => { setDept(mine()); }, [role]);
   const [adding, setAdding] = useState(false);
   const stateOf = (t: any): "pending" | ItemDecision => decisions[t.id]?.decision ?? "pending";
-  const count = (k: "pending" | ItemDecision) => threads.filter((t) => stateOf(t) === k).length;
+  const count = (k: "pending" | ItemDecision) => threads.filter((t) => stateOf(t) === k && (dept === "all" || itemDepartment(t, findings, route) === dept)).length;
   // Bring an item opened from a finding or a highlight into view.
   useEffect(() => {
     if (!focusThread) return;
@@ -307,9 +312,11 @@ function Comments({ contractId, documentId, threads, all, decisions, composer, s
     } catch (e: any) { toast.error(friendlyError(e)); } finally { setBusy(null); }
   }
 
-  const shown = threads.filter((t) => (show === "all" || stateOf(t) === show) && (who === "everyone" || (who === "ai") === (t.acting_role === AI_ROLE)));
-  // Accept All: every item still to decide, within the Everyone / AI / Reviewers filter.
-  const toAccept = threads.filter((t) => stateOf(t) === "pending" && (who === "everyone" || (who === "ai") === (t.acting_role === AI_ROLE)));
+  const inDept = (t: any) => dept === "all" || deptOf(t) === dept;
+  const shown = threads.filter((t) => (show === "all" || stateOf(t) === show) && inDept(t));
+  // Accept All: every item still to decide in the review being looked at.
+  const toAccept = threads.filter((t) => stateOf(t) === "pending" && inDept(t));
+  const deptLabel = (k: string) => stageTitle(reviews.find((st) => st.key === k)?.label ?? k);
   async function acceptAll() {
     setBusy("all");
     try {
@@ -326,7 +333,7 @@ function Comments({ contractId, documentId, threads, all, decisions, composer, s
             <div className="font-semibold text-gray-900">Accepted review</div>
             <div className="text-gray-600"><span className="text-emerald-700 font-medium">{accepted} accepted</span> · {count("rejected")} rejected · <span className={count("pending") ? "text-amber-700 font-medium" : ""}>{count("pending")} to decide</span></div>
           </div>
-          {toAccept.length > 0 && <Button size="sm" variant="outline" disabled={busy === "all"} onClick={acceptAll} className="gap-1.5 border-emerald-300 text-emerald-800 hover:bg-emerald-50">{busy === "all" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} Accept All ({toAccept.length})</Button>}
+          {toAccept.length > 0 && <Button size="sm" variant="outline" disabled={busy === "all"} onClick={acceptAll} className="gap-1.5 border-emerald-300 text-emerald-800 hover:bg-emerald-50">{busy === "all" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} Accept All{dept !== "all" ? ` · ${deptLabel(dept)}` : ""} ({toAccept.length})</Button>}
           {onDownload && <Button size="sm" disabled={!accepted || exporting} onClick={onDownload} className="gap-1.5">{exporting ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />} Download</Button>}
         </div>
         <p className="mt-1.5 text-xs text-gray-500">Only accepted items go into the Word file sent to the counterparty.</p>
@@ -353,10 +360,19 @@ function Comments({ contractId, documentId, threads, all, decisions, composer, s
             {l}{k !== "all" && <span className="ml-1 text-gray-500">{count(k)}</span>}
           </button>
         ))}
-        <select value={who} onChange={(e) => setWho(e.target.value as any)} className="ml-auto rounded-md border border-gray-200 bg-white px-2 py-1 text-sm">
-          <option value="everyone">Everyone</option><option value="ai">AI Reviewer</option><option value="people">Reviewers</option>
-        </select>
       </div>
+      {reviews.length > 1 && (
+        <div className="flex flex-wrap gap-1.5">
+          {[{ key: "all", label: "All reviews" }, ...reviews.map((st) => ({ key: st.key, label: stageTitle(st.label) }))].map((o) => {
+            const n = threads.filter((t) => stateOf(t) === "pending" && (o.key === "all" || deptOf(t) === o.key)).length;
+            return (
+              <button key={o.key} onClick={() => setDept(o.key)} className={cn("rounded-full border px-3 py-1 text-sm", dept === o.key ? "border-gray-900 bg-gray-900 text-white" : "border-gray-200 text-gray-600 hover:border-gray-400")}>
+                {o.label} <span className={dept === o.key ? "text-gray-300" : "text-gray-500"}>{n}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
       {shown.length === 0 && <p className="text-sm text-gray-500">{show === "pending" ? "Nothing left to decide." : "None here."}</p>}
       {shown.map((t) => {
         const st = stateOf(t); const d = decisions[t.id];
@@ -366,6 +382,7 @@ function Comments({ contractId, documentId, threads, all, decisions, composer, s
               {t.acting_role === AI_ROLE && <Bot className="size-4 text-gray-600" />}
               <span className="font-semibold text-gray-900">{t.acting_role === AI_ROLE ? "AI suggestion" : roleLabel(t.acting_role)}</span>
               <span className="text-gray-500">{t.acting_role === AI_ROLE ? "" : `${displayName(t.author_name)} · `}{format(new Date(t.created_at), "d MMM, HH:mm")}</span>
+              {reviews.length > 1 && <span className="rounded-full border border-gray-200 px-2 py-0.5 text-xs text-gray-600">{deptLabel(deptOf(t))}</span>}
               <span className={cn("ml-auto rounded-full border px-2 py-0.5 text-xs font-semibold",
                 st === "accepted" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : st === "rejected" ? "border-gray-200 bg-gray-50 text-gray-600" : "border-amber-200 bg-amber-50 text-amber-800")}>
                 {st === "accepted" ? "Accepted" : st === "rejected" ? "Rejected" : "To decide"}
@@ -407,7 +424,7 @@ function Comments({ contractId, documentId, threads, all, decisions, composer, s
 
 /** Where each review stands, and a button per pending review. The decision
  *  itself is a pop-up, opened here or straight from the contract's milestone. */
-function OutcomeBar({ contract, role, openThreadsByRole, onDone }: { contract: any; role: CcmsRole; openThreadsByRole: any[]; onDone: () => void }) {
+function OutcomeBar({ contract, role, openThreadsByRole, findings, onDone }: { contract: any; role: CcmsRole; openThreadsByRole: any[]; findings: any[]; onDone: () => void }) {
   const [, setRole] = useCcmsRole();
   const route: Stage[] = contract.approval_route ?? [];
   const stages = route.filter((s) => s.kind === "review");
@@ -436,15 +453,16 @@ function OutcomeBar({ contract, role, openThreadsByRole, onDone }: { contract: a
           );
         })}
       </div>
-      {open && <OutcomeDialog stage={open} contract={contract} lite={lite} openThreads={openThreadsByRole} onClose={() => setOpen(null)} onDone={onDone} />}
+      {open && <OutcomeDialog stage={open} contract={contract} lite={lite} openThreads={openThreadsByRole} findings={findings} onClose={() => setOpen(null)} onDone={onDone} />}
     </div>
   );
 }
 
-function OutcomeDialog({ stage, contract, lite, openThreads, onClose, onDone }: { stage: Stage; contract: any; lite: boolean; openThreads: any[]; onClose: () => void; onDone: () => void }) {
+function OutcomeDialog({ stage, contract, lite, openThreads, findings, onClose, onDone }: { stage: Stage; contract: any; lite: boolean; openThreads: any[]; findings: any[]; onClose: () => void; onDone: () => void }) {
   const recordFn = useServerFn(recordCcmsReview);
   const draftFn = useServerFn(draftCcmsReturnNote);
-  const mineOpen = openThreads.filter((t) => t.acting_role === stage.role || t.acting_role === AI_ROLE).length;
+  // Only this review's items: Legal's for Legal Vetting, Finance's for Finance Review.
+  const mineOpen = openThreads.filter((t) => itemDepartment(t, findings, contract.approval_route ?? []) === stage.key).length;
   const [outcome, setOutcome] = useState<"cleared" | "cleared_with_comments" | "not_cleared">(mineOpen ? "cleared_with_comments" : "cleared");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);

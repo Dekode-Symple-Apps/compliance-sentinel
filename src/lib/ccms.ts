@@ -291,6 +291,20 @@ export function straightThrough(
   ];
   return { eligible: checks.every(([ok]) => ok), reasons: checks.filter(([ok]) => ok).map(([, r]) => r), blockers: checks.filter(([ok]) => !ok).map(([, , b]) => b) };
 }
+/** Which review an action item belongs to: the AI's by its finding's category
+ *  (legal and compliance → Legal; financial, commercial, operational → Finance),
+ *  a reviewer's by their own review. Falls back to the review the route has. */
+export function itemDepartment(t: { acting_role?: string | null; anchor_ref?: string | null; body?: string | null }, findings: any[], route: Stage[]): string {
+  const reviews = route.filter((s) => s.kind === "review").map((s) => s.key);
+  const pick = (k: string) => (reviews.includes(k) ? k : reviews.includes("legal") ? "legal" : reviews[0] ?? "legal");
+  if (t.acting_role && t.acting_role !== AI_ROLE) return pick(t.acting_role === "contract_manager" ? "contracts" : t.acting_role);
+  const ref = String(t.anchor_ref ?? "").replace(/^Finding:\s*/, "");
+  const same = findings.filter((f) => f.ref === ref);
+  const f = same.find((x) => String(t.body ?? "").startsWith(String(x.issue ?? "").slice(0, 60))) ?? same[0];
+  const cat = f?.category;
+  return pick(["financial", "commercial", "operational"].includes(cat) ? "finance" : "legal");
+}
+
 /** True when every stage was decided straight-through. */
 export const wasStraightThrough = (route: Stage[] | null | undefined) => !!route?.length && route.every((s) => s.decided_by === STP_ACTOR);
 
