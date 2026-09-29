@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { DocViewer, type DocHighlight } from "@/components/doc-viewer";
 import { PdfViewer } from "@/components/pdf-viewer";
 import {
-  addCcmsComment, compareCcmsAward, decideCcmsComment, decideCcmsDifference, exportCcmsDocumentWithComments, getCcmsDocument, recordCcmsReview, reviewCcmsDocument, setCcmsCommentStatus, draftCcmsReturnNote } from "@/lib/ccms.functions";
+  addCcmsComment, compareCcmsAward, decideCcmsComment, decideCcmsCommentsBulk, decideCcmsDifference, exportCcmsDocumentWithComments, getCcmsDocument, recordCcmsReview, reviewCcmsDocument, setCcmsCommentStatus, draftCcmsReturnNote } from "@/lib/ccms.functions";
 import { CcmsHeader, StatusBadge, OutcomeText, CARD, useCcmsRole, SeverityIcon, CostChip, AiDraftButton } from "@/components/ccms-widgets";
 import { friendlyError } from "@/components/ccms-widgets";
 import { AI_ROLE, CCMS_ROLES, COMPARISON_AREAS, CONTRACT_TYPES, DECISION_LABEL, DEMO_SINGLE_USER, displayName, flowOf, stageTitle, roleLabel, templateById, type CcmsRole, type Decision, type Stage } from "@/lib/ccms";
@@ -272,6 +272,7 @@ function Comments({ contractId, documentId, threads, all, decisions, composer, s
   const [role] = useCcmsRole();
   const addFn = useServerFn(addCcmsComment);
   const decideFn = useServerFn(decideCcmsComment);
+  const bulkFn = useServerFn(decideCcmsCommentsBulk);
   const [body, setBody] = useState("");
   const [note, setNote] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -307,6 +308,15 @@ function Comments({ contractId, documentId, threads, all, decisions, composer, s
   }
 
   const shown = threads.filter((t) => (show === "all" || stateOf(t) === show) && (who === "everyone" || (who === "ai") === (t.acting_role === AI_ROLE)));
+  // Accept All: every item still to decide, within the Everyone / AI / Reviewers filter.
+  const toAccept = threads.filter((t) => stateOf(t) === "pending" && (who === "everyone" || (who === "ai") === (t.acting_role === AI_ROLE)));
+  async function acceptAll() {
+    setBusy("all");
+    try {
+      const r: any = await bulkFn({ data: { document_id: documentId, comment_ids: toAccept.map((t) => t.id), decision: "accepted", acting_role: role } });
+      toast.success(`Accepted ${r.decided} item${r.decided === 1 ? "" : "s"} — Undo on any one to take it back`); onDone();
+    } catch (e: any) { toast.error(friendlyError(e)); } finally { setBusy(null); }
+  }
   const accepted = count("accepted");
   return (
     <div className="space-y-3">
@@ -316,6 +326,7 @@ function Comments({ contractId, documentId, threads, all, decisions, composer, s
             <div className="font-semibold text-gray-900">Accepted review</div>
             <div className="text-gray-600"><span className="text-emerald-700 font-medium">{accepted} accepted</span> · {count("rejected")} rejected · <span className={count("pending") ? "text-amber-700 font-medium" : ""}>{count("pending")} to decide</span></div>
           </div>
+          {toAccept.length > 0 && <Button size="sm" variant="outline" disabled={busy === "all"} onClick={acceptAll} className="gap-1.5 border-emerald-300 text-emerald-800 hover:bg-emerald-50">{busy === "all" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} Accept All ({toAccept.length})</Button>}
           {onDownload && <Button size="sm" disabled={!accepted || exporting} onClick={onDownload} className="gap-1.5">{exporting ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />} Download</Button>}
         </div>
         <p className="mt-1.5 text-xs text-gray-500">Only accepted items go into the Word file sent to the counterparty.</p>

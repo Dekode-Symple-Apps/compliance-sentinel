@@ -683,6 +683,29 @@ export const decideCcmsComment = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+/** Accept (or reject) several review items on one document at once — the
+ *  "Accept All" button. Same record as deciding them one by one. */
+export const decideCcmsCommentsBulk = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({ document_id: z.string().uuid(), comment_ids: z.array(z.string().uuid()).min(1).max(200), decision: z.enum(["accepted", "rejected"]), acting_role: roleSchema }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await ccms(context);
+    const { data: doc } = await sb.from("ccms_documents").select("id,contract_id,ai_review,version").eq("id", data.document_id).single();
+    if (!doc) throw new Error("Document not found.");
+    const contract = await loadContract(sb, doc.contract_id, tenantId);
+    const { data: items } = await sb.from("ccms_comments").select("id").eq("document_id", doc.id).is("parent_id", null).in("id", data.comment_ids);
+    const ids = (items ?? []).map((x: any) => x.id);
+    if (!ids.length) return { decided: 0 };
+    const now = new Date().toISOString();
+    const decisions = { ...(doc.ai_review?.decisions ?? {}) };
+    for (const id of ids) if (!decisions[id]) decisions[id] = { decision: data.decision, by: userName, role: data.acting_role, at: now, note: null };
+    await sb.from("ccms_documents").update({ ai_review: { ...(doc.ai_review ?? {}), decisions } }).eq("id", doc.id);
+    await sb.from("ccms_comments").update({ status: "resolved", resolved_by_name: userName, resolved_at: now }).in("id", ids);
+    await logEvent(sb, { contract_id: contract.id, event_type: "review_item", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
+      detail: `${data.decision === "accepted" ? "Accepted" : "Rejected"} ${ids.length} review item${ids.length === 1 ? "" : "s"} on v${doc.version} at once.` });
+    return { decided: ids.length };
+  });
+
 export const recordCcmsReview = createServerFn({ method: "POST" })
   .middleware([requireCcms])
   .inputValidator(z.object({
