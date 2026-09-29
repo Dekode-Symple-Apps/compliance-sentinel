@@ -13,7 +13,7 @@ import {
 } from "@/lib/vms.functions";
 import { CcmsHeader, CARD, TD, StageBar, NoteText, friendlyError, useCcmsRole, useConfirm, uploadToStorage } from "@/components/ccms-widgets";
 import {
-  ABMS_QUESTIONS, AFS_ITEMS, DOC_TYPES, PASS_MARK, PORTAL_FORMS, PREQUAL_AREAS, VENDOR_CATEGORIES, VMS_STATUS, afsRatios, daysTo, docsFor, prequalScore, requestMilestones, sameValue, validationRows, vmsActions, type Afs, type VmsAction,
+  ABMS_QUESTIONS, AFS_ITEMS, DOC_TYPES, PASS_MARK, PORTAL_FORMS, PREQUAL_AREAS, VENDOR_CATEGORIES, VMS_STATUS, afsRatios, daysTo, docsFor, prequalScore, requestMilestones, sameValue, validationRows, vmsActions, integrityChecklist, milestoneTarget, type Afs, type VmsAction,
 } from "@/lib/vms";
 import { CCMS_ROLES, DEMO_SINGLE_USER, displayName, fmtMoneyPlain } from "@/lib/ccms";
 import { ArrowLeft, ChevronRight, Copy, Loader2, Sparkles, Star, Trash2, Upload } from "lucide-react";
@@ -67,6 +67,13 @@ function VmsRequestPage() {
   const [focus, setFocus] = useState<string | null>(null);
   const [manual, setManual] = useState<Record<string, boolean>>({});
   useEffect(() => { setManual({}); }, [focus]);
+  // Demo: "Acting as" follows the next step, so finishing a step hands over to
+  // whoever acts next without changing roles by hand.
+  const nextAct = data ? vmsActions({ ...(data as any).request, invite_token: (data as any).token }, (data as any).documents)[0] : undefined;
+  useEffect(() => {
+    if (!DEMO_SINGLE_USER || !nextAct || nextAct.role === "vendor") return;
+    setRole(nextAct.role as any); setFocus(null);
+  }, [nextAct?.id, nextAct?.role]);
   if (isLoading) return <AppShell><div className="p-10 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="size-4 animate-spin" /> Loading…</div></AppShell>;
   if (error || !data) return <AppShell><div className="p-10 text-sm text-red-700">{(error as Error)?.message ?? "Not found"}</div></AppShell>;
   const { request: r, token, vendor, documents, events } = data as any;
@@ -95,7 +102,15 @@ function VmsRequestPage() {
           <Link to="/vms/requests" className="inline-flex items-center gap-1 text-sm text-gray-600 hover:underline"><ArrowLeft className="size-4" /> Requests</Link>
           {!["approved", "conditional"].includes(r.status) && <DeleteRequest r={r} />}
         </div>
-        <StageBar stages={ms.stages} next={ms.next} actions={acts.length ? acts.map((a, i) => (
+        <StageBar stages={ms.stages} next={ms.next}
+          onStageClick={(key) => {
+            // Go back to (or ahead to) any step: open its section, acting as the role that does it.
+            const t = milestoneTarget(r, key); if (!t) return;
+            if (DEMO_SINGLE_USER) setRole(t.role as any);
+            setFocus(t.section);
+            setTimeout(() => document.getElementById(`sec-${t.section}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+          }}
+          actions={acts.length ? acts.map((a, i) => (
           <Button key={a.id} size="sm" variant={i === 0 ? "default" : "outline"} onClick={() => act(a)}>{a.label}</Button>
         )) : undefined} />
         {r.submitted_by_vendor_at && <VendorSummary r={r} documents={documents} onOpen={(k) => { setFocus(k); setTimeout(() => document.getElementById(`sec-${k}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 60); }} />}
@@ -288,23 +303,25 @@ function SubmissionSection({ r, documents, onDone }: { r: any; documents: any[];
         </>
       )}
 
-      <div className="font-semibold text-gray-900 pt-2">Integrity</div>
-      <div className="overflow-x-auto rounded-md border border-gray-200">
-        <table className="w-full text-sm"><tbody>
-          {ABMS_QUESTIONS.map((q) => (
-            <tr key={q.id} className="border-t border-gray-100 first:border-0">
-              <td className={TD2 + " text-gray-700"}>{q.text}</td>
-              <td className={cn(TD2, "w-20 font-semibold", ab.answers?.[q.id] === "yes" ? "text-red-700" : "text-emerald-700")}>{ab.answers?.[q.id] === "yes" ? "Yes" : ab.answers?.[q.id] === "no" ? "No" : "—"}</td>
-            </tr>
-          ))}
-          {([["Declaration of interest (ABMS-001)", ab.declaration_interest === "declared" ? `Declared — ${ab.interest_details ?? ""}` : "None to declare", ab.declaration_interest !== "declared"],
-            ["Integrity pledge (ABMS-005)", ab.pledge ? "Signed" : "—", !!ab.pledge], ["CTOS consent", ab.ctos_consent === "signed" ? "Given" : ab.ctos_consent ?? "—", ab.ctos_consent === "signed"],
-            ["PDPA consent", ab.pdpa ? "Given" : "—", !!ab.pdpa], ["Signed by", `${ab.signatory ?? "—"}, ${ab.designation ?? "—"} · ${ab.signed_date ?? "—"}`, true]] as [string, string, boolean][]).map(([l, v, ok]) => (
-            <tr key={l} className="border-t border-gray-100"><td className={TD2 + " text-gray-700"}>{l}</td><td className={cn(TD2, "font-semibold", ok ? "text-emerald-700" : "text-red-700")}>{v}</td></tr>
-          ))}
-          {ab.details && <tr className="border-t border-gray-100"><td className={TD2 + " text-gray-700"}>Details given</td><td className={TD2}>{ab.details}</td></tr>}
-        </tbody></table>
-      </div>
+      {(() => {
+        const items = integrityChecklist(r);
+        const flags = items.filter((x) => !x.ok);
+        return (
+          <>
+            <div className="flex items-baseline gap-2 pt-2"><span className="font-semibold text-gray-900">Integrity checklist</span>
+              <span className={cn("text-sm", flags.length ? "font-semibold text-amber-800" : "text-emerald-700")}>{flags.length ? `⚠ ${flags.length} to look at before going on` : "✓ Nothing to flag — ready for the next step"}</span></div>
+            <ul className="divide-y divide-gray-100 rounded-md border border-gray-200">
+              {items.map((x) => (
+                <li key={x.label} className={cn("flex items-start gap-3 px-3 py-2 text-sm", !x.ok && "bg-amber-50/60")}>
+                  <span className={cn("mt-0.5 grid size-5 shrink-0 place-items-center rounded-full text-xs", x.ok ? "bg-emerald-600 text-white" : "bg-amber-500 text-white")}>{x.ok ? "✓" : "!"}</span>
+                  <span className="w-64 shrink-0 text-gray-900">{x.label}</span>
+                  <span className={cn("flex-1", x.ok ? "text-gray-600" : "font-medium text-amber-900")}>{x.note}</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        );
+      })()}
       {(reg.project_references ?? []).filter((x: string) => x?.trim()).length > 0 && <p className="text-sm"><span className="text-gray-500">Project references:</span> {reg.project_references.filter((x: string) => x?.trim()).join("; ")}</p>}
     </Section>
   );
@@ -316,9 +333,9 @@ function ScreeningSection({ r, onDone }: { r: any; onDone: () => void }) {
   const { busy, run } = useRun(onDone);
   const s = r.screening;
   return (
-    <Section k="screening" title="Screening" sub="Duplicates (SSM, TIN, bank account, directors), related parties, blacklist and red flags. A blacklist hit rejects automatically."
+    <Section k="screening" title="Checks" sub="Run by themselves when the vendor submits: duplicates (SSM, TIN, bank account, directors), related parties, blacklist, the details against the documents and the audited accounts. Clean documents are verified at the same time."
       right={["purchasing_executive", "contract_executive", "contract_manager"].includes(role) && !["approved", "conditional", "rejected"].includes(r.status) &&
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => run(() => screenFn({ data: { request_id: r.id, acting_role: role } }), "Screened")}>{s ? "Re-run" : "Run screening"}</Button>}>
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => run(() => screenFn({ data: { request_id: r.id, acting_role: role } }), "Checks done")}>{s ? "Re-run Checks" : "Run Checks"}</Button>}>
       {s ? (
         <>
           <p>Risk: <span className={cn("font-semibold", s.rating === "high" ? "text-red-700" : s.rating === "medium" ? "text-amber-700" : "text-emerald-700")}>{s.rating}</span>{s.relatedParty && <span className="text-red-700"> · related party</span>}</p>
@@ -410,9 +427,24 @@ function DocumentsSection({ r, documents, onDone }: { r: any; documents: any[]; 
   const required = docsFor(r.category);
   const val = (d: any, k: string) => edit[d.id]?.[k] ?? d[k] ?? d.extracted?.[k === "issued_date" ? "issued" : k === "expiry_date" ? "expiry" : k] ?? "";
   const set = (d: any, k: string, v: string) => setEdit((e) => ({ ...e, [d.id]: { ...(e[d.id] ?? {}), [k]: v } }));
-  const docs = documents.filter((d) => d.doc_type !== "ctos");
+  const docs = documents.filter((d) => d.doc_type !== "ctos" && d.status !== "superseded");
+  // Clean documents are verified by the checks; only the exceptions need a person.
+  const differs = new Set(validationRows(r, docs).filter((x) => x.check === "differs").map((x) => x.source?.id));
+  const company = r.register?.company_name || r.company_name;
+  const whyFlagged = (d: any): string => {
+    const x = d.extracted ?? {};
+    const exp = d.expiry_date || x.expiry;
+    if (!d.extracted) return "Not read yet";
+    if (differs.has(d.id)) return "Details differ from what the vendor entered";
+    if (x.holder && d.doc_type !== "competency" && !sameValue("name", x.holder, company)) return `Issued to ${x.holder}, not the company`;
+    if (DOC_TYPES.find((t) => t.id === d.doc_type)?.expires && !exp) return "No expiry date found";
+    if (exp && daysTo(exp) < 0) return `Expired ${exp}`;
+    return d.status === "rejected" ? "Rejected" : "Needs a look";
+  };
+  const flagged = docs.filter((d) => d.status === "uploaded" || d.status === "rejected");
+  const verified = docs.filter((d) => d.status === "verified");
   return (
-    <Section k="documents" title="Documents" sub="The AI reads each certificate; the person verifying confirms every field. A name that does not match the company blocks verification."
+    <Section k="documents" title="Documents" sub={flagged.length ? `${verified.length} verified by the checks · ${flagged.length} need${flagged.length === 1 ? "s" : ""} a person` : `All ${verified.length} verified by the checks — nothing to do here`}
       right={can && docs.some((d) => d.status === "uploaded" && !d.extracted) && <AiLink label="Read All with AI" run={async () => {
         const todo = docs.filter((d) => d.status === "uploaded" && !d.extracted);
         for (let i = 0; i < todo.length; i += 3) await Promise.all(todo.slice(i, i + 3).map((d) => readFn({ data: { document_id: d.id } }).catch(() => null)));
@@ -422,7 +454,8 @@ function DocumentsSection({ r, documents, onDone }: { r: any; documents: any[]; 
       <div className="rounded-md border border-gray-200 p-3"><RequiredDocsChecklist category={r.category} documents={documents}
         done={[...(r.submitted_by_vendor_at ? ["register_form", "abms_001", "abms_004", "abms_005", "abc_ack"] : []), ...(r.ctos ? ["ctos"] : []), ...(r.assessment ? ["prequal_form"] : [])]} /></div>
       {docs.length === 0 && <p className="text-gray-500">No documents uploaded.</p>}
-      {docs.map((d) => {
+      {flagged.length > 0 && <div className="text-sm font-semibold text-amber-800">Needs a person</div>}
+      {flagged.map((d) => {
         const t = DOC_TYPES.find((x) => x.id === d.doc_type);
         const lvl = required.find((x) => x.id === d.doc_type)?.level;
         return (
@@ -431,7 +464,7 @@ function DocumentsSection({ r, documents, onDone }: { r: any; documents: any[]; 
               <span className="font-semibold text-gray-900">{t?.label ?? d.doc_type}</span>
               {lvl === "M" && <span title="Mandatory"><Star className="size-3.5 fill-amber-400 text-amber-400" aria-label="Mandatory" /></span>}
               <a href={d.file_url} target="_blank" rel="noreferrer" className="text-blue-700 hover:underline truncate max-w-64">{d.file_name}</a>
-              <span className={cn("ml-auto text-xs font-semibold", d.status === "verified" ? "text-emerald-700" : d.status === "rejected" ? "text-red-700" : "text-amber-700")}>{d.status}{d.verified_by ? ` · ${displayName(d.verified_by)}` : ""}</span>
+              <span className={cn("ml-auto text-xs font-semibold", d.status === "rejected" ? "text-red-700" : "text-amber-700")}>⚠ {whyFlagged(d)}</span>
               {can && ["uploaded", "rejected"].includes(d.status) && (
                 <button type="button" title="Delete this document" disabled={busy}
                   onClick={async () => { if (await confirm({ title: "Delete this document?", body: `${d.file_name} is removed from the request.` })) run(() => deleteFn({ data: { document_id: d.id, acting_role: role } }), "Deleted"); }}
@@ -448,10 +481,27 @@ function DocumentsSection({ r, documents, onDone }: { r: any; documents: any[]; 
                 <Button size="sm" disabled={busy} onClick={() => run(() => verifyFn({ data: { document_id: d.id, action: "verify", number: val(d, "number") || null, issuer: val(d, "issuer") || null, holder: val(d, "holder") || null, issued_date: val(d, "issued_date") || null, expiry_date: val(d, "expiry_date") || null, acting_role: role } }), "Verified")}>Verify</Button>
                 <Button size="sm" variant="outline" disabled={busy} onClick={() => run(() => verifyFn({ data: { document_id: d.id, action: "reject", note: "Not acceptable", acting_role: role } }), "Rejected")}>Reject</Button>
               </div>
-            ) : d.status === "verified" ? <p className="text-gray-600">{[d.number, d.issuer, d.expiry_date && `valid to ${d.expiry_date}`].filter(Boolean).join(" · ")}</p> : d.status === "uploaded" && <Hint role="Purchasing Executive" />}
+            ) : d.status === "uploaded" && <Hint role="Purchasing Executive" />}
           </div>
         );
       })}
+      {verified.length > 0 && (
+        <div className="overflow-x-auto rounded-md border border-gray-200">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50"><tr>{["Document", "Number", "Issuer", "Valid to", "Verified"].map((h) => <th key={h} className="px-2 py-1.5 text-left text-xs font-medium uppercase tracking-wide text-gray-500">{h}</th>)}<th /></tr></thead>
+            <tbody>{verified.map((d) => (
+              <tr key={d.id} className="border-t border-gray-100">
+                <td className="px-2 py-1.5 text-gray-900">{DOC_TYPES.find((t) => t.id === d.doc_type)?.label ?? d.doc_type}</td>
+                <td className="px-2 py-1.5">{d.number || "—"}</td>
+                <td className="px-2 py-1.5">{d.issuer || "—"}</td>
+                <td className="px-2 py-1.5">{d.expiry_date || "—"}</td>
+                <td className="px-2 py-1.5 text-emerald-700">✓ {/^Auto/.test(d.verified_by ?? "") ? "By the checks" : displayName(d.verified_by)}</td>
+                <td className="px-2 py-1.5"><a href={d.file_url} target="_blank" rel="noreferrer" className="text-blue-700 hover:underline">View</a></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
     </Section>
   );
 }
@@ -622,7 +672,7 @@ function VendorSummary({ r, documents, onOpen }: { r: any; documents: any[]; onO
     { key: "screen", label: "Screening", value: s ? `${s.rating[0].toUpperCase()}${s.rating.slice(1)} risk` : "Not run", note: s ? (s.reasons.length ? `${s.reasons.length} point${s.reasons.length === 1 ? "" : "s"}` : "no issues") : "run by Purchasing", tone: !s ? "idle" : s.rating === "high" ? "bad" : s.rating === "medium" ? "warn" : "good", section: "screening" },
     ...(r.kind === "subcontractor" ? [] : [{ key: "ctos", label: "CTOS", value: r.ctos ? String(r.ctos.score ?? "—") : "Awaiting", note: r.ctos ? ([r.ctos.litigation && "litigation", r.ctos.winding_up && "winding-up", r.ctos.director_flags && "director flags"].filter(Boolean).join(", ") || "no adverse records") : "Finance uploads the report", tone: (!r.ctos ? "idle" : r.ctos.litigation || r.ctos.winding_up || r.ctos.director_flags ? "bad" : "good") as T["tone"], section: "ctos" }]),
     { key: "fin", label: "Financial standing", value: k ? `${k.currentRatio != null ? k.currentRatio.toFixed(2) : "—"}` : "No accounts", note: k ? `current ratio · ${k.flags.length ? `${k.flags.length} flag${k.flags.length === 1 ? "" : "s"}` : `margin ${k.netMargin != null ? (k.netMargin * 100).toFixed(1) + "%" : "—"}, no flags`}` : "audited accounts not provided", tone: !k ? "idle" : k.flags.length ? "warn" : "good", section: "validation" },
-    { key: "int", label: "Integrity", value: yes ? `${yes} Yes` : r.abms?.answers ? "All No" : "—", note: r.abms?.declaration_interest === "declared" ? "interest declared" : r.abms?.pledge ? "pledge signed" : "not signed", tone: yes || r.abms?.declaration_interest === "declared" ? "warn" : r.abms?.pledge ? "good" : "idle", section: "validation" },
+    (() => { const flags = integrityChecklist(r).filter((x) => !x.ok); return { key: "int", label: "Integrity", value: flags.length ? `${flags.length} to flag` : "All clear", note: flags.length ? flags.map((x) => x.label.replace(/ \(.*\)/, "")).join(", ") : `${yes ? "" : "all No · "}pledge signed`, tone: (flags.length ? "warn" : "good") as T["tone"], section: "validation" }; })(),
     { key: "pq", label: "Pre-qualification", value: r.assessment ? `${r.assessment.total}%` : "Not scored", note: r.assessment ? (r.assessment.pass ? `pass (${PASS_MARK}%)` : `below ${PASS_MARK}%`) : `pass mark ${PASS_MARK}%`, tone: !r.assessment ? "idle" : r.assessment.pass ? "good" : "bad", section: "assessment" },
     { key: "dec", label: "Decision", value: r.decision ? String(r.decision.outcome).replace(/^\w/, (c: string) => c.toUpperCase()) : r.compliance ? `Compliance: ${r.compliance.decision}` : "Pending", note: r.decision ? displayName(r.decision.by) : r.compliance ? "awaiting Purchasing Manager" : "after scoring", tone: r.decision ? (["approve", "approved", "conditional"].includes(r.decision.outcome) ? "good" : "bad") : "idle", section: r.compliance && !r.decision ? "decision" : r.status === "compliance" ? "compliance" : "decision" },
   ];

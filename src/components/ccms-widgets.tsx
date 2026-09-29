@@ -191,14 +191,18 @@ export const fmtMoney = (v: number | null | undefined, cur = "MYR") =>
   typeof v === "number" ? `${cur === "MYR" ? "RM" : cur + " "}${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : "—";
 
 /** A row of stages — done, current, to do, skipped — and the one next step. */
-export function StageBar({ stages, next, actions }: { stages: { key: string; label: string; state: string; detail?: string }[]; next: { text: string; role: string } | null; actions?: React.ReactNode }) {
+export function StageBar({ stages, next, actions, onStageClick }: { stages: { key: string; label: string; state: string; detail?: string }[]; next: { text: string; role: string } | null; actions?: React.ReactNode; onStageClick?: (key: string) => void }) {
   const [role] = useCcmsRole();
   return (
     <section className={CARD + " p-4 space-y-3"}>
       <ol className="flex flex-wrap items-start gap-y-3">
         {stages.map((s, i) => (
           <li key={s.key} className="flex items-start">
-            <div className="flex flex-col items-center w-[108px] text-center">
+            <div className={cn("flex flex-col items-center w-[108px] text-center", onStageClick && s.state !== "todo" && s.state !== "skipped" && "cursor-pointer rounded-md hover:bg-gray-50")}
+              role={onStageClick ? "button" : undefined} tabIndex={onStageClick && s.state !== "todo" ? 0 : undefined}
+              title={onStageClick && s.state !== "todo" && s.state !== "skipped" ? `Open ${s.label}` : undefined}
+              onClick={() => onStageClick && s.state !== "todo" && s.state !== "skipped" && onStageClick(s.key)}
+              onKeyDown={(e) => { if (e.key === "Enter" && onStageClick && s.state !== "todo") onStageClick(s.key); }}>
               <span className={cn("size-7 rounded-full border-2 grid place-items-center text-xs",
                 s.state === "done" ? "border-emerald-600 bg-emerald-600 text-white" : s.state === "current" ? "border-blue-700 text-blue-700" : "border-gray-300 text-gray-300")}>
                 {s.state === "done" ? "✓" : s.state === "skipped" ? "–" : "●"}

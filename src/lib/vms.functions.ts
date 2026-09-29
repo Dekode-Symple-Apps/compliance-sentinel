@@ -8,7 +8,7 @@ import { documentText, parseJson } from "@/lib/ccms.functions";
 import { actorOf, assertTenant, requireRole, selfApproval } from "@/lib/actor";
 import { CCMS_ROLES, DEMO_SINGLE_USER, type CcmsRole } from "@/lib/ccms";
 import {
-  ABMS_QUESTIONS, DOC_TYPES, PASS_MARK, PORTAL_FORMS, PREQUAL_AREAS, afsRatios, validationRows, VENDOR_CATEGORIES, addMonths, coiDates, daysTo, ddMonths, docTypeFromName, docsFor,
+  ABMS_QUESTIONS, DOC_TYPES, PASS_MARK, PORTAL_FORMS, PREQUAL_AREAS, afsRatios, sameValue, validationRows, VENDOR_CATEGORIES, addMonths, coiDates, daysTo, ddMonths, docTypeFromName, docsFor,
   needsCompliance, prequalScore, screen,
 } from "@/lib/vms";
 
@@ -294,23 +294,21 @@ export const saveVendorPortal = createServerFn({ method: "POST" })
       // unmigrated database does not block the vendor's submission.
       await admin().from("ccms_vendors").update({ address: reg.address ?? null, contact_phone: reg.contact_phone ?? null, contact_designation: ab.designation ?? null }).eq("id", r.vendor_id);
       await admin().from("vms_events").insert({ request_id: r.id, vendor_id: r.vendor_id, event_type: "vendor_submitted", actor_name: `Vendor (${ab.signatory ?? ""})`, detail: `Registration submitted by the vendor.${ab.ctos_consent === "declined" ? " CTOS consent declined." : ""}` });
-      // Read every document now, so the reviewer opens a filled validation table.
-      await readAllDocuments(admin(), r.id);
+      // The consolidated check now: documents read, screened, clean ones verified —
+      // the reviewer opens a request that is ready for the next step.
+      try { await consolidate(admin(), { ...r, register: reg, abms: ab, submitted_by_vendor_at: new Date().toISOString() }, { name: "Platform", role: null }); }
+      catch (e) { console.error("[vms] consolidation after submit failed", e); }
     }
     return { ok: true };
   });
 
 // ── step 6: screening ────────────────────────────────────────────────────────
 
-export const screenVmsRequest = createServerFn({ method: "POST" })
-  .middleware([requireVms])
-  .inputValidator(z.object({ request_id: z.string().uuid(), acting_role: roleSchema }))
-  .handler(async ({ data, context }) => {
-    const { sb, tenantId, userName } = await vms(context);
-    requireRole(data.acting_role, ["purchasing_executive", "contract_executive", "contract_manager"], "run screening");
-    const r = await loadRequest(sb, data.request_id, tenantId);
-    if (!r.submitted_by_vendor_at) throw new Error("The vendor has not submitted yet.");
-    const { data: vendors } = await sb.from("ccms_vendors").select("*").eq("tenant_id", tenantId);
+/** Screening: duplicates, related parties, blacklist, what was filled in
+ *  against the documents, and the audited accounts. Runs by itself when the
+ *  vendor submits; plain function so the portal and the reviewer share it. */
+async function runScreening(db: any, r: any, actor: { name: string; role: string | null }) {
+    const { data: vendors } = await db.from("ccms_vendors").select("*").eq("tenant_id", r.tenant_id);
     const others = (vendors ?? []).filter((v: any) => v.id !== r.vendor_id);
     const reg = r.register ?? {};
     const dirs = new Set((reg.directors ?? []).map((d: any) => norm(d.name)).filter(Boolean));
@@ -323,8 +321,8 @@ export const screenVmsRequest = createServerFn({ method: "POST" })
       || r.abms?.answers?.lsh_relationship === "yes" || r.abms?.declaration_interest === "declared";
     const s = screen({ abms: r.abms, ctos: r.ctos, blacklisted, relatedPartyMatch: related, duplicates: dup.map((v: any) => v.name) });
     // What was filled in against the documents, and the audited accounts.
-    await readAllDocuments(sb, r.id);
-    const { data: docs } = await sb.from("vms_documents").select("*").eq("request_id", r.id);
+    await readAllDocuments(db, r.id);
+    const { data: docs } = await db.from("vms_documents").select("*").eq("request_id", r.id);
     const differs = validationRows(r, docs ?? []).filter((x) => x.check === "differs");
     for (const d of differs) s.reasons.push(`${d.label} in the form differs from the ${d.source?.label ?? "documents"}`);
     const afsDoc = (docs ?? []).find((d: any) => d.doc_type === "afs" && d.extracted?.afs);
@@ -332,11 +330,60 @@ export const screenVmsRequest = createServerFn({ method: "POST" })
     for (const f of afsFlags) s.reasons.push(`Financial statements: ${f}`);
     if ((differs.length || afsFlags.length) && s.rating === "low") s.rating = "medium";
     const status = blacklisted ? "rejected" : r.kind === "subcontractor" ? "assessment" : (r.ctos ? "assessment" : "screening");
-    await sb.from("vms_requests").update({ screening: s, status, decision: blacklisted ? { outcome: "rejected", reason: "Blacklist hit", by: "Platform", at: new Date().toISOString() } : r.decision, updated_at: new Date().toISOString() }).eq("id", r.id);
-    await sb.from("ccms_vendors").update({ risk_rating: s.rating, related_party: s.relatedParty, status: blacklisted ? "rejected" : undefined }).eq("id", r.vendor_id);
-    await log(sb, { request_id: r.id, vendor_id: r.vendor_id, event_type: "screened", actor_name: userName, acting_role: data.acting_role,
+    await db.from("vms_requests").update({ screening: s, status, decision: blacklisted ? { outcome: "rejected", reason: "Blacklist hit", by: "Platform", at: new Date().toISOString() } : r.decision, updated_at: new Date().toISOString() }).eq("id", r.id);
+    await db.from("ccms_vendors").update({ risk_rating: s.rating, related_party: s.relatedParty, status: blacklisted ? "rejected" : undefined }).eq("id", r.vendor_id);
+    await log(db, { request_id: r.id, vendor_id: r.vendor_id, event_type: "screened", actor_name: actor.name, acting_role: actor.role,
       detail: blacklisted ? "Blacklist hit — rejected automatically." : `Screened: ${s.rating} risk${s.reasons.length ? ` — ${s.reasons.join("; ")}` : ""}.` });
     return s;
+}
+
+/** Documents the checks confirm — details agree, issued to the company (a
+ *  competency certificate to a person), not expired — are verified without a
+ *  person; the rest stay for someone to look at. */
+async function autoVerifyDocuments(db: any, r: any): Promise<{ auto: number; left: number }> {
+  const { data: docs } = await db.from("vms_documents").select("*").eq("request_id", r.id).eq("status", "uploaded");
+  const { data: allDocs } = await db.from("vms_documents").select("*").eq("request_id", r.id);
+  const differs = new Set(validationRows(r, allDocs ?? []).filter((x) => x.check === "differs").map((x) => x.source?.id));
+  const company = r.register?.company_name || r.company_name;
+  let auto = 0;
+  for (const d of (docs ?? []) as any[]) {
+    const x = d.extracted ?? {};
+    const type = DOC_TYPES.find((t) => t.id === d.doc_type);
+    const expiry: string | null = x.expiry || null;
+    const clean = !!d.extracted && !differs.has(d.id)
+      && (!x.holder || d.doc_type === "competency" || sameValue("name", x.holder, company))
+      && (!type?.expires || (!!expiry && daysTo(expiry) >= 0));
+    if (!clean) continue;
+    await db.from("vms_documents").update({ status: "verified", number: x.number || null, issuer: x.issuer || null, issued_date: x.issued || null, expiry_date: expiry,
+      verified_by: "Auto-verified (checks confirmed)", verified_at: new Date().toISOString() }).eq("id", d.id);
+    auto++;
+  }
+  if (auto) await releaseHoldIfClear(db, r.vendor_id);
+  const left = (docs ?? []).length - auto;
+  await log(db, { request_id: r.id, vendor_id: r.vendor_id, event_type: "document", actor_name: "Platform", acting_role: null,
+    detail: `${auto} document${auto === 1 ? "" : "s"} verified automatically${left ? `; ${left} need${left === 1 ? "s" : ""} a person` : ""}.` });
+  return { auto, left };
+}
+
+/** The consolidated check: read every document, screen, and verify what the
+ *  checks confirm. On submission, and on demand for older requests. */
+async function consolidate(db: any, r: any, actor: { name: string; role: string | null }) {
+  await readAllDocuments(db, r.id);
+  const { data: fresh } = await db.from("vms_requests").select("*").eq("id", r.id).single();
+  const s = await runScreening(db, fresh ?? r, actor);
+  if (!s.blacklisted) await autoVerifyDocuments(db, fresh ?? r);
+  return s;
+}
+
+export const screenVmsRequest = createServerFn({ method: "POST" })
+  .middleware([requireVms])
+  .inputValidator(z.object({ request_id: z.string().uuid(), acting_role: roleSchema }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userName } = await vms(context);
+    requireRole(data.acting_role, ["purchasing_executive", "contract_executive", "contract_manager"], "run the checks");
+    const r = await loadRequest(sb, data.request_id, tenantId);
+    if (!r.submitted_by_vendor_at) throw new Error("The vendor has not submitted yet.");
+    return consolidate(sb, r, { name: userName, role: data.acting_role });
   });
 
 // ── step 7 (onboarding): CTOS report; VMS-02 step 6: Accounts conflict check ─

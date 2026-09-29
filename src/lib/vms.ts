@@ -162,7 +162,7 @@ export function requestMilestones(r: any, docs: any[]): { stages: VmsStage[]; ne
     { key: "request", label: "Request raised", ok: true },
     { key: "invite", label: "Vendor invited", ok: !!r.invite_token || !!r.invite_expires || !!r.submitted_by_vendor_at },
     { key: "register", label: "Vendor submitted", ok: !!r.submitted_by_vendor_at },
-    { key: "screen", label: "Screened", ok: !!r.screening, detail: r.screening ? `${r.screening.rating} risk` : undefined },
+    { key: "screen", label: "Checked", ok: !!r.screening, detail: r.screening ? `${r.screening.rating} risk · auto` : undefined },
     { key: "ctos", label: sub ? "Conflict check" : "CTOS report", ok: sub ? !!r.conflict_check?.accounts_decision : !!r.ctos },
     { key: "assess", label: sub ? "Contract Manager review" : "Documents & scoring", ok: !!r.assessment && verifiedAll, detail: r.assessment ? `${r.assessment.total}%` : undefined },
     { key: "compliance", label: "Compliance", ok: !!r.compliance, skip: !compl },
@@ -283,6 +283,21 @@ export function afsRatios(afs: Afs, annualSpend?: number | null) {
   return { ...r, flags };
 }
 
+/** The integrity checklist, flagged only where something needs a person:
+ *  a Yes answer, a declared interest, or a missing pledge or consent. */
+export interface IntegrityItem { label: string; ok: boolean; note?: string }
+export function integrityChecklist(r: any): IntegrityItem[] {
+  const ab = r.abms ?? {};
+  const yes = ABMS_QUESTIONS.filter((q) => ab.answers?.[q.id] === "yes");
+  return [
+    { label: "Integrity questionnaire (ABMS-004)", ok: !!ab.answers && yes.length === 0, note: yes.length ? `Yes to: ${yes.map((q) => q.text).join("; ")}${ab.details ? ` — ${ab.details}` : ""}` : ab.answers ? "All answered No" : "Not answered" },
+    { label: "Declaration of interest (ABMS-001)", ok: ab.declaration_interest === "none", note: ab.declaration_interest === "declared" ? `Declared: ${ab.interest_details ?? ""}` : ab.declaration_interest === "none" ? "Nothing to declare" : "Not given" },
+    { label: "Integrity pledge (ABMS-005)", ok: !!ab.pledge, note: ab.pledge ? "Signed" : "Not signed" },
+    { label: "CTOS consent", ok: ab.ctos_consent === "signed", note: ab.ctos_consent === "signed" ? "Given" : ab.ctos_consent === "declined" ? "Declined — Finance still runs the report" : "Not given" },
+    { label: "PDPA consent", ok: !!ab.pdpa, note: ab.pdpa ? "Given" : "Not given" },
+  ];
+}
+
 /** What to do next on a request, as buttons: each opens its section and, in
  *  the single-user demo, acts as the role that does it. */
 export interface VmsAction { id: string; label: string; role: string; section: string }
@@ -295,10 +310,11 @@ export function vmsActions(r: any, docs: any[]): VmsAction[] {
   switch (cur) {
     case "invite": return [{ id: "invite", label: "Invite Vendor", role: "purchasing_executive", section: "portal" }];
     case "register": return [{ id: "portal", label: "Open Vendor Portal", role: "vendor", section: "portal" }];
-    case "screen": return [{ id: "screen", label: "Review & Run Screening", role: "purchasing_executive", section: "screening" }];
+    // Screening runs by itself when the vendor submits; this is only for older requests.
+    case "screen": return [{ id: "screen", label: "Run Checks", role: "purchasing_executive", section: "screening" }];
     case "ctos": return [sub ? { id: "conflict", label: "Conflict Check", role: "accounts", section: "ctos" } : { id: "ctos", label: "Upload CTOS Report", role: "finance", section: "ctos" }];
     case "assess": return [
-      ...(docs.some((d) => d.status === "uploaded") ? [{ id: "verify", label: "Verify Documents", role: assessor, section: "documents" }] : []),
+      ...(docs.some((d) => d.status === "uploaded") ? [{ id: "verify", label: "Check Flagged Documents", role: assessor, section: "documents" }] : []),
       ...(!r.assessment ? [{ id: "score", label: "Score Pre-qualification", role: assessor, section: "assessment" }] : []),
     ];
     case "compliance": return [{ id: "compliance", label: "Compliance Decision", role: "compliance", section: "compliance" }];
@@ -306,6 +322,19 @@ export function vmsActions(r: any, docs: any[]): VmsAction[] {
     default: return [];
   }
 }
+/** Where each milestone leads when clicked, and who acts on it — for going back
+ *  to any step in the demo. */
+export function milestoneTarget(r: any, key: string): { section: string; role: string } | null {
+  const sub = r.kind === "subcontractor";
+  const map: Record<string, { section: string; role: string }> = {
+    request: { section: "portal", role: "purchasing_executive" }, invite: { section: "portal", role: "purchasing_executive" },
+    register: { section: "validation", role: "purchasing_executive" }, screen: { section: "screening", role: "purchasing_executive" },
+    ctos: { section: "ctos", role: sub ? "accounts" : "finance" }, assess: { section: r.assessment ? "assessment" : "documents", role: sub ? "contract_manager" : "purchasing_executive" },
+    compliance: { section: "compliance", role: "compliance" }, decision: { section: "decision", role: sub ? "head_contracts" : "purchasing_manager" },
+  };
+  return map[key] ?? null;
+}
+
 /** Priority for the Requests list: the reviewer's turn first, then waiting on the vendor, then done. */
 export const vmsPriority = (r: any) =>
   ["approved", "conditional", "rejected"].includes(r.status) ? 4 : !r.submitted_by_vendor_at ? 3 : r.status === "returned" ? 3 : 1;
