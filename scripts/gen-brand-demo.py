@@ -3,9 +3,9 @@
 Writes to ~/Desktop/01. Demo Data/Branding Compliance/ (or the folder given):
   crest_placeholder.png                      stand-in for the state crest (not the real Jata)
   1 Brochure - Program Kampung Digital.pdf   compliant
-  2 Poster - Open Day v1.png                 breaches: stretched crest, off-palette, Chief Minister, English only, watermark, gmail
+  2 Poster - Open Day v1.png                 breaches: stretched crest, off-palette, Chief Minister, comic font, watermark, gmail
   2b Poster - Hari Terbuka v2.png            the corrected poster (upload as the revision)
-  3 Slides - Rural Water Supply.pptx         breaches: crest stretched and in the corner, agency logo larger, teal/purple theme, unsourced figures, no date
+  3 Slides - Rural Water Supply.pptx         breaches: crest stretched and in the corner, agency logo larger, no state mottos, teal/purple theme, unsourced figures, no date
   4 Proposal - Coal Power Plant.docx         breaches: contradicts the green energy direction, unsourced figures, Chief Minister, gmail, no date or classification
   answer_key.json                            the rules each file is expected to fail
 """
@@ -242,9 +242,9 @@ proposal(f"{OUT}/4 Proposal - Coal Power Plant.docx")
 
 key = {
     "1 Brochure - Program Kampung Digital.pdf": {"expect": "compliant", "must_not_fail": ["BC-1.1", "BC-1.3", "BC-4.2", "BC-5.2", "BC-8.1", "BC-8.2"]},
-    "2 Poster - Open Day v1.png": {"expect": "red_flag", "must_fail": ["BC-1.2", "BC-1.3", "BC-2.2", "BC-3.2", "BC-4.1", "BC-4.2", "BC-6.2", "BC-7.1", "BC-8.1", "BC-8.2"]},
+    "2 Poster - Open Day v1.png": {"expect": "red_flag", "must_fail": ["BC-1.2", "BC-1.3", "BC-2.2", "BC-3.2", "BC-4.2", "BC-6.2", "BC-7.1", "BC-8.1", "BC-8.2"]},
     "2b Poster - Hari Terbuka v2.png": {"expect": "compliant", "must_not_fail": ["BC-1.1", "BC-1.3", "BC-4.2", "BC-8.1", "BC-8.2"]},
-    "3 Slides - Rural Water Supply.pptx": {"expect": "red_flag", "must_fail": ["BC-1.2", "BC-1.3", "BC-1.4", "BC-2.2", "BC-4.1", "BC-5.3", "BC-8.2", "BC-8.3"]},
+    "3 Slides - Rural Water Supply.pptx": {"expect": "red_flag", "must_fail": ["BC-1.2", "BC-1.3", "BC-1.4", "BC-1.7", "BC-2.2", "BC-5.3", "BC-8.2", "BC-8.3"]},
     "4 Proposal - Coal Power Plant.docx": {"expect": "red_flag", "must_fail": ["BC-4.2", "BC-5.2", "BC-5.3", "BC-8.2", "BC-8.3", "BC-8.4"]},
 }
 json.dump(key, open(f"{OUT}/answer_key.json", "w"), indent=1)

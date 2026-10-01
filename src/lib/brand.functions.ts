@@ -9,7 +9,7 @@ import { computeCost } from "@/lib/pricing";
 import { displayName } from "@/lib/ccms";
 import { BRAND_RULES, GUIDELINE, PALETTE, TYPEFACES, ruleById } from "@/lib/brand-guideline";
 import {
-  AGENCIES, BRAND_WORKSPACE, CHANNELS, MATERIAL_TYPES, findingSeverity, guardVerdict, latestReview,
+  VERDICT_LABEL, toFix, AGENCIES, BRAND_WORKSPACE, CHANNELS, MATERIAL_TYPES, findingSeverity, guardVerdict, latestReview,
   type BrandFinding, type BrandReview, type RuleResult,
 } from "@/lib/brand";
 
@@ -54,7 +54,7 @@ const kindOf = (name: string, mime?: string | null): "pdf" | "image" | "office" 
   if (n.endsWith(".pdf") || mime === "application/pdf") return "pdf";
   if (/\.(png|jpe?g|webp)$/.test(n) || (mime ?? "").startsWith("image/")) return "image";
   if (/\.(pptx|ppt|docx|doc)$/.test(n)) return "office";
-  throw new Error("Upload a PDF, PowerPoint, Word or image (PNG / JPG) file.");
+  throw new Error("This file type can't be checked. Upload a PDF, PowerPoint, Word file or an image (PNG or JPG).");
 };
 
 // ── list and read ───────────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ export const createBrandSubmission = createServerFn({ method: "POST" })
       ref, agency: data.agency, title: data.title, material_type: data.material_type, channel: data.channel, submitted_by: userName,
       versions: [{ v: 1, file_name: data.file_name, file_url: data.file_url, mime: data.mime ?? null, uploaded_by: userName, uploaded_at: new Date().toISOString(), review_status: "pending" }],
       decision: null, cost_log: [],
-      events: [event(userName, "agency", "submitted", `${MATERIAL_TYPES[data.material_type]} submitted: ${data.title}.`)],
+      events: [event(userName, "agency", "submitted", `${MATERIAL_TYPES[data.material_type]} sent for checking: ${data.title}.`)],
     };
     const { data: row, error } = await sb.from("analysis_reports").insert({
       title: data.title, policy_name: data.agency, status: "reviewing", workflow_type: "brand_review",
@@ -117,11 +117,11 @@ export const reviseBrandSubmission = createServerFn({ method: "POST" })
     kindOf(data.file_name, data.mime);
     const row = await load(sb, data.id, tenantId);
     const brand = row.summary_json.brand;
-    if (row.status !== "returned") throw new Error("A revision is uploaded after the submission is returned.");
+    if (row.status !== "returned") throw new Error("You can upload a new version once the brand officer sends it back.");
     const v = (brand.versions?.length ?? 0) + 1;
     brand.versions = [...brand.versions, { v, file_name: data.file_name, file_url: data.file_url, mime: data.mime ?? null, uploaded_by: userName, uploaded_at: new Date().toISOString(), review_status: "pending", note: data.note ?? null }];
     brand.decision = null;
-    brand.events = [...brand.events, event(userName, "agency", "revised", `Revision v${v} uploaded${data.note ? ` — ${data.note}` : ""}.`)];
+    brand.events = [...brand.events, event(userName, "agency", "revised", `Version ${v} uploaded${data.note ? `: ${data.note}` : ""}.`)];
     await save(sb, row, brand, "reviewing");
     return { v };
   });
@@ -129,7 +129,7 @@ export const reviseBrandSubmission = createServerFn({ method: "POST" })
 // ── the AI review ───────────────────────────────────────────────────────────
 
 function reviewPrompt(brand: any, pages: number, isImage: boolean, extra: string) {
-  const rules = BRAND_RULES.map((r) => ({ id: r.id, category: r.category, severity: r.severity, rule: r.rule, check: r.check_how }));
+  const rules = BRAND_RULES.map((r) => ({ id: r.id, category: r.category, severity: r.severity, rule: r.rule, check: r.check_how, plain_name: r.title }));
   return [
     `You are the brand compliance reviewer at ${GUIDELINE.owner}. Review the attached ${isImage ? "image" : `document (${pages} page${pages === 1 ? "" : "s"}; each slide is one page)`} against the ${GUIDELINE.title} (${GUIDELINE.version}).`,
     `Submitted by: ${brand.agency}. Material: ${MATERIAL_TYPES[brand.material_type] ?? brand.material_type}, channel: ${CHANNELS[brand.channel] ?? brand.channel}. Title: "${brand.title}".`,
@@ -144,7 +144,12 @@ function reviewPrompt(brand: any, pages: number, isImage: boolean, extra: string
     "For every failed rule give at least one finding, one per place it occurs. Each finding names the page (1-indexed; an image is page 1) and:",
     "- box_2d: [ymin, xmin, ymax, xmax] on that page, integers 0–1000, tightly around the offending element (logo, colour band, heading, photo, text block). Always give it for visual breaches; for text breaches box the text too.",
     "- excerpt: the offending words copied EXACTLY as they appear on the page (for text breaches), else empty.",
-    "Write like a margin note: short and plain, no preamble. issue ≤ 15 words; whyItMatters ≤ 15 words; fix ≤ 15 words, an instruction.",
+    "WRITING: the reader is an agency's marketing or admin officer, not a designer or a lawyer. Use everyday words and short sentences. No preamble.",
+    "- Never write rule ids (BC-…), hex codes, point or pixel sizes, contrast ratios or jargon such as \"breach\", \"non-compliant\", \"violation\", \"palette\", \"typography\" or \"off-brand\".",
+    "- Name colours in plain words (\"bright purple\", \"state red\"). Call the Jata Negeri Sarawak \"the state crest\". Explain an acronym the first time, e.g. \"the state's 2030 plan (PCDS 2030)\".",
+    "- issue: what is wrong, where, ≤ 12 words (e.g. \"The crest is stretched sideways.\"). whyItMatters: why it matters to the public or the government, ≤ 12 words. fix: one instruction starting with a verb, ≤ 12 words.",
+    "- summary: one or two short sentences. Start with the overall result (\"Ready to publish.\", \"Needs a few small fixes.\" or \"Must be fixed before publishing.\"), then the main reason.",
+    "- rule note: ≤ 12 plain words.",
     "Risk score 0–100: how likely this harms the state's brand if published as is. A failed critical rule is a red_flag (70+); failed major rules only is caution (30–69); only minor or none is compliant (0–29).",
     "",
     "Return ONLY JSON:",
@@ -179,7 +184,7 @@ export async function runBrandReviewOn(brand: any, bytes: Buffer, mime: string, 
     { tier: "quality" },
   );
   const out = parseJson(res.text ?? "");
-  if (!out || !Array.isArray(out.rules)) throw new Error("The AI review came back in an unexpected format — run it again.");
+  if (!out || !Array.isArray(out.rules)) throw new Error("The check didn't finish properly. Press Check Again.");
   const given = new Map<string, any>((out.rules as any[]).filter((r) => ruleById(r?.rule_id)).map((r) => [r.rule_id, r]));
   const rules: RuleResult[] = BRAND_RULES.map((r) => {
     const g = given.get(r.id);
@@ -198,11 +203,15 @@ export async function runBrandReviewOn(brand: any, bytes: Buffer, mime: string, 
       page: Math.max(1, Math.min(pages, Math.round(Number(f.page) || 1))), box,
     };
   });
-  // A rule the model failed but gave no finding for still gets one, on page 1.
+  // A rule the model failed but gave no finding for still gets one, on page 1,
+  // unless an item on the same topic already covers it (the model often files
+  // "purple background" under one colour rule and fails the other colour rules
+  // too). The Checklist still shows every failed rule.
   for (const r of rules.filter((x) => x.outcome === "fail" && !findings.some((f) => f.rule_id === x.rule_id))) {
     const rule = ruleById(r.rule_id)!;
+    if (findings.some((f) => ruleById(f.rule_id)?.category === rule.category)) continue;
     findings.push({ id: `f${findings.length + 1}`, rule_id: rule.id, ref: `${rule.id} · ${rule.category}`, severity: findingSeverity(rule.id),
-      issue: r.note || rule.rule, whyItMatters: "", fix: "", page: 1, box: null });
+      issue: r.note || `This does not follow: ${rule.title.toLowerCase()}.`, whyItMatters: "", fix: rule.plain, page: 1, box: null });
   }
   const { verdict, riskScore } = guardVerdict(out, rules);
   const review: BrandReview = {
@@ -232,20 +241,20 @@ export const runBrandReview = createServerFn({ method: "POST" })
         bytes = await convertToPdf(ver.file_url);
         const path = `brand/${row.id}/v${ver.v}-${Date.now()}.pdf`;
         const up = await sb.storage.from("policies").upload(path, bytes, { contentType: "application/pdf", upsert: true });
-        if (up.error) throw new Error(`Could not store the converted PDF: ${up.error.message}`);
+        if (up.error) throw new Error("We couldn't save a copy of the file. Press Check Again.");
         viewUrl = sb.storage.from("policies").getPublicUrl(path).data.publicUrl;
         mime = "application/pdf";
       } else {
         const r = await fetch(ver.file_url);
-        if (!r.ok) throw new Error(`Could not read the file (${r.status}).`);
+        if (!r.ok) throw new Error("We couldn't open the file. Upload it again.");
         bytes = Buffer.from(await r.arrayBuffer());
         mime = kind === "pdf" ? "application/pdf" : (ver.mime && ver.mime.startsWith("image/") ? ver.mime : /\.png$/i.test(ver.file_name) ? "image/png" : "image/jpeg");
       }
-      if (bytes.length > MAX_BYTES) throw new Error("The file is over 19 MB — export it at a lower resolution and upload again.");
+      if (bytes.length > MAX_BYTES) throw new Error("The file is too big (over 19 MB). Save it at a smaller size and upload again.");
       let pages = 1;
       if (mime === "application/pdf") {
         pages = (await extractPdfPages(bytes)).length || 1;
-        if (pages > MAX_PAGES) throw new Error(`${pages} pages — split it into parts of up to ${MAX_PAGES} pages.`);
+        if (pages > MAX_PAGES) throw new Error(`It has ${pages} pages. Split it into parts of up to ${MAX_PAGES} pages.`);
       }
       // Extra guidance the brand office wrote for this workspace, if any.
       const { data: g } = await sb.from("analysis_guidance").select("guidance").eq("workspace_id", BRAND_WORKSPACE).maybeSingle();
@@ -253,13 +262,14 @@ export const runBrandReview = createServerFn({ method: "POST" })
       const model = res.modelVersion ?? (await getDefaultModel());
       setVer({ review_status: "done", review, view_url: viewUrl, view_kind: mime === "application/pdf" ? "pdf" : "image", error: null });
       brand.cost_log = [...(brand.cost_log ?? []).slice(-49), costEntry(`AI review v${ver.v}`, res, model)];
-      brand.events = [...brand.events, event("AI Reviewer", "ai", "reviewed",
-        `AI review of v${ver.v}: risk ${review.riskScore}, ${review.findings.length} finding(s), ${review.rules.filter((r) => r.outcome === "fail").length} rule(s) failed.`)];
+      const n = review.findings.filter((f) => f.severity !== "info").length;
+      brand.events = [...brand.events, event("Automatic check", "ai", "reviewed",
+        `Version ${ver.v} checked: ${VERDICT_LABEL[review.verdict].toLowerCase()}${n ? `, ${toFix(n).toLowerCase()}` : ""}.`)];
       await save(sb, row, brand, "awaiting_decision");
       return { ok: true, riskScore: review.riskScore, verdict: review.verdict, findings: review.findings.length };
     } catch (e: any) {
       setVer({ review_status: "failed", error: String(e?.message ?? e).slice(0, 400) });
-      brand.events = [...brand.events, event(userName, "agency", "review_failed", `AI review of v${ver.v} failed: ${String(e?.message ?? e).slice(0, 200)}`)];
+      brand.events = [...brand.events, event(userName, "agency", "review_failed", `Version ${ver.v} couldn't be checked. ${String(e?.message ?? e).slice(0, 200)}`)];
       await save(sb, row, brand, "review_failed");
       throw e;
     }
@@ -274,11 +284,11 @@ export const decideBrandSubmission = createServerFn({ method: "POST" })
     const { sb, tenantId, userName } = who(context);
     const row = await load(sb, data.id, tenantId);
     const brand = row.summary_json.brand;
-    if (row.status !== "awaiting_decision") throw new Error("Nothing is awaiting a decision on this submission.");
+    if (row.status !== "awaiting_decision") throw new Error("This design isn't waiting for approval.");
     const review = latestReview(brand);
     const red = (review?.findings ?? []).filter((f) => f.severity === "red_flag").length;
-    if (data.outcome === "return" && !data.note?.trim()) throw new Error("Say what needs to change.");
-    if (data.outcome === "clear" && red && !data.note?.trim()) throw new Error(`${red} red-flag finding(s) are open. Return it, or give the reason for clearing anyway.`);
+    if (data.outcome === "return" && !data.note?.trim()) throw new Error("Say what to change.");
+    if (data.outcome === "clear" && red && !data.note?.trim()) throw new Error(`${red} must-fix item${red === 1 ? " is" : "s are"} still open. Send it back, or say why you are approving it anyway.`);
     const now = new Date().toISOString();
     let clearance_ref: string | null = null;
     if (data.outcome === "clear") {
@@ -287,7 +297,7 @@ export const decideBrandSubmission = createServerFn({ method: "POST" })
     }
     brand.decision = { outcome: data.outcome, by: userName, at: now, note: data.note ?? null, clearance_ref, version: brand.versions.at(-1)?.v };
     brand.events = [...brand.events, event(userName, "ukas", data.outcome === "clear" ? "cleared" : "returned",
-      data.outcome === "clear" ? `Cleared for public use — ${clearance_ref}${data.note ? ` (${data.note})` : ""}.` : data.note?.includes("\n") ? `Returned:\n${data.note}` : `Returned — ${data.note}.`)];
+      data.outcome === "clear" ? `Approved for public use. Approval no. ${clearance_ref}${data.note ? ` (${data.note})` : ""}.` : data.note?.includes("\n") ? `Sent back. What to change:\n${data.note}` : `Sent back: ${data.note}`)];
     await save(sb, row, brand, data.outcome === "clear" ? "cleared" : "returned");
     return { clearance_ref };
   });
@@ -306,10 +316,10 @@ export const draftBrandReturnNote = createServerFn({ method: "POST" })
     const findings = (latestReview(brand)?.findings ?? []).filter((f) => f.severity !== "info")
       .sort((a, b) => (a.severity === "red_flag" ? 0 : 1) - (b.severity === "red_flag" ? 0 : 1));
     if (!findings.length) return { note: "", bullets: [] as string[] };
-    const prompt = `You write a brand officer's note returning material to a government agency for revision.
-Summarise the findings below into 3–6 bullets, most serious first. Each bullet: what to change, in the imperative, at most 16 words, ending with the page, e.g. "(p. 2)". Merge duplicates. No preamble.
-FINDINGS:
-${findings.map((f) => `[${f.severity === "red_flag" ? "RED FLAG" : "CAUTION"}] ${f.rule_id} p.${f.page}: ${f.issue}${f.fix ? ` Fix: ${f.fix}` : ""}`).join("\n")}
+    const prompt = `You write a brand officer's note sending a design back to a government agency to fix. The reader is a marketing or admin officer, not a designer.
+Turn the items below into 3–6 bullets, most important first. Each bullet: one plain instruction starting with a verb, at most 14 words, ending with the page, e.g. "(page 2)". Everyday words; no rule codes, hex codes or jargon. Merge duplicates. No preamble.
+ITEMS:
+${findings.map((f) => `[${f.severity === "red_flag" ? "MUST FIX" : "SHOULD FIX"}] ${ruleById(f.rule_id)?.title ?? ""}, page ${f.page}: ${f.issue}${f.fix ? ` What to do: ${f.fix}` : ""}`).join("\n")}
 Return ONLY JSON: {"bullets": ["..."]}`;
     const res: any = await generateWithFallback({ contents: [{ role: "user", parts: [{ text: prompt }] }],
       config: { responseMimeType: "application/json", maxOutputTokens: 1024, temperature: 0.2 } }, { tier: "fast" });

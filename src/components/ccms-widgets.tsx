@@ -280,16 +280,16 @@ export function NoteText({ text, className }: { text?: string | null; className?
 
 /** Drafts a note with AI from what the review found; the text lands in the
  *  box for the person to edit before it is sent. */
-export function AiDraftButton({ run, onText }: { run: () => Promise<{ note: string }>; onText: (t: string) => void }) {
+export function AiDraftButton({ run, onText, label = "Draft with AI", empty = "Nothing in the review to summarise — write the note." }: { run: () => Promise<{ note: string }>; onText: (t: string) => void; label?: string; empty?: string }) {
   const [busy, setBusy] = useState(false);
   return (
     <button type="button" disabled={busy} className="inline-flex shrink-0 items-center gap-1 text-sm text-blue-700 hover:underline disabled:opacity-60"
       onClick={async () => {
         setBusy(true);
-        try { const r = await run(); if (r.note) onText(r.note); else toast.message("Nothing in the review to summarise — write the note."); }
+        try { const r = await run(); if (r.note) onText(r.note); else toast.message(empty); }
         catch (e) { toast.error(friendlyError(e)); } finally { setBusy(false); }
       }}>
-      {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} {busy ? "Drafting…" : "Draft with AI"}
+      {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} {busy ? "Writing…" : label}
     </button>
   );
 }

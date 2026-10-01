@@ -8,7 +8,7 @@
 // each agency's compliance over time.
 // ----------------------------------------------------------------------------
 
-import { BRAND_RULES, ruleById, type RuleSeverity } from "./brand-guideline";
+import { BRAND_RULES, PALETTE, ruleById, type RuleSeverity } from "./brand-guideline";
 
 export const BRAND_WORKSPACE = "brand_compliance" as const;
 
@@ -27,22 +27,48 @@ export const AGENCIES = [
 ];
 
 export const MATERIAL_TYPES: Record<string, string> = {
-  slide_deck: "Slide Deck", brochure: "Brochure", poster: "Poster / Banner", social_post: "Social Media Post",
-  proposal: "Proposal / Paper", other: "Other",
+  slide_deck: "Slides", brochure: "Brochure", poster: "Poster or banner", social_post: "Social media post",
+  proposal: "Proposal or paper", other: "Other",
 };
-export const CHANNELS: Record<string, string> = { print: "Print", digital: "Digital", event: "Event / Presentation" };
+export const CHANNELS: Record<string, string> = { print: "Printed", digital: "Online", event: "Event or presentation" };
 
 export type BrandStatus = "reviewing" | "review_failed" | "awaiting_decision" | "returned" | "cleared";
 export const STATUS_META: Record<BrandStatus, { label: string; tone: string }> = {
-  reviewing: { label: "AI Review", tone: "border-sky-200 bg-sky-50/70 text-sky-800" },
-  review_failed: { label: "Review Failed", tone: "border-red-200 bg-red-50/70 text-red-800" },
-  awaiting_decision: { label: "Awaiting Decision", tone: "border-amber-200 bg-amber-50/70 text-amber-800" },
-  returned: { label: "Returned", tone: "border-orange-200 bg-orange-50/70 text-orange-800" },
-  cleared: { label: "Cleared", tone: "border-emerald-200 bg-emerald-50/70 text-emerald-800" },
+  reviewing: { label: "Checking", tone: "border-sky-200 bg-sky-50/70 text-sky-800" },
+  review_failed: { label: "Check failed", tone: "border-red-200 bg-red-50/70 text-red-800" },
+  awaiting_decision: { label: "Waiting for approval", tone: "border-amber-200 bg-amber-50/70 text-amber-800" },
+  returned: { label: "Sent back", tone: "border-orange-200 bg-orange-50/70 text-orange-800" },
+  cleared: { label: "Approved", tone: "border-emerald-200 bg-emerald-50/70 text-emerald-800" },
 };
 
 export type Verdict = "red_flag" | "caution" | "compliant";
-export const VERDICT_LABEL: Record<Verdict, string> = { red_flag: "Not Compliant", caution: "Needs Changes", compliant: "Compliant" };
+/** The result in plain words: long on the submission, short in lists. */
+export const VERDICT_LABEL: Record<Verdict, string> = { red_flag: "Must fix before publishing", caution: "Needs small fixes", compliant: "Ready to publish" };
+export const VERDICT_SHORT: Record<Verdict, string> = { red_flag: "Must fix", caution: "Small fixes", compliant: "Ready" };
+/** How serious one item is, in plain words. */
+export const SEVERITY_LABEL: Record<BrandFinding["severity"], string> = { red_flag: "Must fix", caution: "Should fix", info: "Tip" };
+export const OUTCOME_LABEL: Record<RuleOutcome, string> = { pass: "Passed", fail: "Needs fixing", not_applicable: "Doesn't apply", unclear: "Couldn't tell" };
+/** "3 things to fix" / "Nothing to fix". */
+export const toFix = (n: number) => (n === 0 ? "Nothing to fix" : `${n} thing${n === 1 ? "" : "s"} to fix`);
+
+/** A colour the AI saw, named in words: the state colour it matches, or the
+ *  nearest everyday name and that it is not a state colour. */
+const EVERYDAY: [string, string][] = [
+  ["Purple", "#7B2D8E"], ["Violet", "#8A5CF6"], ["Pink", "#E86AA6"], ["Orange", "#F28C28"], ["Brown", "#8B5A2B"],
+  ["Green", "#2E8B57"], ["Lime", "#9ACD32"], ["Teal", "#13827A"], ["Blue", "#1E5AA8"], ["Light blue", "#6CB4EE"], ["Navy", "#1F2A55"],
+  ["Gold", "#C9A227"], ["Maroon", "#7A1F2B"], ["Cream", "#F3E9D2"],
+];
+const rgb = (h: string) => { const x = h.replace("#", ""); return [0, 2, 4].map((i) => parseInt(x.slice(i, i + 2), 16)); };
+const dist = (a: number[], b: number[]) => Math.sqrt(a.reduce((n, v, i) => n + (v - b[i]) ** 2, 0));
+export function colourName(hex: string): { name: string; state: boolean } | null {
+  const h = hex.trim().startsWith("#") ? hex.trim() : `#${hex.trim()}`;
+  if (!/^#[0-9a-f]{6}$/i.test(h)) return null;
+  const c = rgb(h);
+  const pal = PALETTE.map((p) => ({ name: p.name, d: dist(c, rgb(p.hex)) })).sort((a, b) => a.d - b.d)[0];
+  if (pal.d < 60) return { name: pal.name, state: true };
+  const ev = EVERYDAY.map(([name, x]) => ({ name, d: dist(c, rgb(x)) })).sort((a, b) => a.d - b.d)[0];
+  return { name: ev.d < pal.d ? ev.name : pal.name.replace(/^Sarawak /, ""), state: false };
+}
 
 export type RuleOutcome = "pass" | "fail" | "not_applicable" | "unclear";
 export interface RuleResult { rule_id: string; outcome: RuleOutcome; note?: string }
@@ -143,9 +169,9 @@ export function brandMilestones(s: any): { key: string; label: string; state: "d
   const reviewed = !!latestReview(s);
   const steps = [
     { key: "submitted", label: "Submitted", ok: true },
-    { key: "review", label: "AI Review", ok: reviewed && s.status !== "reviewing" },
-    { key: "decision", label: "Brand Officer Decision", ok: s.status === "cleared" },
-    { key: "cleared", label: "Cleared for Public Use", ok: s.status === "cleared" },
+    { key: "review", label: "Checked", ok: reviewed && s.status !== "reviewing" },
+    { key: "decision", label: "Brand officer's decision", ok: s.status === "cleared" },
+    { key: "cleared", label: "Approved for use", ok: s.status === "cleared" },
   ];
   let cur = false;
   return steps.map((x) => {
@@ -155,20 +181,20 @@ export function brandMilestones(s: any): { key: string; label: string; state: "d
   });
 }
 
-export const BRAND_ROLES = { agency: "Agency Officer", ukas: "Brand Officer (UKAS)" } as const;
+export const BRAND_ROLES = { agency: "Agency staff", ukas: "Brand officer (UKAS)" } as const;
 export type BrandRole = keyof typeof BRAND_ROLES;
 
 /** The buttons for the current step. */
 export function brandActions(s: any): { id: "clear" | "return" | "revise" | "rerun"; label: string; role: BrandRole; primary?: boolean }[] {
-  if (s.status === "review_failed") return [{ id: "rerun", label: "Re-run AI Review", role: "agency", primary: true }];
+  if (s.status === "review_failed") return [{ id: "rerun", label: "Check Again", role: "agency", primary: true }];
   if (s.status === "awaiting_decision") {
     const red = latestReview(s)?.verdict === "red_flag";
     return [
-      { id: "return", label: "Return", role: "ukas", primary: red },
-      { id: "clear", label: "Clear for Public Use", role: "ukas", primary: !red },
+      { id: "return", label: "Send Back", role: "ukas", primary: red },
+      { id: "clear", label: "Approve for Use", role: "ukas", primary: !red },
     ];
   }
-  if (s.status === "returned") return [{ id: "revise", label: "Upload Revision", role: "agency", primary: true }];
+  if (s.status === "returned") return [{ id: "revise", label: "Upload New Version", role: "agency", primary: true }];
   return [];
 }
 

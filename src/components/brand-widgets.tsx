@@ -11,9 +11,10 @@ import { FillButton, RememberedInput, RememberedTextarea } from "@/components/cc
 import { recallForm, remember, rememberForm } from "@/lib/ccms-prefill";
 import { createBrandSubmission, decideBrandSubmission, reviseBrandSubmission, draftBrandReturnNote } from "@/lib/brand.functions";
 import {
-  AGENCIES, BRAND_ROLES, CHANNELS, MATERIAL_TYPES, STATUS_META, VERDICT_LABEL, boxToPixels,
+  AGENCIES, BRAND_ROLES, CHANNELS, MATERIAL_TYPES, STATUS_META, VERDICT_LABEL, VERDICT_SHORT, boxToPixels,
   type BrandFinding, type BrandRole, type BrandStatus, type Verdict,
 } from "@/lib/brand";
+import type { BrandRule } from "@/lib/brand-guideline";
 import { cn } from "@/lib/utils";
 
 const INPUT = "w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gray-900";
@@ -39,9 +40,9 @@ export function useBrandRole(): [BrandRole, (r: BrandRole) => void] {
 export function BrandActingAs() {
   const [role, setRole] = useBrandRole();
   return (
-    <label className="flex items-center gap-2 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm" title="Demo persona">
+    <label className="flex items-center gap-2 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm" title="For the demo: switch between the agency and the brand officer">
       <UserCog className="size-4 text-gray-500" />
-      <span className="text-gray-600">Acting as</span>
+      <span className="whitespace-nowrap text-gray-600">Demo view</span>
       <select value={role} onChange={(e) => setRole(e.target.value as BrandRole)} className="font-semibold bg-transparent focus:outline-none cursor-pointer">
         {(Object.keys(BRAND_ROLES) as BrandRole[]).map((r) => <option key={r} value={r}>{BRAND_ROLES[r]}</option>)}
       </select>
@@ -72,22 +73,36 @@ export function BrandStatusBadge({ status }: { status: string }) {
   return <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold whitespace-nowrap", m.tone)}>{m.label}</span>;
 }
 
-/** "Risk 88" with the verdict as an icon, as on the CMS Documents list. */
-export function RiskBadge({ verdict, score, showLabel }: { verdict?: Verdict | null; score?: number | null; showLabel?: boolean }) {
-  if (!verdict) return <span className="text-sm text-gray-400">—</span>;
+export const VERDICT_TONE: Record<Verdict, string> = {
+  red_flag: "border-red-200 bg-red-50 text-red-800", caution: "border-amber-200 bg-amber-50 text-amber-800", compliant: "border-emerald-200 bg-emerald-50 text-emerald-800",
+};
+/** The result in plain words — "Must fix", "Small fixes", "Ready" — with how
+ *  many things to fix. No score: a number means nothing to the agency. */
+export function ResultBadge({ verdict, count, long }: { verdict?: Verdict | null; count?: number; long?: boolean }) {
+  if (!verdict) return <span className="text-sm text-gray-400">Not checked yet</span>;
   return (
-    <span className="inline-flex items-center gap-1.5 text-sm">
-      <SeverityIcon severity={verdict === "compliant" ? "info" : verdict} />
-      <span>Risk {score ?? "—"}</span>
-      {showLabel && <span className={cn("font-semibold", verdict === "red_flag" ? "text-red-700" : verdict === "caution" ? "text-amber-700" : "text-emerald-700")}>· {VERDICT_LABEL[verdict]}</span>}
+    <span className={cn("inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 font-semibold", long ? "text-sm" : "text-xs", VERDICT_TONE[verdict])}>
+      {long ? VERDICT_LABEL[verdict] : VERDICT_SHORT[verdict]}{verdict !== "compliant" && count ? <span className="font-normal">· {count}</span> : null}
     </span>
   );
+}
+
+/** Where a rule comes from: an official state rule (with its circular) or good practice. */
+export function RuleSource({ rule }: { rule: BrandRule }) {
+  const s = rule.source;
+  if (s.kind === "official") return (
+    <span className="inline-flex flex-wrap items-center gap-1 text-xs text-gray-600" title={s.note}>
+      <span className="rounded border border-indigo-200 bg-indigo-50 px-1.5 font-medium text-indigo-800">Official rule</span>
+      {s.url ? <a href={s.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-blue-700 hover:underline">{s.ref}</a> : s.ref}
+    </span>
+  );
+  return <span className="inline-flex items-center text-xs text-gray-500" title={s.note ?? "Good practice until UKAS publishes a full guideline."}><span className="rounded border border-gray-200 px-1.5">Good practice</span></span>;
 }
 
 function DropZone({ file, onFile }: { file: File | null; onFile: (f: File | null) => void }) {
   return (
     <label className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-gray-300 px-3 py-4 text-sm text-gray-700 hover:border-gray-500">
-      {file ? <FileText className="size-4" /> : <Upload className="size-4" />} {file ? file.name : "Select file · PDF, PowerPoint, Word, PNG or JPG"}
+      {file ? <FileText className="size-4" /> : <Upload className="size-4" />} {file ? file.name : "Choose a file: PDF, PowerPoint, Word or an image"}
       <input type="file" accept={ACCEPT} className="hidden" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
     </label>
   );
@@ -109,7 +124,7 @@ export function NewSubmissionDialog({ open, onClose }: { open: boolean; onClose:
     try {
       setBusy("Uploading…");
       const url = await uploadToStorage("brand/uploads", file);
-      setBusy("Creating submission…");
+      setBusy("Sending…");
       const r: any = await createFn({ data: { ...f, file_name: file.name, file_url: url, mime: file.type || null } });
       rememberForm("brand:submission", f);
       qc.invalidateQueries({ queryKey: ["brand"] });
@@ -120,24 +135,24 @@ export function NewSubmissionDialog({ open, onClose }: { open: boolean; onClose:
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-xl bg-white">
-        <DialogHeader><DialogTitle>New Submission</DialogTitle><DialogDescription>Reviewed against the Sarawak brand guideline on upload.</DialogDescription></DialogHeader>
+        <DialogHeader><DialogTitle>Check a Design</DialogTitle><DialogDescription>Upload it and we check it against the Sarawak brand guide. It takes about a minute.</DialogDescription></DialogHeader>
         <div className="space-y-3">
-          <div className="flex justify-end"><FillButton onClick={() => { const s = recallForm("brand:submission"); if (s) setF({ ...blank, ...s }); else toast.message("Nothing saved yet — it is remembered after the first submission."); }} /></div>
+          <div className="flex justify-end"><FillButton onClick={() => { const s = recallForm("brand:submission"); if (s) setF({ ...blank, ...s }); else toast.message("Nothing saved yet. Your details are remembered after your first upload."); }} /></div>
           <label className={LABEL}>Agency
             <select className={INPUT} value={f.agency} onChange={(e) => setF({ ...f, agency: e.target.value })}>{AGENCIES.map((a) => <option key={a}>{a}</option>)}</select>
           </label>
-          <label className={LABEL}>Title<RememberedInput field="brand_title" value={f.title} onChange={(v) => setF({ ...f, title: v })} placeholder="e.g. Hari Terbuka JKR 2026 poster" /></label>
+          <label className={LABEL}>Name of the design<RememberedInput field="brand_title" value={f.title} onChange={(v) => setF({ ...f, title: v })} placeholder="e.g. Hari Terbuka JKR 2026 poster" /></label>
           <div className="grid grid-cols-2 gap-3">
-            <label className={LABEL}>Material type
+            <label className={LABEL}>What is it?
               <select className={INPUT} value={f.material_type} onChange={(e) => setF({ ...f, material_type: e.target.value })}>{Object.entries(MATERIAL_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
             </label>
-            <label className={LABEL}>Channel
+            <label className={LABEL}>Where will it be used?
               <select className={INPUT} value={f.channel} onChange={(e) => setF({ ...f, channel: e.target.value })}>{Object.entries(CHANNELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
             </label>
           </div>
           <DropZone file={file} onFile={setFile} />
           <div className="flex items-center gap-2 pt-1">
-            <Button disabled={!!busy || !file || f.title.trim().length < 3} onClick={submit}>{busy ? <><Loader2 className="size-4 animate-spin" /> {busy}</> : "Submit for Review"}</Button>
+            <Button disabled={!!busy || !file || f.title.trim().length < 3} onClick={submit}>{busy ? <><Loader2 className="size-4 animate-spin" /> {busy}</> : "Check It"}</Button>
           </div>
         </div>
       </DialogContent>
@@ -157,23 +172,23 @@ export function DecisionDialog({ id, outcome, redFlags, onClose, onDone }: { id:
     try {
       const r: any = await fn({ data: { id, outcome, note: note || null } });
       remember(outcome === "return" ? { brand_return_note: note } : { brand_clear_note: note });
-      toast.success(outcome === "clear" ? `Cleared — ${r.clearance_ref}` : "Returned to the agency");
+      toast.success(outcome === "clear" ? `Approved. Approval no. ${r.clearance_ref}` : "Sent back to the agency");
       onClose(); onDone();
     } catch (e: any) { toast.error(friendlyError(e)); } finally { setBusy(false); }
   }
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-lg bg-white">
-        <DialogHeader><DialogTitle>{outcome === "clear" ? "Clear for Public Use" : "Return to Agency"}</DialogTitle>
-          <DialogDescription>{outcome === "clear" ? "Issues a UKAS clearance reference." : "The agency uploads a revision, which is reviewed again."}</DialogDescription></DialogHeader>
+        <DialogHeader><DialogTitle>{outcome === "clear" ? "Approve for Use" : "Send Back to the Agency"}</DialogTitle>
+          <DialogDescription>{outcome === "clear" ? "The agency gets an approval number to quote." : "The agency fixes it and uploads a new version. We check it again."}</DialogDescription></DialogHeader>
         <div className="space-y-3">
-          {outcome === "clear" && redFlags > 0 && <p className="flex gap-1.5 text-sm text-red-800"><SeverityIcon severity="red_flag" className="mt-0.5" /> {redFlags} red-flag finding{redFlags === 1 ? "" : "s"} open. Clearing needs a reason.</p>}
+          {outcome === "clear" && redFlags > 0 && <p className="flex gap-1.5 text-sm text-red-800"><SeverityIcon severity="red_flag" className="mt-0.5" /> {redFlags} must-fix item{redFlags === 1 ? " is" : "s are"} still open. Say why you are approving it anyway.</p>}
           <label className={LABEL}>
-            <span className="flex items-center gap-2"><span className="flex-1">{outcome === "clear" ? (redFlags ? "Reason for clearing" : "Note · optional") : "What needs to change"}</span>
-              {outcome === "return" && <AiDraftButton run={() => draftFn({ data: { id } })} onText={setNote} />}</span>
+            <span className="flex items-center gap-2"><span className="flex-1">{outcome === "clear" ? (redFlags ? "Why you are approving it anyway" : "Note (optional)") : "What to change"}</span>
+              {outcome === "return" && <AiDraftButton label="Write It for Me" empty="Nothing to fix was found. Write the note yourself." run={() => draftFn({ data: { id } })} onText={setNote} />}</span>
             <RememberedTextarea field={outcome === "return" ? "brand_return_note" : "brand_clear_note"} value={note} onChange={setNote} />
           </label>
-          <Button disabled={busy || (needNote && !note.trim())} onClick={go}>{busy ? <Loader2 className="size-4 animate-spin" /> : outcome === "clear" ? "Clear for Public Use" : "Return"}</Button>
+          <Button disabled={busy || (needNote && !note.trim())} onClick={go}>{busy ? <Loader2 className="size-4 animate-spin" /> : outcome === "clear" ? "Approve" : "Send Back"}</Button>
         </div>
       </DialogContent>
     </Dialog>
@@ -198,11 +213,11 @@ export function RevisionDialog({ id, onClose, onDone }: { id: string; onClose: (
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-lg bg-white">
-        <DialogHeader><DialogTitle>Upload Revision</DialogTitle><DialogDescription>Reviewed again on upload. Earlier versions are kept.</DialogDescription></DialogHeader>
+        <DialogHeader><DialogTitle>Upload a New Version</DialogTitle><DialogDescription>We check it again. Earlier versions are kept.</DialogDescription></DialogHeader>
         <div className="space-y-3">
           <DropZone file={file} onFile={setFile} />
-          <label className={LABEL}>Revision note<RememberedInput field="brand_revision_note" value={note} onChange={setNote} /></label>
-          <Button disabled={busy || !file} onClick={go}>{busy ? <Loader2 className="size-4 animate-spin" /> : "Upload & Review"}</Button>
+          <label className={LABEL}>What did you change? (optional)<RememberedInput field="brand_revision_note" value={note} onChange={setNote} /></label>
+          <Button disabled={busy || !file} onClick={go}>{busy ? <Loader2 className="size-4 animate-spin" /> : "Upload and Check"}</Button>
         </div>
       </DialogContent>
     </Dialog>
@@ -210,7 +225,7 @@ export function RevisionDialog({ id, onClose, onDone }: { id: string; onClose: (
 }
 
 // ── image view with boxes (PNG / JPG submissions) ────────────────────────────
-export function ImageBoxViewer({ url, findings, activeId, onSelect }: { url: string; findings: BrandFinding[]; activeId: string | null; onSelect: (id: string) => void }) {
+export function ImageBoxViewer({ url, findings, activeId, onSelect, numberOf }: { url: string; findings: BrandFinding[]; activeId: string | null; onSelect: (id: string) => void; numberOf: (f: BrandFinding) => number }) {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   return (
     <div className="h-full overflow-auto bg-gray-100 p-6">
@@ -223,7 +238,7 @@ export function ImageBoxViewer({ url, findings, activeId, onSelect }: { url: str
           return (
             <button key={f.id} onClick={() => onSelect(f.id)} className="absolute rounded-[3px]"
               style={{ left: p.left, top: p.top, width: p.width, height: p.height, border: `${on ? 3 : 2}px solid rgba(${rgb},0.85)`, background: `rgba(${rgb},${on ? 0.16 : 0.06})`, boxShadow: on ? `0 0 0 4px rgba(${rgb},0.25)` : "none" }}>
-              <span className="absolute -top-[18px] -left-[2px] whitespace-nowrap rounded-[3px] px-1.5 text-[11px] font-semibold leading-4 text-white" style={{ background: `rgba(${rgb},0.95)` }}>{f.rule_id}</span>
+              <span className="absolute -top-[18px] -left-[2px] whitespace-nowrap rounded-[3px] px-1.5 text-[11px] font-semibold leading-4 text-white" style={{ background: `rgba(${rgb},0.95)` }}>{numberOf(f)}</span>
             </button>
           );
         })}

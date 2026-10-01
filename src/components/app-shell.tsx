@@ -5,7 +5,7 @@ import { useRole, ROLE_META, type UserRole } from "@/lib/role";
 import { useAuth, signOut, type AppRole } from "@/lib/auth";
 import { useWorkspace, WORKSPACES, type WorkspaceId } from "@/lib/workspace";
 import { useState, useRef, useEffect } from "react";
-import { Briefcase, ListChecks } from "lucide-react";
+import { Briefcase, ListChecks, BookOpen } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { getWorkspaceVisibility } from "@/lib/compliance.functions";
@@ -20,6 +20,12 @@ const DMS_NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, match: (p) => p === "/" },
   { to: "/knowledge-base", label: "Knowledge base", icon: FolderOpen },
   { to: "/reports", label: "Analyses", icon: FileSearch },
+];
+// Branding Compliance: submissions and the brand guide, in plain words.
+const DMS_BRAND_NAV: NavItem[] = [
+  { to: "/", label: "Dashboard", icon: LayoutDashboard, match: (p) => p === "/" },
+  { to: "/reports", label: "Submissions", icon: FileSearch, match: (p) => p.startsWith("/reports") || (p.startsWith("/brand/") && !p.startsWith("/brand/guide")) },
+  { to: "/brand/guide", label: "Brand guide", icon: BookOpen, match: (p) => p.startsWith("/brand/guide") },
 ];
 // The "layout" workspace swaps the DMS group for its own tools.
 const DMS_LAYOUT_NAV: NavItem[] = [
@@ -90,7 +96,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // mismatch when the layout nav has different anchors/icons than base.
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-  const dmsNav = mounted && ws === "layout" ? DMS_LAYOUT_NAV : DMS_NAV;
+  const dmsNav = mounted && ws === "layout" ? DMS_LAYOUT_NAV : mounted && ws === "brand_compliance" ? DMS_BRAND_NAV : DMS_NAV;
   // Tenant branding — same mounted-gate as everything else keyed off client
   // auth state, so SSR (always the default tenant) matches first paint.
   const tenant = mounted ? auth.tenant : DEFAULT_TENANT_BRANDING;
