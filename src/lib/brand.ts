@@ -24,7 +24,14 @@ export const AGENCIES = [
   "Sarawak Digital Economy Corporation (SDEC)",
   "Lembaga Sumber Asli dan Alam Sekitar (NREB)",
   "Majlis Bandaraya Kuching Selatan (MBKS)",
+  "Sarawak Biodiversity Centre (SBC)",
 ];
+/** Statutory bodies and councils: they carry their own corporate identity and
+ *  may use the state crest only with the State Secretary's written permission
+ *  (Circular Memorandum 47/75), so the crest, state colour and font rules do
+ *  not apply to them. Ministries and departments use the crest. */
+export const STATUTORY = new Set(["STB", "SEDC", "SDEC", "NREB", "MBKS", "SBC"]);
+export const isStatutory = (agency: string) => STATUTORY.has(agency.match(/\(([^)]+)\)\s*$/)?.[1] ?? "");
 
 export const MATERIAL_TYPES: Record<string, string> = {
   slide_deck: "Slides", brochure: "Brochure", poster: "Poster or banner", social_post: "Social media post",

@@ -197,7 +197,6 @@ function BrandSubmission() {
                         <span className="text-xs text-gray-500">Page {f.page}</span>
                       </div>
                       <p className="mt-1.5 text-sm text-gray-900">{f.issue}</p>
-                      {f.whyItMatters && <p className="mt-0.5 text-sm text-gray-600"><span className="font-medium text-gray-700">Why it matters:</span> {f.whyItMatters}</p>}
                       {(f.fix || rule?.plain) && <p className="mt-0.5 text-sm text-gray-800"><span className="font-medium">What to do:</span> {f.fix || rule?.plain}</p>}
                       {f.excerpt && <p className="mt-1 border-l-2 border-gray-300 pl-2 text-sm text-gray-600 line-clamp-2">"{f.excerpt}"</p>}
                       {rule?.source.kind === "official" && <div className="mt-1.5"><RuleSource rule={rule} /></div>}

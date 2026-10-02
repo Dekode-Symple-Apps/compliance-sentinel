@@ -9,7 +9,7 @@ import { computeCost } from "@/lib/pricing";
 import { displayName } from "@/lib/ccms";
 import { BRAND_RULES, GUIDELINE, PALETTE, TYPEFACES, ruleById } from "@/lib/brand-guideline";
 import {
-  VERDICT_LABEL, toFix, AGENCIES, BRAND_WORKSPACE, CHANNELS, MATERIAL_TYPES, findingSeverity, guardVerdict, latestReview,
+  VERDICT_LABEL, toFix, AGENCIES, BRAND_WORKSPACE, isStatutory, CHANNELS, MATERIAL_TYPES, findingSeverity, guardVerdict, latestReview,
   type BrandFinding, type BrandReview, type RuleResult,
 } from "@/lib/brand";
 
@@ -136,6 +136,9 @@ function reviewPrompt(brand: any, pages: number, isImage: boolean, extra: string
     `Approved palette: ${PALETTE.map((p) => `${p.name} ${p.hex} (${p.role})`).join("; ")}. Typefaces: headings ${TYPEFACES.headings}, body ${TYPEFACES.body}, fallback ${TYPEFACES.fallback}.`,
     `State vision (verbatim): "${GUIDELINE.vision}" Pillars: ${GUIDELINE.pillars.join(", ")}.`,
     "The state crest (Jata Negeri Sarawak) may appear as an official artwork or as a clearly labelled placeholder emblem in drafts; treat a labelled placeholder as the crest for position and proportion checks.",
+    isStatutory(brand.agency)
+      ? "The submitting agency is a statutory body or council with its own corporate identity. Under Circular Memorandum 47/75 it does not use the state crest without the State Secretary's written permission, so BC-1.1, BC-1.2, BC-1.4, BC-1.7, BC-2.1, BC-2.2 and BC-3.1 are not_applicable: judge its own logo and colours only for being clear and undistorted. If it does show the state crest, judge BC-1.2 to BC-1.4 as usual."
+      : "",
     brand.material_type === "proposal"
       ? "This is an internal proposal or paper, not designed artwork: the visual identity rules (BC-1.1–1.4, BC-2.x, BC-3.1, BC-6.x, BC-7.x) are not_applicable unless it is clearly laid out for public release. Judge its words, policy alignment and mandatory information."
       : "",
@@ -147,7 +150,7 @@ function reviewPrompt(brand: any, pages: number, isImage: boolean, extra: string
     "WRITING: the reader is an agency's marketing or admin officer, not a designer or a lawyer. Use everyday words and short sentences. No preamble.",
     "- Never write rule ids (BC-…), hex codes, point or pixel sizes, contrast ratios or jargon such as \"breach\", \"non-compliant\", \"violation\", \"palette\", \"typography\" or \"off-brand\".",
     "- Name colours in plain words (\"bright purple\", \"state red\"). Call the Jata Negeri Sarawak \"the state crest\". Explain an acronym the first time, e.g. \"the state's 2030 plan (PCDS 2030)\".",
-    "- issue: what is wrong, where, ≤ 12 words (e.g. \"The crest is stretched sideways.\"). whyItMatters: why it matters to the public or the government, ≤ 12 words. fix: one instruction starting with a verb, ≤ 12 words.",
+    "- issue: what is wrong, where, ≤ 12 words (e.g. \"The crest is stretched sideways.\"). fix: one instruction starting with a verb, ≤ 12 words. Leave whyItMatters empty.",
     "- summary: one or two short sentences. Start with the overall result (\"Ready to publish.\", \"Needs a few small fixes.\" or \"Must be fixed before publishing.\"), then the main reason.",
     "- rule note: ≤ 12 plain words.",
     "Risk score 0–100: how likely this harms the state's brand if published as is. A failed critical rule is a red_flag (70+); failed major rules only is caution (30–69); only minor or none is compliant (0–29).",

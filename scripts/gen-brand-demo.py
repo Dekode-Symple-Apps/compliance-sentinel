@@ -1,19 +1,24 @@
 """Demo material for Branding Compliance, with an answer key.
 
 Writes to ~/Desktop/01. Demo Data/Branding Compliance/ (or the folder given):
-  crest_placeholder.png                      stand-in for the state crest (not the real Jata)
-  1 Brochure - Program Kampung Digital.pdf   compliant
-  2 Poster - Open Day v1.png                 breaches: stretched crest, off-palette, Chief Minister, comic font, watermark, gmail
-  2b Poster - Hari Terbuka v2.png            the corrected poster (upload as the revision)
-  3 Slides - Rural Water Supply.pptx         breaches: crest stretched and in the corner, agency logo larger, no state mottos, teal/purple theme, unsourced figures, no date
-  4 Proposal - Coal Power Plant.docx         breaches: contradicts the green energy direction, unsourced figures, Chief Minister, gmail, no date or classification
-  answer_key.json                            the rules each file is expected to fail
+  sarawak-crest.png                                     the state crest (Jata Negeri Sarawak), from Wikimedia Commons (public domain)
+  1 Good sample - SBC General Info brochure (real).pdf  a real brochure, downloaded from the Sarawak Biodiversity Centre (a statutory body: own logo, no crest)
+  2 Bad draft - Program Kampung Digital v1.pdf          UKAS brochure to rework: agency logo bigger than the crest, old department name,
+                                                        "One Government" counter logo on a brochure, Gmail contact
+  2b Reworked - Program Kampung Digital v2.pdf          the same brochure, fixed (upload as the new version)
+  More samples/3 Poster - Open Day v1.png               breaches: stretched crest, off-palette, Chief Minister, comic font, watermark, gmail
+  More samples/3b Poster - Hari Terbuka v2.png          the corrected poster
+  More samples/4 Slides - Rural Water Supply.pptx       breaches: crest stretched and in the corner, agency logo larger, no state mottos, teal/purple theme, unsourced figures, no date
+  More samples/5 Proposal - Coal Power Plant.docx       breaches: contradicts the green energy direction, unsourced figures, Chief Minister, gmail, no date or classification
+  answer_key.json                                       the rules each file is expected to fail
 """
 import json, os, sys, math
 from PIL import Image, ImageDraw, ImageFont
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser("~/Desktop/01. Demo Data/Branding Compliance")
-os.makedirs(OUT, exist_ok=True)
+MORE = f"{OUT}/More samples"
+os.makedirs(MORE, exist_ok=True)
+HERE = os.path.dirname(os.path.abspath(__file__))
 FONTS = os.path.expanduser("~/Library/Fonts")
 SUP = "/System/Library/Fonts/Supplemental"
 MONT = f"{FONTS}/Montserrat-Regular.ttf"
@@ -25,25 +30,12 @@ RED, YEL, BLK, GREY, LIGHT = (206, 17, 38), (255, 209, 0), (26, 26, 26), (107, 1
 def font(path, size):
     return ImageFont.truetype(path, size)
 
-# ── the placeholder crest ────────────────────────────────────────────────────
-def crest(size=420):
-    im = Image.new("RGBA", (size, int(size * 1.15)), (0, 0, 0, 0))
-    d = ImageDraw.Draw(im)
-    w, h = im.size
-    shield = [(w * .1, h * .08), (w * .9, h * .08), (w * .9, h * .55), (w * .5, h * .95), (w * .1, h * .55)]
-    d.polygon(shield, fill=YEL, outline=BLK, width=int(size * .025))
-    d.polygon([(w * .1, h * .08), (w * .5, h * .08), (w * .5, h * .95), (w * .1, h * .55)], fill=BLK)
-    d.polygon([(w * .5, h * .3), (w * .9, h * .08), (w * .9, h * .3), (w * .5, h * .52)], fill=RED)
-    cx, cy, r = w * .5, h * .28, w * .09
-    pts = [(cx + r * math.cos(math.radians(90 + i * 40)) * (1 if i % 2 == 0 else .45), cy - r * math.sin(math.radians(90 + i * 40)) * (1 if i % 2 == 0 else .45)) for i in range(9)]
-    d.polygon(pts, fill=YEL)
-    f = font(OSANS_B, int(size * .07))
-    d.text((w / 2, h * .72), "JATA", fill=BLK, anchor="mm", font=f)
-    d.text((w / 2, h * .8), "PLACEHOLDER", fill=BLK, anchor="mm", font=font(OSANS_B, int(size * .045)))
-    return im
-
-CREST = crest()
-CREST.save(f"{OUT}/crest_placeholder.png")
+# ── the state crest ───────────────────────────────────────────────────────────
+# Jata Negeri Sarawak, 960 × 1024, from Wikimedia Commons (public domain).
+CREST_PNG = f"{OUT}/sarawak-crest.png"
+CREST = Image.open(f"{HERE}/assets/sarawak-crest.png").convert("RGBA")
+CREST.save(CREST_PNG)
+CREST_RATIO = CREST.height / CREST.width  # keep it when the crest is meant to be correct
 
 def paste(bg, im, box):
     x, y, w, h = box
@@ -63,11 +55,11 @@ hexc = lambda c: "#%02x%02x%02x" % c
 def brochure(path):
     c = canvas.Canvas(path, pagesize=A4)
     W, H = A4
-    crest_png = f"{OUT}/crest_placeholder.png"
+    crest_png = CREST_PNG
     def header(title_bm, title_en):
         c.setFillColor(hexc(RED)); c.rect(0, H - 150, W, 150, fill=1, stroke=0)
         c.setFillColor(hexc(YEL)); c.rect(0, H - 158, W, 8, fill=1, stroke=0)
-        c.drawImage(ImageReader(crest_png), 36, H - 138, width=90, height=103, mask="auto")
+        c.drawImage(ImageReader(crest_png), 36, H - 140, width=100, height=100 * CREST_RATIO, mask="auto")
         c.setFillColor("white"); c.setFont("OpenSansBold", 11); c.drawString(150, H - 60, "UNIT KOMUNIKASI AWAM SARAWAK (UKAS)")
         c.setFont("OpenSans", 9); c.drawString(150, H - 75, "Jabatan Premier Sarawak · Kerajaan Sarawak")
         c.setFont("Montserrat", 22); c.drawString(150, H - 108, title_bm)
@@ -121,7 +113,60 @@ def brochure(path):
     c.setFont("OpenSans", 9); c.drawString(48, 30, "Tel: 082-000 000 · E-mel: ukas@sarawak.gov.my · ukas.sarawak.gov.my")
     c.save()
 
-brochure(f"{OUT}/1 Brochure - Program Kampung Digital.pdf")
+brochure(f"{OUT}/2b Reworked - Program Kampung Digital v2.pdf")
+
+# ── 2. the same brochure as a first draft that needs reworking ───────────────
+def brochure_draft(path):
+    c = canvas.Canvas(path, pagesize=A4)
+    W, H = A4
+    # Header: a big agency badge leads; the crest is small and pushed to the right.
+    c.setFillColor(hexc(RED)); c.rect(0, H - 170, W, 170, fill=1, stroke=0)
+    c.setFillColor(hexc(YEL)); c.rect(0, H - 178, W, 8, fill=1, stroke=0)
+    c.setFillColor("white"); c.roundRect(30, H - 160, 230, 140, 14, fill=1, stroke=0)
+    c.setFillColor(hexc(RED)); c.setFont("Montserrat", 64); c.drawCentredString(145, H - 100, "UKAS")
+    c.setFillColor(hexc(BLK)); c.setFont("OpenSansBold", 9); c.drawCentredString(145, H - 125, "UNIT KOMUNIKASI AWAM SARAWAK")
+    c.setFont("OpenSans", 8); c.drawCentredString(145, H - 140, "Jabatan Ketua Menteri Sarawak")
+    c.drawImage(ImageReader(CREST_PNG), W - 80, H - 75, width=44, height=44 * CREST_RATIO, mask="auto")
+    c.setFillColor("white"); c.setFont("Montserrat", 20); c.drawString(280, H - 85, "Program Kampung")
+    c.drawString(280, H - 110, "Digital Sarawak")
+    c.setFont("OpenSans", 11); c.drawString(280, H - 135, "Sarawak Digital Village Programme")
+    y = H - 220
+    c.setFillColor(hexc(BLK)); c.setFont("Montserrat", 15); c.drawString(48, y, "Menghubungkan setiap kampung / Connecting every village"); y -= 28
+    c.setFont("OpenSans", 11)
+    for line in ["Program Kampung Digital membawa capaian internet berkelajuan tinggi, latihan kemahiran",
+                 "digital dan perkhidmatan kerajaan dalam talian ke kawasan luar bandar Sarawak."]:
+        c.drawString(48, y, line); y -= 16
+    c.setFillColor(hexc(GREY))
+    for line in ["The Digital Village Programme brings high-speed internet, digital skills training and",
+                 "online government services to rural Sarawak."]:
+        c.drawString(48, y, line); y -= 16
+    y -= 20
+    c.setFillColor(hexc(BLK)); c.setFont("Montserrat", 14); c.drawString(48, y, "Apa yang anda dapat / What you get"); y -= 24
+    for bm, en in [("Wi-Fi awam percuma di pusat komuniti", "Free public Wi-Fi at the community centre"),
+                   ("Kelas literasi digital untuk semua peringkat umur", "Digital literacy classes for all ages"),
+                   ("Kaunter bantuan perkhidmatan kerajaan dalam talian", "Help desk for online government services")]:
+        c.setFillColor(hexc(RED)); c.circle(54, y + 4, 3, fill=1, stroke=0)
+        c.setFillColor(hexc(BLK)); c.setFont("OpenSans", 11); c.drawString(64, y, bm)
+        c.setFillColor(hexc(GREY)); c.setFont("OpenSans", 10); c.drawString(64, y - 14, en); y -= 34
+    # The counter-only "One Government At Your Service" mark, used as decoration.
+    y -= 10
+    c.setStrokeColor(hexc(RED)); c.setLineWidth(3); c.setFillColor("white"); c.roundRect(48, y - 70, 260, 70, 10, fill=1, stroke=1)
+    c.setFillColor(hexc(RED)); c.setFont("OpenSansBold", 16); c.drawString(64, y - 30, "ONE GOVERNMENT")
+    c.setFillColor(hexc(BLK)); c.setFont("OpenSans", 12); c.drawString(64, y - 50, "At Your Service")
+    c.setFillColor(hexc(BLK)); c.rect(0, 0, W, 70, fill=1, stroke=0)
+    c.setFillColor("white"); c.setFont("OpenSansBold", 10); c.drawString(48, 44, "Unit Komunikasi Awam Sarawak (UKAS)")
+    c.setFont("OpenSans", 9); c.drawString(48, 30, "Tel: 082-000 000 · E-mel: kampungdigital.ukas@gmail.com")
+    c.drawString(48, 16, "Draf / Draft: September 2026")
+    c.save()
+
+brochure_draft(f"{OUT}/2 Bad draft - Program Kampung Digital v1.pdf")
+
+# ── 1. a real brochure, as published ─────────────────────────────────────────
+REAL = f"{OUT}/1 Good sample - SBC General Info brochure (real).pdf"
+if not os.path.exists(REAL):
+    import urllib.request
+    req = urllib.request.Request("https://www.sbc.org.my/sbc-news/downloads/brochures/715-sbc-general-info/file", headers={"User-Agent": "Mozilla/5.0"})
+    open(REAL, "wb").write(urllib.request.urlopen(req, timeout=60).read())
 
 # ── 2. poster v1 (breaches) and v2 (corrected) ───────────────────────────────
 def poster_v1(path):
@@ -151,8 +196,8 @@ def poster_v1(path):
     d.text((140, 950), "Venue: Main Hall", fill=(255, 215, 0), font=font(COMIC, 40))
     d.text((140, 1010), "Free entry! Lucky draw worth RM50,000!!", fill=(255, 215, 0), font=font(COMIC, 40))
     d.text((W / 2, 1180), "Info: hariterbuka.sarawak@gmail.com", fill=(255, 255, 255), anchor="mm", font=font(COMIC, 36))
-    # the crest, stretched and tucked into the bottom-right corner
-    paste(im, CREST, (900, 1250, 170, 80))
+    # the crest, squeezed tall and thin and tucked into the bottom-right corner
+    paste(im, CREST, (975, 1115, 85, 225))
     im.save(path)
 
 def poster_v2(path):
@@ -161,7 +206,7 @@ def poster_v2(path):
     d = ImageDraw.Draw(im)
     d.rectangle([0, 0, W, 230], fill=RED)
     d.rectangle([0, 230, W, 244], fill=YEL)
-    paste(im, CREST, (50, 30, 150, 172))
+    paste(im, CREST, (50, 30, 160, 160 * CREST_RATIO))
     d.text((230, 70), "JABATAN KERJA RAYA SARAWAK", fill=(255, 255, 255), font=font(OSANS_B, 34))
     d.text((230, 120), "Kerajaan Sarawak · Sarawak Government", fill=(255, 255, 255), font=font(OSANS, 28))
     d.rounded_rectangle([860, 70, 1030, 170], radius=10, outline=(255, 255, 255), width=4)
@@ -183,8 +228,8 @@ def poster_v2(path):
     d.text((80, 1265), "Tel: 082-000 000 · info@jkr.sarawak.gov.my · jkr.sarawak.gov.my", fill=(255, 255, 255), font=font(OSANS, 28))
     im.save(path)
 
-poster_v1(f"{OUT}/2 Poster - Open Day v1.png")
-poster_v2(f"{OUT}/2b Poster - Hari Terbuka v2.png")
+poster_v1(f"{MORE}/3 Poster - Open Day v1.png")
+poster_v2(f"{MORE}/3b Poster - Hari Terbuka v2.png")
 
 # ── 3. slide deck (PPTX) ─────────────────────────────────────────────────────
 from pptx import Presentation
@@ -209,7 +254,7 @@ def deck(path):
             # agency wordmark larger than the crest; crest stretched in the corner
             box = s.shapes.add_shape(1, Inches(9.4), Inches(4.6), Inches(3.4), Inches(1.6)); box.fill.solid(); box.fill.fore_color.rgb = TEAL; box.line.fill.background()
             box.text_frame.text = "MUT"; box.text_frame.paragraphs[0].runs[0].font.size = Pt(54)
-            s.shapes.add_picture(f"{OUT}/crest_placeholder.png", Inches(11.9), Inches(6.55), width=Inches(1.3), height=Inches(0.55))
+            s.shapes.add_picture(CREST_PNG, Inches(11.9), Inches(6.55), width=Inches(1.3), height=Inches(0.55))
         return s
     slide("Rural Water Supply Project", ["Ministry of Utility and Telecommunication", "Briefing for community leaders", "Presenter: Project Team"], logo=True)
     slide("Why this project", ["Many longhouses still rely on rainwater tanks", "Treated water improves health and daily life", "Supports rural development"])
@@ -218,7 +263,7 @@ def deck(path):
     slide("Contact", ["projectteam.water@gmail.com", "WhatsApp: 012-345 6789"])
     prs.save(path)
 
-deck(f"{OUT}/3 Slides - Rural Water Supply.pptx")
+deck(f"{MORE}/4 Slides - Rural Water Supply.pptx")
 
 # ── 4. proposal (DOCX) ───────────────────────────────────────────────────────
 from docx import Document
@@ -238,14 +283,16 @@ def proposal(path):
         p = doc.add_paragraph(t); p.runs[0].font.size = DPt(11)
     doc.save(path)
 
-proposal(f"{OUT}/4 Proposal - Coal Power Plant.docx")
+proposal(f"{MORE}/5 Proposal - Coal Power Plant.docx")
 
 key = {
-    "1 Brochure - Program Kampung Digital.pdf": {"expect": "compliant", "must_not_fail": ["BC-1.1", "BC-1.3", "BC-4.2", "BC-5.2", "BC-8.1", "BC-8.2"]},
-    "2 Poster - Open Day v1.png": {"expect": "red_flag", "must_fail": ["BC-1.2", "BC-1.3", "BC-2.2", "BC-3.2", "BC-4.2", "BC-6.2", "BC-7.1", "BC-8.1", "BC-8.2"]},
-    "2b Poster - Hari Terbuka v2.png": {"expect": "compliant", "must_not_fail": ["BC-1.1", "BC-1.3", "BC-4.2", "BC-8.1", "BC-8.2"]},
-    "3 Slides - Rural Water Supply.pptx": {"expect": "red_flag", "must_fail": ["BC-1.2", "BC-1.3", "BC-1.4", "BC-1.7", "BC-2.2", "BC-5.3", "BC-8.2", "BC-8.3"]},
-    "4 Proposal - Coal Power Plant.docx": {"expect": "red_flag", "must_fail": ["BC-4.2", "BC-5.2", "BC-5.3", "BC-8.2", "BC-8.3", "BC-8.4"]},
+    "1 Good sample - SBC General Info brochure (real).pdf": {"expect": "compliant", "agency": "Sarawak Biodiversity Centre (SBC)", "must_not_fail": ["BC-1.1", "BC-2.1", "BC-2.2", "BC-3.1", "BC-8.1", "BC-8.2"]},
+    "2 Bad draft - Program Kampung Digital v1.pdf": {"expect": "caution", "agency": "Unit Komunikasi Awam Sarawak (UKAS)", "must_fail": ["BC-1.4", "BC-1.6", "BC-1.8", "BC-8.2"], "must_not_fail": ["BC-1.1", "BC-1.3"]},
+    "2b Reworked - Program Kampung Digital v2.pdf": {"expect": "compliant", "agency": "Unit Komunikasi Awam Sarawak (UKAS)", "must_not_fail": ["BC-1.1", "BC-1.3", "BC-1.4", "BC-1.6", "BC-1.8", "BC-8.2"]},
+    "More samples/3 Poster - Open Day v1.png": {"expect": "red_flag", "agency": "Jabatan Kerja Raya Sarawak (JKR)", "must_fail": ["BC-1.2", "BC-1.3", "BC-2.2", "BC-3.2", "BC-4.2", "BC-6.2", "BC-7.1", "BC-8.1", "BC-8.2"]},
+    "More samples/3b Poster - Hari Terbuka v2.png": {"expect": "compliant", "agency": "Jabatan Kerja Raya Sarawak (JKR)", "must_not_fail": ["BC-1.1", "BC-1.3", "BC-4.2", "BC-8.1", "BC-8.2"]},
+    "More samples/4 Slides - Rural Water Supply.pptx": {"expect": "red_flag", "agency": "Kementerian Utiliti dan Telekomunikasi (MUT)", "must_fail": ["BC-1.2", "BC-1.3", "BC-1.4", "BC-1.7", "BC-2.2", "BC-5.3", "BC-8.2", "BC-8.3"]},
+    "More samples/5 Proposal - Coal Power Plant.docx": {"expect": "red_flag", "agency": "Kementerian Utiliti dan Telekomunikasi (MUT)", "must_fail": ["BC-4.2", "BC-5.2", "BC-5.3", "BC-8.2", "BC-8.3", "BC-8.4"]},
 }
 json.dump(key, open(f"{OUT}/answer_key.json", "w"), indent=1)
 print("written to", OUT)
