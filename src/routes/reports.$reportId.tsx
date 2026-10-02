@@ -46,7 +46,7 @@ function ReportRoute() {
 export const Route = createFileRoute("/reports/$reportId")({
   component: ReportRoute,
   errorComponent: ({ error }) => (
-    <AppShell><div className="p-10 text-sm text-destructive">{error.message}</div></AppShell>
+    <AppShell><div className="p-10 text-sm text-destructive">{(error as Error).message}</div></AppShell>
   ),
   notFoundComponent: () => (
     <AppShell><div className="p-10">Report not found.</div></AppShell>

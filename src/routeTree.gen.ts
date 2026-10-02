@@ -9,61 +9,56 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as SettingsRouteImport } from './routes/settings'
-import { Route as LoginRouteImport } from './routes/login'
-import { Route as KnowledgeBaseRouteImport } from './routes/knowledge-base'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as VmsIndexRouteImport } from './routes/vms.index'
-import { Route as ReportsIndexRouteImport } from './routes/reports.index'
-import { Route as LegalIndexRouteImport } from './routes/legal.index'
-import { Route as LayoutIndexRouteImport } from './routes/layout.index'
-import { Route as CcmsIndexRouteImport } from './routes/ccms.index'
+import { Route as KnowledgeBaseRouteImport } from './routes/knowledge-base'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as AmsIndexRouteImport } from './routes/ams.index'
-import { Route as VmsVendorsRouteImport } from './routes/vms.vendors'
-import { Route as VmsRequestsRouteImport } from './routes/vms.requests'
-import { Route as VmsNewRouteImport } from './routes/vms.new'
-import { Route as VmsMonitoringRouteImport } from './routes/vms.monitoring'
-import { Route as VmsRequestIdRouteImport } from './routes/vms.$requestId'
-import { Route as VendorPortalTokenRouteImport } from './routes/vendor-portal.$token'
-import { Route as Simplify2ReportIdRouteImport } from './routes/simplify2.$reportId'
-import { Route as SimplifyReportIdRouteImport } from './routes/simplify.$reportId'
-import { Route as RspoReportIdRouteImport } from './routes/rspo.$reportId'
-import { Route as ReportsReportIdRouteImport } from './routes/reports.$reportId'
-import { Route as MbrsReportIdRouteImport } from './routes/mbrs.$reportId'
-import { Route as LegalRequestsRouteImport } from './routes/legal.requests'
-import { Route as LegalRepositoryRouteImport } from './routes/legal.repository'
-import { Route as LegalNewRouteImport } from './routes/legal.new'
-import { Route as LegalMatterIdRouteImport } from './routes/legal.$matterId'
-import { Route as LayoutJobIdRouteImport } from './routes/layout.$jobId'
-import { Route as CreditReportIdRouteImport } from './routes/credit.$reportId'
-import { Route as CcmsVendorsRouteImport } from './routes/ccms.vendors'
-import { Route as CcmsRepositoryRouteImport } from './routes/ccms.repository'
-import { Route as CcmsObligationsRouteImport } from './routes/ccms.obligations'
-import { Route as CcmsNewRouteImport } from './routes/ccms.new'
-import { Route as CcmsContractsRouteImport } from './routes/ccms.contracts'
-import { Route as CcmsContractIdRouteImport } from './routes/ccms.$contractId'
-import { Route as BrandGuideRouteImport } from './routes/brand.guide'
-import { Route as BrandReportIdRouteImport } from './routes/brand.$reportId'
-import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
-import { Route as AmsNewRouteImport } from './routes/ams.new'
-import { Route as AmsDriversRouteImport } from './routes/ams.drivers'
-import { Route as AmsAssetsRouteImport } from './routes/ams.assets'
 import { Route as AmsAssetIdRouteImport } from './routes/ams.$assetId'
-import { Route as CcmsTemplatesIndexRouteImport } from './routes/ccms.templates.index'
-import { Route as ReportsReportIdPresentRouteImport } from './routes/reports.$reportId.present'
-import { Route as LegalReviewDocumentIdRouteImport } from './routes/legal.review.$documentId'
-import { Route as CcmsTemplatesTemplateIdRouteImport } from './routes/ccms.templates.$templateId'
-import { Route as CcmsReviewDocumentIdRouteImport } from './routes/ccms.review.$documentId'
+import { Route as AmsAssetsRouteImport } from './routes/ams.assets'
+import { Route as AmsDriversRouteImport } from './routes/ams.drivers'
+import { Route as AmsNewRouteImport } from './routes/ams.new'
+import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
+import { Route as BrandReportIdRouteImport } from './routes/brand.$reportId'
+import { Route as BrandGuideRouteImport } from './routes/brand.guide'
+import { Route as CcmsIndexRouteImport } from './routes/ccms.index'
+import { Route as CcmsContractIdRouteImport } from './routes/ccms.$contractId'
+import { Route as CcmsContractsRouteImport } from './routes/ccms.contracts'
+import { Route as CcmsNewRouteImport } from './routes/ccms.new'
+import { Route as CcmsObligationsRouteImport } from './routes/ccms.obligations'
+import { Route as CcmsRepositoryRouteImport } from './routes/ccms.repository'
+import { Route as CcmsVendorsRouteImport } from './routes/ccms.vendors'
+import { Route as CreditReportIdRouteImport } from './routes/credit.$reportId'
+import { Route as LayoutIndexRouteImport } from './routes/layout.index'
+import { Route as LayoutJobIdRouteImport } from './routes/layout.$jobId'
+import { Route as LegalIndexRouteImport } from './routes/legal.index'
+import { Route as LegalMatterIdRouteImport } from './routes/legal.$matterId'
+import { Route as LegalNewRouteImport } from './routes/legal.new'
+import { Route as LegalRepositoryRouteImport } from './routes/legal.repository'
+import { Route as LegalRequestsRouteImport } from './routes/legal.requests'
+import { Route as MbrsReportIdRouteImport } from './routes/mbrs.$reportId'
+import { Route as ReportsIndexRouteImport } from './routes/reports.index'
+import { Route as ReportsReportIdRouteImport } from './routes/reports.$reportId'
+import { Route as RspoReportIdRouteImport } from './routes/rspo.$reportId'
+import { Route as SimplifyReportIdRouteImport } from './routes/simplify.$reportId'
+import { Route as Simplify2ReportIdRouteImport } from './routes/simplify2.$reportId'
+import { Route as VendorPortalTokenRouteImport } from './routes/vendor-portal.$token'
+import { Route as VmsIndexRouteImport } from './routes/vms.index'
+import { Route as VmsRequestIdRouteImport } from './routes/vms.$requestId'
+import { Route as VmsMonitoringRouteImport } from './routes/vms.monitoring'
+import { Route as VmsNewRouteImport } from './routes/vms.new'
+import { Route as VmsRequestsRouteImport } from './routes/vms.requests'
+import { Route as VmsVendorsRouteImport } from './routes/vms.vendors'
 import { Route as AuthGoogleCallbackRouteImport } from './routes/auth.google.callback'
+import { Route as CcmsReviewDocumentIdRouteImport } from './routes/ccms.review.$documentId'
+import { Route as CcmsTemplatesIndexRouteImport } from './routes/ccms.templates.index'
+import { Route as CcmsTemplatesTemplateIdRouteImport } from './routes/ccms.templates.$templateId'
+import { Route as LegalReviewDocumentIdRouteImport } from './routes/legal.review.$documentId'
+import { Route as ReportsReportIdPresentRouteImport } from './routes/reports.$reportId.present'
 
-const SettingsRoute = SettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LoginRoute = LoginRouteImport.update({
-  id: '/login',
-  path: '/login',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const KnowledgeBaseRoute = KnowledgeBaseRouteImport.update({
@@ -71,34 +66,14 @@ const KnowledgeBaseRoute = KnowledgeBaseRouteImport.update({
   path: '/knowledge-base',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
-const VmsIndexRoute = VmsIndexRouteImport.update({
-  id: '/vms/',
-  path: '/vms/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ReportsIndexRoute = ReportsIndexRouteImport.update({
-  id: '/reports/',
-  path: '/reports/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LegalIndexRoute = LegalIndexRouteImport.update({
-  id: '/legal/',
-  path: '/legal/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LayoutIndexRoute = LayoutIndexRouteImport.update({
-  id: '/layout/',
-  path: '/layout/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CcmsIndexRoute = CcmsIndexRouteImport.update({
-  id: '/ccms/',
-  path: '/ccms/',
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AmsIndexRoute = AmsIndexRouteImport.update({
@@ -106,144 +81,9 @@ const AmsIndexRoute = AmsIndexRouteImport.update({
   path: '/ams/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const VmsVendorsRoute = VmsVendorsRouteImport.update({
-  id: '/vms/vendors',
-  path: '/vms/vendors',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const VmsRequestsRoute = VmsRequestsRouteImport.update({
-  id: '/vms/requests',
-  path: '/vms/requests',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const VmsNewRoute = VmsNewRouteImport.update({
-  id: '/vms/new',
-  path: '/vms/new',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const VmsMonitoringRoute = VmsMonitoringRouteImport.update({
-  id: '/vms/monitoring',
-  path: '/vms/monitoring',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const VmsRequestIdRoute = VmsRequestIdRouteImport.update({
-  id: '/vms/$requestId',
-  path: '/vms/$requestId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const VendorPortalTokenRoute = VendorPortalTokenRouteImport.update({
-  id: '/vendor-portal/$token',
-  path: '/vendor-portal/$token',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const Simplify2ReportIdRoute = Simplify2ReportIdRouteImport.update({
-  id: '/simplify2/$reportId',
-  path: '/simplify2/$reportId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SimplifyReportIdRoute = SimplifyReportIdRouteImport.update({
-  id: '/simplify/$reportId',
-  path: '/simplify/$reportId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const RspoReportIdRoute = RspoReportIdRouteImport.update({
-  id: '/rspo/$reportId',
-  path: '/rspo/$reportId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ReportsReportIdRoute = ReportsReportIdRouteImport.update({
-  id: '/reports/$reportId',
-  path: '/reports/$reportId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MbrsReportIdRoute = MbrsReportIdRouteImport.update({
-  id: '/mbrs/$reportId',
-  path: '/mbrs/$reportId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LegalRequestsRoute = LegalRequestsRouteImport.update({
-  id: '/legal/requests',
-  path: '/legal/requests',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LegalRepositoryRoute = LegalRepositoryRouteImport.update({
-  id: '/legal/repository',
-  path: '/legal/repository',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LegalNewRoute = LegalNewRouteImport.update({
-  id: '/legal/new',
-  path: '/legal/new',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LegalMatterIdRoute = LegalMatterIdRouteImport.update({
-  id: '/legal/$matterId',
-  path: '/legal/$matterId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LayoutJobIdRoute = LayoutJobIdRouteImport.update({
-  id: '/layout/$jobId',
-  path: '/layout/$jobId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CreditReportIdRoute = CreditReportIdRouteImport.update({
-  id: '/credit/$reportId',
-  path: '/credit/$reportId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CcmsVendorsRoute = CcmsVendorsRouteImport.update({
-  id: '/ccms/vendors',
-  path: '/ccms/vendors',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CcmsRepositoryRoute = CcmsRepositoryRouteImport.update({
-  id: '/ccms/repository',
-  path: '/ccms/repository',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CcmsObligationsRoute = CcmsObligationsRouteImport.update({
-  id: '/ccms/obligations',
-  path: '/ccms/obligations',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CcmsNewRoute = CcmsNewRouteImport.update({
-  id: '/ccms/new',
-  path: '/ccms/new',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CcmsContractsRoute = CcmsContractsRouteImport.update({
-  id: '/ccms/contracts',
-  path: '/ccms/contracts',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CcmsContractIdRoute = CcmsContractIdRouteImport.update({
-  id: '/ccms/$contractId',
-  path: '/ccms/$contractId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const BrandGuideRoute = BrandGuideRouteImport.update({
-  id: '/brand/guide',
-  path: '/brand/guide',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const BrandReportIdRoute = BrandReportIdRouteImport.update({
-  id: '/brand/$reportId',
-  path: '/brand/$reportId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthCallbackRoute = AuthCallbackRouteImport.update({
-  id: '/auth/callback',
-  path: '/auth/callback',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AmsNewRoute = AmsNewRouteImport.update({
-  id: '/ams/new',
-  path: '/ams/new',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AmsDriversRoute = AmsDriversRouteImport.update({
-  id: '/ams/drivers',
-  path: '/ams/drivers',
+const AmsAssetIdRoute = AmsAssetIdRouteImport.update({
+  id: '/ams/$assetId',
+  path: '/ams/$assetId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AmsAssetsRoute = AmsAssetsRouteImport.update({
@@ -251,29 +91,174 @@ const AmsAssetsRoute = AmsAssetsRouteImport.update({
   path: '/ams/assets',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AmsAssetIdRoute = AmsAssetIdRouteImport.update({
-  id: '/ams/$assetId',
-  path: '/ams/$assetId',
+const AmsDriversRoute = AmsDriversRouteImport.update({
+  id: '/ams/drivers',
+  path: '/ams/drivers',
   getParentRoute: () => rootRouteImport,
 } as any)
-const CcmsTemplatesIndexRoute = CcmsTemplatesIndexRouteImport.update({
-  id: '/ccms/templates/',
-  path: '/ccms/templates/',
+const AmsNewRoute = AmsNewRouteImport.update({
+  id: '/ams/new',
+  path: '/ams/new',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ReportsReportIdPresentRoute = ReportsReportIdPresentRouteImport.update({
-  id: '/present',
-  path: '/present',
-  getParentRoute: () => ReportsReportIdRoute,
-} as any)
-const LegalReviewDocumentIdRoute = LegalReviewDocumentIdRouteImport.update({
-  id: '/legal/review/$documentId',
-  path: '/legal/review/$documentId',
+const AuthCallbackRoute = AuthCallbackRouteImport.update({
+  id: '/auth/callback',
+  path: '/auth/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
-const CcmsTemplatesTemplateIdRoute = CcmsTemplatesTemplateIdRouteImport.update({
-  id: '/ccms/templates/$templateId',
-  path: '/ccms/templates/$templateId',
+const BrandReportIdRoute = BrandReportIdRouteImport.update({
+  id: '/brand/$reportId',
+  path: '/brand/$reportId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BrandGuideRoute = BrandGuideRouteImport.update({
+  id: '/brand/guide',
+  path: '/brand/guide',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CcmsIndexRoute = CcmsIndexRouteImport.update({
+  id: '/ccms/',
+  path: '/ccms/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CcmsContractIdRoute = CcmsContractIdRouteImport.update({
+  id: '/ccms/$contractId',
+  path: '/ccms/$contractId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CcmsContractsRoute = CcmsContractsRouteImport.update({
+  id: '/ccms/contracts',
+  path: '/ccms/contracts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CcmsNewRoute = CcmsNewRouteImport.update({
+  id: '/ccms/new',
+  path: '/ccms/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CcmsObligationsRoute = CcmsObligationsRouteImport.update({
+  id: '/ccms/obligations',
+  path: '/ccms/obligations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CcmsRepositoryRoute = CcmsRepositoryRouteImport.update({
+  id: '/ccms/repository',
+  path: '/ccms/repository',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CcmsVendorsRoute = CcmsVendorsRouteImport.update({
+  id: '/ccms/vendors',
+  path: '/ccms/vendors',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CreditReportIdRoute = CreditReportIdRouteImport.update({
+  id: '/credit/$reportId',
+  path: '/credit/$reportId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LayoutIndexRoute = LayoutIndexRouteImport.update({
+  id: '/layout/',
+  path: '/layout/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LayoutJobIdRoute = LayoutJobIdRouteImport.update({
+  id: '/layout/$jobId',
+  path: '/layout/$jobId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LegalIndexRoute = LegalIndexRouteImport.update({
+  id: '/legal/',
+  path: '/legal/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LegalMatterIdRoute = LegalMatterIdRouteImport.update({
+  id: '/legal/$matterId',
+  path: '/legal/$matterId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LegalNewRoute = LegalNewRouteImport.update({
+  id: '/legal/new',
+  path: '/legal/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LegalRepositoryRoute = LegalRepositoryRouteImport.update({
+  id: '/legal/repository',
+  path: '/legal/repository',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LegalRequestsRoute = LegalRequestsRouteImport.update({
+  id: '/legal/requests',
+  path: '/legal/requests',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MbrsReportIdRoute = MbrsReportIdRouteImport.update({
+  id: '/mbrs/$reportId',
+  path: '/mbrs/$reportId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReportsIndexRoute = ReportsIndexRouteImport.update({
+  id: '/reports/',
+  path: '/reports/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReportsReportIdRoute = ReportsReportIdRouteImport.update({
+  id: '/reports/$reportId',
+  path: '/reports/$reportId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RspoReportIdRoute = RspoReportIdRouteImport.update({
+  id: '/rspo/$reportId',
+  path: '/rspo/$reportId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SimplifyReportIdRoute = SimplifyReportIdRouteImport.update({
+  id: '/simplify/$reportId',
+  path: '/simplify/$reportId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const Simplify2ReportIdRoute = Simplify2ReportIdRouteImport.update({
+  id: '/simplify2/$reportId',
+  path: '/simplify2/$reportId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VendorPortalTokenRoute = VendorPortalTokenRouteImport.update({
+  id: '/vendor-portal/$token',
+  path: '/vendor-portal/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VmsIndexRoute = VmsIndexRouteImport.update({
+  id: '/vms/',
+  path: '/vms/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VmsRequestIdRoute = VmsRequestIdRouteImport.update({
+  id: '/vms/$requestId',
+  path: '/vms/$requestId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VmsMonitoringRoute = VmsMonitoringRouteImport.update({
+  id: '/vms/monitoring',
+  path: '/vms/monitoring',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VmsNewRoute = VmsNewRouteImport.update({
+  id: '/vms/new',
+  path: '/vms/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VmsRequestsRoute = VmsRequestsRouteImport.update({
+  id: '/vms/requests',
+  path: '/vms/requests',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VmsVendorsRoute = VmsVendorsRouteImport.update({
+  id: '/vms/vendors',
+  path: '/vms/vendors',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthGoogleCallbackRoute = AuthGoogleCallbackRouteImport.update({
+  id: '/auth/google/callback',
+  path: '/auth/google/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CcmsReviewDocumentIdRoute = CcmsReviewDocumentIdRouteImport.update({
@@ -281,10 +266,25 @@ const CcmsReviewDocumentIdRoute = CcmsReviewDocumentIdRouteImport.update({
   path: '/ccms/review/$documentId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthGoogleCallbackRoute = AuthGoogleCallbackRouteImport.update({
-  id: '/auth/google/callback',
-  path: '/auth/google/callback',
+const CcmsTemplatesIndexRoute = CcmsTemplatesIndexRouteImport.update({
+  id: '/ccms/templates/',
+  path: '/ccms/templates/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const CcmsTemplatesTemplateIdRoute = CcmsTemplatesTemplateIdRouteImport.update({
+  id: '/ccms/templates/$templateId',
+  path: '/ccms/templates/$templateId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LegalReviewDocumentIdRoute = LegalReviewDocumentIdRouteImport.update({
+  id: '/legal/review/$documentId',
+  path: '/legal/review/$documentId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReportsReportIdPresentRoute = ReportsReportIdPresentRouteImport.update({
+  id: '/present',
+  path: '/present',
+  getParentRoute: () => ReportsReportIdRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -629,18 +629,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/settings': {
-      id: '/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/knowledge-base': {
@@ -650,46 +643,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof KnowledgeBaseRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/vms/': {
-      id: '/vms/'
-      path: '/vms'
-      fullPath: '/vms/'
-      preLoaderRoute: typeof VmsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/reports/': {
-      id: '/reports/'
-      path: '/reports'
-      fullPath: '/reports/'
-      preLoaderRoute: typeof ReportsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/legal/': {
-      id: '/legal/'
-      path: '/legal'
-      fullPath: '/legal/'
-      preLoaderRoute: typeof LegalIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/layout/': {
-      id: '/layout/'
-      path: '/layout'
-      fullPath: '/layout/'
-      preLoaderRoute: typeof LayoutIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/ccms/': {
-      id: '/ccms/'
-      path: '/ccms'
-      fullPath: '/ccms/'
-      preLoaderRoute: typeof CcmsIndexRouteImport
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/ams/': {
@@ -699,200 +664,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AmsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/vms/vendors': {
-      id: '/vms/vendors'
-      path: '/vms/vendors'
-      fullPath: '/vms/vendors'
-      preLoaderRoute: typeof VmsVendorsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/vms/requests': {
-      id: '/vms/requests'
-      path: '/vms/requests'
-      fullPath: '/vms/requests'
-      preLoaderRoute: typeof VmsRequestsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/vms/new': {
-      id: '/vms/new'
-      path: '/vms/new'
-      fullPath: '/vms/new'
-      preLoaderRoute: typeof VmsNewRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/vms/monitoring': {
-      id: '/vms/monitoring'
-      path: '/vms/monitoring'
-      fullPath: '/vms/monitoring'
-      preLoaderRoute: typeof VmsMonitoringRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/vms/$requestId': {
-      id: '/vms/$requestId'
-      path: '/vms/$requestId'
-      fullPath: '/vms/$requestId'
-      preLoaderRoute: typeof VmsRequestIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/vendor-portal/$token': {
-      id: '/vendor-portal/$token'
-      path: '/vendor-portal/$token'
-      fullPath: '/vendor-portal/$token'
-      preLoaderRoute: typeof VendorPortalTokenRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/simplify2/$reportId': {
-      id: '/simplify2/$reportId'
-      path: '/simplify2/$reportId'
-      fullPath: '/simplify2/$reportId'
-      preLoaderRoute: typeof Simplify2ReportIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/simplify/$reportId': {
-      id: '/simplify/$reportId'
-      path: '/simplify/$reportId'
-      fullPath: '/simplify/$reportId'
-      preLoaderRoute: typeof SimplifyReportIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/rspo/$reportId': {
-      id: '/rspo/$reportId'
-      path: '/rspo/$reportId'
-      fullPath: '/rspo/$reportId'
-      preLoaderRoute: typeof RspoReportIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/reports/$reportId': {
-      id: '/reports/$reportId'
-      path: '/reports/$reportId'
-      fullPath: '/reports/$reportId'
-      preLoaderRoute: typeof ReportsReportIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/mbrs/$reportId': {
-      id: '/mbrs/$reportId'
-      path: '/mbrs/$reportId'
-      fullPath: '/mbrs/$reportId'
-      preLoaderRoute: typeof MbrsReportIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/legal/requests': {
-      id: '/legal/requests'
-      path: '/legal/requests'
-      fullPath: '/legal/requests'
-      preLoaderRoute: typeof LegalRequestsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/legal/repository': {
-      id: '/legal/repository'
-      path: '/legal/repository'
-      fullPath: '/legal/repository'
-      preLoaderRoute: typeof LegalRepositoryRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/legal/new': {
-      id: '/legal/new'
-      path: '/legal/new'
-      fullPath: '/legal/new'
-      preLoaderRoute: typeof LegalNewRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/legal/$matterId': {
-      id: '/legal/$matterId'
-      path: '/legal/$matterId'
-      fullPath: '/legal/$matterId'
-      preLoaderRoute: typeof LegalMatterIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/layout/$jobId': {
-      id: '/layout/$jobId'
-      path: '/layout/$jobId'
-      fullPath: '/layout/$jobId'
-      preLoaderRoute: typeof LayoutJobIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/credit/$reportId': {
-      id: '/credit/$reportId'
-      path: '/credit/$reportId'
-      fullPath: '/credit/$reportId'
-      preLoaderRoute: typeof CreditReportIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/ccms/vendors': {
-      id: '/ccms/vendors'
-      path: '/ccms/vendors'
-      fullPath: '/ccms/vendors'
-      preLoaderRoute: typeof CcmsVendorsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/ccms/repository': {
-      id: '/ccms/repository'
-      path: '/ccms/repository'
-      fullPath: '/ccms/repository'
-      preLoaderRoute: typeof CcmsRepositoryRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/ccms/obligations': {
-      id: '/ccms/obligations'
-      path: '/ccms/obligations'
-      fullPath: '/ccms/obligations'
-      preLoaderRoute: typeof CcmsObligationsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/ccms/new': {
-      id: '/ccms/new'
-      path: '/ccms/new'
-      fullPath: '/ccms/new'
-      preLoaderRoute: typeof CcmsNewRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/ccms/contracts': {
-      id: '/ccms/contracts'
-      path: '/ccms/contracts'
-      fullPath: '/ccms/contracts'
-      preLoaderRoute: typeof CcmsContractsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/ccms/$contractId': {
-      id: '/ccms/$contractId'
-      path: '/ccms/$contractId'
-      fullPath: '/ccms/$contractId'
-      preLoaderRoute: typeof CcmsContractIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/brand/guide': {
-      id: '/brand/guide'
-      path: '/brand/guide'
-      fullPath: '/brand/guide'
-      preLoaderRoute: typeof BrandGuideRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/brand/$reportId': {
-      id: '/brand/$reportId'
-      path: '/brand/$reportId'
-      fullPath: '/brand/$reportId'
-      preLoaderRoute: typeof BrandReportIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/auth/callback': {
-      id: '/auth/callback'
-      path: '/auth/callback'
-      fullPath: '/auth/callback'
-      preLoaderRoute: typeof AuthCallbackRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/ams/new': {
-      id: '/ams/new'
-      path: '/ams/new'
-      fullPath: '/ams/new'
-      preLoaderRoute: typeof AmsNewRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/ams/drivers': {
-      id: '/ams/drivers'
-      path: '/ams/drivers'
-      fullPath: '/ams/drivers'
-      preLoaderRoute: typeof AmsDriversRouteImport
+    '/ams/$assetId': {
+      id: '/ams/$assetId'
+      path: '/ams/$assetId'
+      fullPath: '/ams/$assetId'
+      preLoaderRoute: typeof AmsAssetIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/ams/assets': {
@@ -902,39 +678,242 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AmsAssetsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/ams/$assetId': {
-      id: '/ams/$assetId'
-      path: '/ams/$assetId'
-      fullPath: '/ams/$assetId'
-      preLoaderRoute: typeof AmsAssetIdRouteImport
+    '/ams/drivers': {
+      id: '/ams/drivers'
+      path: '/ams/drivers'
+      fullPath: '/ams/drivers'
+      preLoaderRoute: typeof AmsDriversRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/ccms/templates/': {
-      id: '/ccms/templates/'
-      path: '/ccms/templates'
-      fullPath: '/ccms/templates/'
-      preLoaderRoute: typeof CcmsTemplatesIndexRouteImport
+    '/ams/new': {
+      id: '/ams/new'
+      path: '/ams/new'
+      fullPath: '/ams/new'
+      preLoaderRoute: typeof AmsNewRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/reports/$reportId/present': {
-      id: '/reports/$reportId/present'
-      path: '/present'
-      fullPath: '/reports/$reportId/present'
-      preLoaderRoute: typeof ReportsReportIdPresentRouteImport
-      parentRoute: typeof ReportsReportIdRoute
-    }
-    '/legal/review/$documentId': {
-      id: '/legal/review/$documentId'
-      path: '/legal/review/$documentId'
-      fullPath: '/legal/review/$documentId'
-      preLoaderRoute: typeof LegalReviewDocumentIdRouteImport
+    '/auth/callback': {
+      id: '/auth/callback'
+      path: '/auth/callback'
+      fullPath: '/auth/callback'
+      preLoaderRoute: typeof AuthCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/ccms/templates/$templateId': {
-      id: '/ccms/templates/$templateId'
-      path: '/ccms/templates/$templateId'
-      fullPath: '/ccms/templates/$templateId'
-      preLoaderRoute: typeof CcmsTemplatesTemplateIdRouteImport
+    '/brand/$reportId': {
+      id: '/brand/$reportId'
+      path: '/brand/$reportId'
+      fullPath: '/brand/$reportId'
+      preLoaderRoute: typeof BrandReportIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/brand/guide': {
+      id: '/brand/guide'
+      path: '/brand/guide'
+      fullPath: '/brand/guide'
+      preLoaderRoute: typeof BrandGuideRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ccms/': {
+      id: '/ccms/'
+      path: '/ccms'
+      fullPath: '/ccms/'
+      preLoaderRoute: typeof CcmsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ccms/$contractId': {
+      id: '/ccms/$contractId'
+      path: '/ccms/$contractId'
+      fullPath: '/ccms/$contractId'
+      preLoaderRoute: typeof CcmsContractIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ccms/contracts': {
+      id: '/ccms/contracts'
+      path: '/ccms/contracts'
+      fullPath: '/ccms/contracts'
+      preLoaderRoute: typeof CcmsContractsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ccms/new': {
+      id: '/ccms/new'
+      path: '/ccms/new'
+      fullPath: '/ccms/new'
+      preLoaderRoute: typeof CcmsNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ccms/obligations': {
+      id: '/ccms/obligations'
+      path: '/ccms/obligations'
+      fullPath: '/ccms/obligations'
+      preLoaderRoute: typeof CcmsObligationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ccms/repository': {
+      id: '/ccms/repository'
+      path: '/ccms/repository'
+      fullPath: '/ccms/repository'
+      preLoaderRoute: typeof CcmsRepositoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ccms/vendors': {
+      id: '/ccms/vendors'
+      path: '/ccms/vendors'
+      fullPath: '/ccms/vendors'
+      preLoaderRoute: typeof CcmsVendorsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/credit/$reportId': {
+      id: '/credit/$reportId'
+      path: '/credit/$reportId'
+      fullPath: '/credit/$reportId'
+      preLoaderRoute: typeof CreditReportIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/layout/': {
+      id: '/layout/'
+      path: '/layout'
+      fullPath: '/layout/'
+      preLoaderRoute: typeof LayoutIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/layout/$jobId': {
+      id: '/layout/$jobId'
+      path: '/layout/$jobId'
+      fullPath: '/layout/$jobId'
+      preLoaderRoute: typeof LayoutJobIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/legal/': {
+      id: '/legal/'
+      path: '/legal'
+      fullPath: '/legal/'
+      preLoaderRoute: typeof LegalIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/legal/$matterId': {
+      id: '/legal/$matterId'
+      path: '/legal/$matterId'
+      fullPath: '/legal/$matterId'
+      preLoaderRoute: typeof LegalMatterIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/legal/new': {
+      id: '/legal/new'
+      path: '/legal/new'
+      fullPath: '/legal/new'
+      preLoaderRoute: typeof LegalNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/legal/repository': {
+      id: '/legal/repository'
+      path: '/legal/repository'
+      fullPath: '/legal/repository'
+      preLoaderRoute: typeof LegalRepositoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/legal/requests': {
+      id: '/legal/requests'
+      path: '/legal/requests'
+      fullPath: '/legal/requests'
+      preLoaderRoute: typeof LegalRequestsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mbrs/$reportId': {
+      id: '/mbrs/$reportId'
+      path: '/mbrs/$reportId'
+      fullPath: '/mbrs/$reportId'
+      preLoaderRoute: typeof MbrsReportIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reports/': {
+      id: '/reports/'
+      path: '/reports'
+      fullPath: '/reports/'
+      preLoaderRoute: typeof ReportsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reports/$reportId': {
+      id: '/reports/$reportId'
+      path: '/reports/$reportId'
+      fullPath: '/reports/$reportId'
+      preLoaderRoute: typeof ReportsReportIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/rspo/$reportId': {
+      id: '/rspo/$reportId'
+      path: '/rspo/$reportId'
+      fullPath: '/rspo/$reportId'
+      preLoaderRoute: typeof RspoReportIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/simplify/$reportId': {
+      id: '/simplify/$reportId'
+      path: '/simplify/$reportId'
+      fullPath: '/simplify/$reportId'
+      preLoaderRoute: typeof SimplifyReportIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/simplify2/$reportId': {
+      id: '/simplify2/$reportId'
+      path: '/simplify2/$reportId'
+      fullPath: '/simplify2/$reportId'
+      preLoaderRoute: typeof Simplify2ReportIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/vendor-portal/$token': {
+      id: '/vendor-portal/$token'
+      path: '/vendor-portal/$token'
+      fullPath: '/vendor-portal/$token'
+      preLoaderRoute: typeof VendorPortalTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/vms/': {
+      id: '/vms/'
+      path: '/vms'
+      fullPath: '/vms/'
+      preLoaderRoute: typeof VmsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/vms/$requestId': {
+      id: '/vms/$requestId'
+      path: '/vms/$requestId'
+      fullPath: '/vms/$requestId'
+      preLoaderRoute: typeof VmsRequestIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/vms/monitoring': {
+      id: '/vms/monitoring'
+      path: '/vms/monitoring'
+      fullPath: '/vms/monitoring'
+      preLoaderRoute: typeof VmsMonitoringRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/vms/new': {
+      id: '/vms/new'
+      path: '/vms/new'
+      fullPath: '/vms/new'
+      preLoaderRoute: typeof VmsNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/vms/requests': {
+      id: '/vms/requests'
+      path: '/vms/requests'
+      fullPath: '/vms/requests'
+      preLoaderRoute: typeof VmsRequestsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/vms/vendors': {
+      id: '/vms/vendors'
+      path: '/vms/vendors'
+      fullPath: '/vms/vendors'
+      preLoaderRoute: typeof VmsVendorsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth/google/callback': {
+      id: '/auth/google/callback'
+      path: '/auth/google/callback'
+      fullPath: '/auth/google/callback'
+      preLoaderRoute: typeof AuthGoogleCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/ccms/review/$documentId': {
@@ -944,12 +923,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CcmsReviewDocumentIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/auth/google/callback': {
-      id: '/auth/google/callback'
-      path: '/auth/google/callback'
-      fullPath: '/auth/google/callback'
-      preLoaderRoute: typeof AuthGoogleCallbackRouteImport
+    '/ccms/templates/': {
+      id: '/ccms/templates/'
+      path: '/ccms/templates'
+      fullPath: '/ccms/templates/'
+      preLoaderRoute: typeof CcmsTemplatesIndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/ccms/templates/$templateId': {
+      id: '/ccms/templates/$templateId'
+      path: '/ccms/templates/$templateId'
+      fullPath: '/ccms/templates/$templateId'
+      preLoaderRoute: typeof CcmsTemplatesTemplateIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/legal/review/$documentId': {
+      id: '/legal/review/$documentId'
+      path: '/legal/review/$documentId'
+      fullPath: '/legal/review/$documentId'
+      preLoaderRoute: typeof LegalReviewDocumentIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reports/$reportId/present': {
+      id: '/reports/$reportId/present'
+      path: '/present'
+      fullPath: '/reports/$reportId/present'
+      preLoaderRoute: typeof ReportsReportIdPresentRouteImport
+      parentRoute: typeof ReportsReportIdRoute
     }
   }
 }

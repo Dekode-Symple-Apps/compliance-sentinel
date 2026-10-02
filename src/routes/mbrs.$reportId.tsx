@@ -28,7 +28,7 @@ import type { CalcInconsistency } from "@/lib/mbrs-xbrl";
 export const Route = createFileRoute("/mbrs/$reportId")({
   component: MbrsFilingPage,
   errorComponent: ({ error }) => (
-    <AppShell><div className="p-10 text-sm text-destructive">{error.message}</div></AppShell>
+    <AppShell><div className="p-10 text-sm text-destructive">{(error as Error).message}</div></AppShell>
   ),
   notFoundComponent: () => <AppShell><div className="p-10">Filing not found.</div></AppShell>,
 });

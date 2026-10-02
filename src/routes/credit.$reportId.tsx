@@ -53,7 +53,7 @@ export const Route = createFileRoute("/credit/$reportId")({
   component: CreditReportPage,
   errorComponent: ({ error }) => (
     <AppShell>
-      <div className="p-10 text-sm text-destructive">{error.message}</div>
+      <div className="p-10 text-sm text-destructive">{(error as Error).message}</div>
     </AppShell>
   ),
   notFoundComponent: () => (
