@@ -37,6 +37,25 @@ const OUTCOME_ICON: Record<RuleOutcome, [typeof Check, string]> = {
 };
 type Tab = "fix" | "checklist" | "history";
 
+/** What the design does well: the check's own points, or, for older results,
+ *  the checklist items it passed (official and must-fix rules first). */
+function DoneRight({ review }: { review: BrandReview }) {
+  const rank: Record<string, number> = { critical: 0, major: 1, minor: 2 };
+  const points = review.strengths?.length ? review.strengths
+    : review.rules.filter((r) => r.outcome === "pass").map((r) => ruleById(r.rule_id)).filter(Boolean)
+        .sort((a, b) => (a!.source.kind === "official" ? 0 : 1) - (b!.source.kind === "official" ? 0 : 1) || rank[a!.severity] - rank[b!.severity])
+        .slice(0, 5).map((r) => r!.title);
+  if (!points.length) return null;
+  return (
+    <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-3">
+      <div className="text-sm font-semibold text-emerald-900">{review.strengths?.length ? "What's done right" : "Checks it passed"}</div>
+      <ul className="mt-1.5 space-y-1">
+        {points.map((p, i) => <li key={i} className="flex gap-2 text-sm text-gray-800"><Check className="mt-0.5 size-4 shrink-0 text-emerald-700" />{p}</li>)}
+      </ul>
+    </div>
+  );
+}
+
 /** A version's state when it has no result yet, in plain words. */
 const VERSION_STATE: Record<string, string> = { pending: "Waiting to be checked", running: "Checking", failed: "Check failed" };
 
@@ -184,8 +203,10 @@ function BrandSubmission() {
               ))}
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
+              {tab === "fix" && rv && findings.length === 0 && <p className="flex items-center gap-2 text-sm font-medium text-emerald-800"><Check className="size-4" /> Nothing to fix. This follows the {GUIDELINE.shortName}.</p>}
+              {tab === "fix" && rv && findings.length === 0 && <DoneRight review={rv} />}
               {tab === "fix" && (!rv ? <p className="text-sm text-gray-500">{reviewing ? "Checking…" : "Not checked yet."}</p> : findings.length === 0
-                ? <p className="flex items-center gap-2 text-sm text-emerald-800"><Check className="size-4" /> Nothing to fix. This follows the {GUIDELINE.shortName}.</p>
+                ? null
                 : findings.map((f) => {
                   const rule = ruleById(f.rule_id);
                   return (
@@ -203,6 +224,7 @@ function BrandSubmission() {
                     </button>
                   );
                 }))}
+              {tab === "fix" && rv && findings.length > 0 && <DoneRight review={rv} />}
 
               {tab === "checklist" && (rv ? (
                 <>

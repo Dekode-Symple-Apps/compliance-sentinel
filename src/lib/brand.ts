@@ -98,6 +98,8 @@ export interface BrandReview {
   verdict: Verdict;
   riskScore: number;
   summary: string;
+  /** What the design does well, in plain words (2–5 points). */
+  strengths?: string[];
   findings: BrandFinding[];
   rules: RuleResult[];
   detected: { logos?: string[]; colours?: string[]; fonts?: string[]; languages?: string[] };

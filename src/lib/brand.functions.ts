@@ -153,10 +153,11 @@ function reviewPrompt(brand: any, pages: number, isImage: boolean, extra: string
     "- issue: what is wrong, where, ≤ 12 words (e.g. \"The crest is stretched sideways.\"). fix: one instruction starting with a verb, ≤ 12 words. Leave whyItMatters empty.",
     "- summary: one or two short sentences. Start with the overall result (\"Ready to publish.\", \"Needs a few small fixes.\" or \"Must be fixed before publishing.\"), then the main reason.",
     "- rule note: ≤ 12 plain words.",
+    "- done_right: 2 to 5 things the design does well, each ≤ 12 plain words and specific to what you see (e.g. \"The crest sits top left with space around it.\"). Always give them, even when there is a lot to fix.",
     "Risk score 0–100: how likely this harms the state's brand if published as is. A failed critical rule is a red_flag (70+); failed major rules only is caution (30–69); only minor or none is compliant (0–29).",
     "",
     "Return ONLY JSON:",
-    `{"verdict":"red_flag|caution|compliant","riskScore":0,"summary":"at most 2 short sentences","detected":{"logos":[""],"colours":["#hex"],"fonts":[""],"languages":[""]},`,
+    `{"verdict":"red_flag|caution|compliant","riskScore":0,"summary":"at most 2 short sentences","done_right":[""],"detected":{"logos":[""],"colours":["#hex"],"fonts":[""],"languages":[""]},`,
     `"rules":[{"rule_id":"BC-1.1","outcome":"pass|fail|not_applicable|unclear","note":"≤ 12 words"}],`,
     `"findings":[{"rule_id":"BC-1.3","severity":"red_flag|caution|info","page":1,"box_2d":[0,0,0,0],"excerpt":"","issue":"","whyItMatters":"","fix":""}]}`,
     "",
@@ -219,6 +220,7 @@ export async function runBrandReviewOn(brand: any, bytes: Buffer, mime: string, 
   const { verdict, riskScore } = guardVerdict(out, rules);
   const review: BrandReview = {
     verdict, riskScore, summary: String(out.summary ?? "").slice(0, 400), findings, rules,
+    strengths: (Array.isArray(out.done_right) ? out.done_right : []).filter((x: any) => typeof x === "string" && x.trim()).map((x: string) => x.trim().slice(0, 160)).slice(0, 5),
     detected: out.detected ?? {}, pages, model: res.modelVersion, reviewed_at: new Date().toISOString(),
   };
   return { review, res };

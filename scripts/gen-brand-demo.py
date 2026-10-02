@@ -3,8 +3,8 @@
 Writes to ~/Desktop/01. Demo Data/Branding Compliance/ (or the folder given):
   sarawak-crest.png                                     the state crest (Jata Negeri Sarawak), from Wikimedia Commons (public domain)
   1 Good sample - SBC General Info brochure (real).pdf  a real brochure, downloaded from the Sarawak Biodiversity Centre (a statutory body: own logo, no crest)
-  2 Bad draft - Program Kampung Digital v1.pdf          UKAS brochure to rework: agency logo bigger than the crest, old department name,
-                                                        "One Government" counter logo on a brochure, Gmail contact
+  2 Bad draft - Program Kampung Digital v1.pdf          UKAS brochure to rework: the UKAS logo (from ukas.sarawak.gov.my) bigger than
+                                                        the crest and ahead of it, old department name, Gmail contact
   2b Reworked - Program Kampung Digital v2.pdf          the same brochure, fixed (upload as the new version)
   More samples/3 Poster - Open Day v1.png               breaches: stretched crest, off-palette, Chief Minister, comic font, watermark, gmail
   More samples/3b Poster - Hari Terbuka v2.png          the corrected poster
@@ -36,6 +36,9 @@ CREST_PNG = f"{OUT}/sarawak-crest.png"
 CREST = Image.open(f"{HERE}/assets/sarawak-crest.png").convert("RGBA")
 CREST.save(CREST_PNG)
 CREST_RATIO = CREST.height / CREST.width  # keep it when the crest is meant to be correct
+# UKAS's own logo, from ukas.sarawak.gov.my (800 × 454).
+UKAS_PNG = f"{HERE}/assets/ukas-logo.png"
+UKAS_RATIO = Image.open(UKAS_PNG).height / Image.open(UKAS_PNG).width
 
 def paste(bg, im, box):
     x, y, w, h = box
@@ -60,9 +63,12 @@ def brochure(path):
         c.setFillColor(hexc(RED)); c.rect(0, H - 150, W, 150, fill=1, stroke=0)
         c.setFillColor(hexc(YEL)); c.rect(0, H - 158, W, 8, fill=1, stroke=0)
         c.drawImage(ImageReader(crest_png), 36, H - 140, width=100, height=100 * CREST_RATIO, mask="auto")
+        # The agency logo to the right of the crest, smaller than it, on a white tile.
+        c.setFillColor("white"); c.roundRect(W - 128, H - 112, 96, 96 * UKAS_RATIO + 12, 6, fill=1, stroke=0)
+        c.drawImage(ImageReader(UKAS_PNG), W - 122, H - 106, width=84, height=84 * UKAS_RATIO, mask="auto")
         c.setFillColor("white"); c.setFont("OpenSansBold", 11); c.drawString(150, H - 60, "UNIT KOMUNIKASI AWAM SARAWAK (UKAS)")
         c.setFont("OpenSans", 9); c.drawString(150, H - 75, "Jabatan Premier Sarawak · Kerajaan Sarawak")
-        c.setFont("Montserrat", 22); c.drawString(150, H - 108, title_bm)
+        c.setFont("Montserrat", 16); c.drawString(150, H - 106, title_bm)
         c.setFont("Montserrat", 13); c.drawString(150, H - 128, title_en)
     def para(y, text, size=11, font_name="OpenSans", color=BLK, width=90):
         c.setFillColor(hexc(color)); c.setFont(font_name, size)
@@ -119,13 +125,12 @@ brochure(f"{OUT}/2b Reworked - Program Kampung Digital v2.pdf")
 def brochure_draft(path):
     c = canvas.Canvas(path, pagesize=A4)
     W, H = A4
-    # Header: a big agency badge leads; the crest is small and pushed to the right.
+    # Header: UKAS's logo, big, leads; the crest is small and pushed to the right.
     c.setFillColor(hexc(RED)); c.rect(0, H - 170, W, 170, fill=1, stroke=0)
     c.setFillColor(hexc(YEL)); c.rect(0, H - 178, W, 8, fill=1, stroke=0)
-    c.setFillColor("white"); c.roundRect(30, H - 160, 230, 140, 14, fill=1, stroke=0)
-    c.setFillColor(hexc(RED)); c.setFont("Montserrat", 64); c.drawCentredString(145, H - 100, "UKAS")
-    c.setFillColor(hexc(BLK)); c.setFont("OpenSansBold", 9); c.drawCentredString(145, H - 125, "UNIT KOMUNIKASI AWAM SARAWAK")
-    c.setFont("OpenSans", 8); c.drawCentredString(145, H - 140, "Jabatan Ketua Menteri Sarawak")
+    c.setFillColor("white"); c.roundRect(24, H - 162, 240, 150, 14, fill=1, stroke=0)
+    c.drawImage(ImageReader(UKAS_PNG), 32, H - 140, width=224, height=224 * UKAS_RATIO, mask="auto")
+    c.setFillColor(hexc(BLK)); c.setFont("OpenSans", 8); c.drawCentredString(144, H - 154, "Jabatan Ketua Menteri Sarawak")
     c.drawImage(ImageReader(CREST_PNG), W - 80, H - 75, width=44, height=44 * CREST_RATIO, mask="auto")
     c.setFillColor("white"); c.setFont("Montserrat", 20); c.drawString(280, H - 85, "Program Kampung")
     c.drawString(280, H - 110, "Digital Sarawak")
@@ -148,11 +153,6 @@ def brochure_draft(path):
         c.setFillColor(hexc(RED)); c.circle(54, y + 4, 3, fill=1, stroke=0)
         c.setFillColor(hexc(BLK)); c.setFont("OpenSans", 11); c.drawString(64, y, bm)
         c.setFillColor(hexc(GREY)); c.setFont("OpenSans", 10); c.drawString(64, y - 14, en); y -= 34
-    # The counter-only "One Government At Your Service" mark, used as decoration.
-    y -= 10
-    c.setStrokeColor(hexc(RED)); c.setLineWidth(3); c.setFillColor("white"); c.roundRect(48, y - 70, 260, 70, 10, fill=1, stroke=1)
-    c.setFillColor(hexc(RED)); c.setFont("OpenSansBold", 16); c.drawString(64, y - 30, "ONE GOVERNMENT")
-    c.setFillColor(hexc(BLK)); c.setFont("OpenSans", 12); c.drawString(64, y - 50, "At Your Service")
     c.setFillColor(hexc(BLK)); c.rect(0, 0, W, 70, fill=1, stroke=0)
     c.setFillColor("white"); c.setFont("OpenSansBold", 10); c.drawString(48, 44, "Unit Komunikasi Awam Sarawak (UKAS)")
     c.setFont("OpenSans", 9); c.drawString(48, 30, "Tel: 082-000 000 · E-mel: kampungdigital.ukas@gmail.com")
@@ -287,8 +287,8 @@ proposal(f"{MORE}/5 Proposal - Coal Power Plant.docx")
 
 key = {
     "1 Good sample - SBC General Info brochure (real).pdf": {"expect": "compliant", "agency": "Sarawak Biodiversity Centre (SBC)", "must_not_fail": ["BC-1.1", "BC-2.1", "BC-2.2", "BC-3.1", "BC-8.1", "BC-8.2"]},
-    "2 Bad draft - Program Kampung Digital v1.pdf": {"expect": "caution", "agency": "Unit Komunikasi Awam Sarawak (UKAS)", "must_fail": ["BC-1.4", "BC-1.6", "BC-1.8", "BC-8.2"], "must_not_fail": ["BC-1.1", "BC-1.3"]},
-    "2b Reworked - Program Kampung Digital v2.pdf": {"expect": "compliant", "agency": "Unit Komunikasi Awam Sarawak (UKAS)", "must_not_fail": ["BC-1.1", "BC-1.3", "BC-1.4", "BC-1.6", "BC-1.8", "BC-8.2"]},
+    "2 Bad draft - Program Kampung Digital v1.pdf": {"expect": "caution", "agency": "Unit Komunikasi Awam Sarawak (UKAS)", "must_fail": ["BC-1.4", "BC-1.6", "BC-8.2"], "must_not_fail": ["BC-1.1", "BC-1.3", "BC-1.8"]},
+    "2b Reworked - Program Kampung Digital v2.pdf": {"expect": "compliant", "agency": "Unit Komunikasi Awam Sarawak (UKAS)", "must_not_fail": ["BC-1.1", "BC-1.3", "BC-1.4", "BC-1.6", "BC-2.3", "BC-8.2"]},
     "More samples/3 Poster - Open Day v1.png": {"expect": "red_flag", "agency": "Jabatan Kerja Raya Sarawak (JKR)", "must_fail": ["BC-1.2", "BC-1.3", "BC-2.2", "BC-3.2", "BC-4.2", "BC-6.2", "BC-7.1", "BC-8.1", "BC-8.2"]},
     "More samples/3b Poster - Hari Terbuka v2.png": {"expect": "compliant", "agency": "Jabatan Kerja Raya Sarawak (JKR)", "must_not_fail": ["BC-1.1", "BC-1.3", "BC-4.2", "BC-8.1", "BC-8.2"]},
     "More samples/4 Slides - Rural Water Supply.pptx": {"expect": "red_flag", "agency": "Kementerian Utiliti dan Telekomunikasi (MUT)", "must_fail": ["BC-1.2", "BC-1.3", "BC-1.4", "BC-1.7", "BC-2.2", "BC-5.3", "BC-8.2", "BC-8.3"]},
