@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireProduct } from "@/lib/feature-middleware";
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { assertRowTenant } from "@/lib/tenant.functions";
 import { generateWithFallback, getDefaultModel } from "@/lib/gemini";
 import { extractPdfPages } from "@/lib/pdf-pages";
@@ -57,6 +58,15 @@ const kindOf = (name: string, mime?: string | null): "pdf" | "image" | "office" 
   throw new Error("This file type can't be checked. Upload a PDF, PowerPoint, Word file or an image (PNG or JPG).");
 };
 
+/** The highest number used so far for a submission or approval number with this
+ *  prefix. Deleting submissions leaves gaps, so numbers are never counted. */
+async function highestNumber(sb: any, tenantId: string, which: "ref" | "clearance", prefix: string): Promise<number> {
+  const { data } = await sb.from("analysis_reports").select("summary_json").eq("workspace_id", BRAND_WORKSPACE).eq("tenant_id", tenantId);
+  const used = (data ?? []).map((r: any) => (which === "ref" ? r.summary_json?.brand?.ref : r.summary_json?.brand?.decision?.clearance_ref) as string | undefined)
+    .filter((x: string | undefined): x is string => !!x && x.startsWith(prefix)).map((x: string) => Number(x.slice(prefix.length)) || 0);
+  return Math.max(0, ...used);
+}
+
 // ── list and read ───────────────────────────────────────────────────────────
 
 export const listBrandSubmissions = createServerFn({ method: "GET" })
@@ -92,9 +102,7 @@ export const createBrandSubmission = createServerFn({ method: "POST" })
     const { sb, tenantId, userName } = who(context);
     kindOf(data.file_name, data.mime);
     const year = new Date().getFullYear();
-    const { count } = await sb.from("analysis_reports").select("id", { count: "exact", head: true })
-      .eq("workspace_id", BRAND_WORKSPACE).eq("tenant_id", tenantId);
-    const ref = `BC-${year}-${String((count ?? 0) + 1).padStart(4, "0")}`;
+    const ref = `BC-${year}-${String((await highestNumber(sb, tenantId, "ref", `BC-${year}-`)) + 1).padStart(4, "0")}`;
     const brand = {
       ref, agency: data.agency, title: data.title, material_type: data.material_type, channel: data.channel, submitted_by: userName,
       versions: [{ v: 1, file_name: data.file_name, file_url: data.file_url, mime: data.mime ?? null, uploaded_by: userName, uploaded_at: new Date().toISOString(), review_status: "pending" }],
@@ -297,8 +305,8 @@ export const decideBrandSubmission = createServerFn({ method: "POST" })
     const now = new Date().toISOString();
     let clearance_ref: string | null = null;
     if (data.outcome === "clear") {
-      const { data: rows } = await sb.from("analysis_reports").select("status").eq("workspace_id", BRAND_WORKSPACE).eq("tenant_id", tenantId).eq("status", "cleared");
-      clearance_ref = `UKAS-BC-${new Date().getFullYear()}-${String((rows?.length ?? 0) + 1).padStart(4, "0")}`;
+      const prefix = `UKAS-BC-${new Date().getFullYear()}-`;
+      clearance_ref = `${prefix}${String((await highestNumber(sb, tenantId, "clearance", prefix)) + 1).padStart(4, "0")}`;
     }
     brand.decision = { outcome: data.outcome, by: userName, at: now, note: data.note ?? null, clearance_ref, version: brand.versions.at(-1)?.v };
     brand.events = [...brand.events, event(userName, "ukas", data.outcome === "clear" ? "cleared" : "returned",
@@ -308,6 +316,23 @@ export const decideBrandSubmission = createServerFn({ method: "POST" })
   });
 
 export const BRAND_AGENCIES = AGENCIES;
+
+/** Delete a submission: the record, every version's file and the PDFs made
+ *  from Office files. Cannot be undone. */
+export const deleteBrandSubmission = createServerFn({ method: "POST" })
+  .middleware([requireBrand])
+  .inputValidator(z.object({ id: z.string().uuid() }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId } = who(context);
+    const row = await load(sb, data.id, tenantId);
+    const urls = (row.summary_json?.brand?.versions ?? []).flatMap((v: any) => [v.file_url, v.view_url]).filter(Boolean);
+    const { data: gone, error } = await sb.from("analysis_reports").delete().eq("id", row.id).select("id");
+    if (error) throw new Error(error.message);
+    if (!gone?.length) throw new Error("The submission could not be deleted.");
+    const paths = [...new Set(urls.map((u: string) => decodeURIComponent(String(u).split("/policies/")[1] ?? "")).filter(Boolean))] as string[];
+    if (paths.length) await (supabaseAdmin as any).storage.from("policies").remove(paths).catch(() => null);
+    return { ref: row.summary_json?.brand?.ref ?? "" };
+  });
 
 /** The return note, drafted from the latest review's findings: what the agency
  *  must change, as short bullets with the page, most serious first. */

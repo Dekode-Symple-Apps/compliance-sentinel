@@ -35,7 +35,7 @@ export const isStatutory = (agency: string) => STATUTORY.has(agency.match(/\(([^
 
 export const MATERIAL_TYPES: Record<string, string> = {
   slide_deck: "Slides", brochure: "Brochure", poster: "Poster or banner", social_post: "Social media post",
-  proposal: "Proposal or paper", other: "Other",
+  proposal: "Proposal or paper", announcement: "Announcement or press statement", other: "Other",
 };
 export const CHANNELS: Record<string, string> = { print: "Printed", digital: "Online", event: "Event or presentation" };
 

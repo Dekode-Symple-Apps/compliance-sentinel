@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -7,18 +7,18 @@ import { format } from "date-fns";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { PdfViewer } from "@/components/pdf-viewer";
-import { friendlyError, NoteText } from "@/components/ccms-widgets";
+import { friendlyError, NoteText, useConfirm } from "@/components/ccms-widgets";
 import {
   BrandHeader, BrandStatusBadge, DecisionDialog, ImageBoxViewer, ResultBadge, RevisionDialog, RuleSource, useBrandRole,
 } from "@/components/brand-widgets";
-import { getBrandSubmission, runBrandReview } from "@/lib/brand.functions";
+import { deleteBrandSubmission, getBrandSubmission, runBrandReview } from "@/lib/brand.functions";
 import {
   BRAND_ROLES, CHANNELS, MATERIAL_TYPES, OUTCOME_LABEL, SEVERITY_LABEL, brandActions, brandMilestones, colourName, toFix,
   type BrandFinding, type BrandReview, type RuleOutcome,
 } from "@/lib/brand";
 import { BRAND_RULES, CATEGORIES, CATEGORY_LABEL, GUIDELINE, ruleById } from "@/lib/brand-guideline";
 import { displayName } from "@/lib/ccms";
-import { ArrowLeft, Check, Circle, Loader2, Minus, HelpCircle, X, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Check, Circle, Loader2, Minus, HelpCircle, X, ShieldCheck, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/brand/$reportId")({
@@ -36,6 +36,30 @@ const OUTCOME_ICON: Record<RuleOutcome, [typeof Check, string]> = {
   not_applicable: [Minus, "bg-gray-100 text-gray-500"], unclear: [HelpCircle, "bg-gray-100 text-gray-500"],
 };
 type Tab = "fix" | "checklist" | "history";
+
+/** Delete this submission, after typing its number to confirm. */
+function DeleteSubmission({ sub }: { sub: any }) {
+  const fn = useServerFn(deleteBrandSubmission);
+  const nav = useNavigate();
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const [confirm, confirmDialog] = useConfirm();
+  return (
+    <>
+      {confirmDialog}
+      <button type="button" disabled={busy} className="ml-auto inline-flex items-center gap-1 text-sm text-gray-500 hover:text-red-700 disabled:opacity-60" onClick={async () => {
+        if (!(await confirm({ title: `Delete ${sub.ref}?`, body: `${sub.title}: every version, its check results and its history are removed. This cannot be undone.`, typeToConfirm: sub.ref, confirmLabel: "Delete" }))) return;
+        setBusy(true);
+        try {
+          await fn({ data: { id: sub.id } });
+          toast.success(`${sub.ref} deleted`);
+          qc.invalidateQueries({ queryKey: ["brand"] });
+          nav({ to: "/reports" });
+        } catch (e: any) { toast.error(friendlyError(e)); setBusy(false); }
+      }}>{busy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />} Delete</button>
+    </>
+  );
+}
 
 /** What the design does well: the check's own points, or, for older results,
  *  the checklist items it passed (official and must-fix rules first). */
@@ -130,7 +154,10 @@ function BrandSubmission() {
       <BrandHeader title={sub.title} subtitle={`${sub.ref} · ${sub.agency} · ${MATERIAL_TYPES[sub.material_type] ?? sub.material_type} · ${CHANNELS[sub.channel] ?? sub.channel}`}
         action={<BrandStatusBadge status={reviewing ? "reviewing" : sub.status} />} />
       <div className="bg-white">
-        <div className="px-6 pt-3"><Link to="/reports" className="inline-flex items-center gap-1 text-sm text-gray-600 hover:underline"><ArrowLeft className="size-4" /> Submissions</Link></div>
+        <div className="flex items-center px-6 pt-3">
+          <Link to="/reports" className="inline-flex items-center gap-1 text-sm text-gray-600 hover:underline"><ArrowLeft className="size-4" /> Submissions</Link>
+          <DeleteSubmission sub={sub} />
+        </div>
 
         {/* where it is, and what to do next */}
         <section className="mx-6 my-3 rounded-lg border border-gray-200 p-3">

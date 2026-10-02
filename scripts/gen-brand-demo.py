@@ -6,6 +6,8 @@ Writes to ~/Desktop/01. Demo Data/Branding Compliance/ (or the folder given):
   2 Bad draft - Program Kampung Digital v1.pdf          UKAS brochure to rework: the UKAS logo (from ukas.sarawak.gov.my) bigger than
                                                         the crest and ahead of it, old department name, Gmail contact
   2b Reworked - Program Kampung Digital v2.pdf          the same brochure, fixed (upload as the new version)
+  3 Real announcement - MTCP S-MM2H press statement.pdf a real ministry press statement (mtcp.sarawak.gov.my, Apr 2023): no contact details,
+                                                        "State Government of Sarawak"
   More samples/3 Poster - Open Day v1.png               breaches: stretched crest, off-palette, Chief Minister, comic font, watermark, gmail
   More samples/3b Poster - Hari Terbuka v2.png          the corrected poster
   More samples/4 Slides - Rural Water Supply.pptx       breaches: crest stretched and in the corner, agency logo larger, no state mottos, teal/purple theme, unsourced figures, no date
@@ -167,6 +169,11 @@ if not os.path.exists(REAL):
     import urllib.request
     req = urllib.request.Request("https://www.sbc.org.my/sbc-news/downloads/brochures/715-sbc-general-info/file", headers={"User-Agent": "Mozilla/5.0"})
     open(REAL, "wb").write(urllib.request.urlopen(req, timeout=60).read())
+ANNOUNCE = f"{OUT}/3 Real announcement - MTCP S-MM2H press statement.pdf"
+if not os.path.exists(ANNOUNCE):
+    import urllib.request
+    req = urllib.request.Request("https://mtcp.sarawak.gov.my/web/attachment/show/?docid=NzlIYkt5cndwYk9FNnFyWndLYlQzdz09OjqEUp-qCaz5C48ftjSe0gAr", headers={"User-Agent": "Mozilla/5.0"})
+    open(ANNOUNCE, "wb").write(urllib.request.urlopen(req, timeout=60).read())
 
 # ── 2. poster v1 (breaches) and v2 (corrected) ───────────────────────────────
 def poster_v1(path):
@@ -289,6 +296,7 @@ key = {
     "1 Good sample - SBC General Info brochure (real).pdf": {"expect": "compliant", "agency": "Sarawak Biodiversity Centre (SBC)", "must_not_fail": ["BC-1.1", "BC-2.1", "BC-2.2", "BC-3.1", "BC-8.1", "BC-8.2"]},
     "2 Bad draft - Program Kampung Digital v1.pdf": {"expect": "caution", "agency": "Unit Komunikasi Awam Sarawak (UKAS)", "must_fail": ["BC-1.4", "BC-1.6", "BC-8.2"], "must_not_fail": ["BC-1.1", "BC-1.3", "BC-1.8"]},
     "2b Reworked - Program Kampung Digital v2.pdf": {"expect": "compliant", "agency": "Unit Komunikasi Awam Sarawak (UKAS)", "must_not_fail": ["BC-1.1", "BC-1.3", "BC-1.4", "BC-1.6", "BC-2.3", "BC-8.2"]},
+    "3 Real announcement - MTCP S-MM2H press statement.pdf": {"expect": "caution", "agency": "Kementerian Pelancongan, Industri Kreatif dan Seni Persembahan (MTCP)", "must_fail": ["BC-8.1"], "must_not_fail": ["BC-1.1", "BC-1.3", "BC-4.2"]},
     "More samples/3 Poster - Open Day v1.png": {"expect": "red_flag", "agency": "Jabatan Kerja Raya Sarawak (JKR)", "must_fail": ["BC-1.2", "BC-1.3", "BC-2.2", "BC-3.2", "BC-4.2", "BC-6.2", "BC-7.1", "BC-8.1", "BC-8.2"]},
     "More samples/3b Poster - Hari Terbuka v2.png": {"expect": "compliant", "agency": "Jabatan Kerja Raya Sarawak (JKR)", "must_not_fail": ["BC-1.1", "BC-1.3", "BC-4.2", "BC-8.1", "BC-8.2"]},
     "More samples/4 Slides - Rural Water Supply.pptx": {"expect": "red_flag", "agency": "Kementerian Utiliti dan Telekomunikasi (MUT)", "must_fail": ["BC-1.2", "BC-1.3", "BC-1.4", "BC-1.7", "BC-2.2", "BC-5.3", "BC-8.2", "BC-8.3"]},
