@@ -12,6 +12,8 @@
 // ----------------------------------------------------------------------------
 
 import NDA_TEMPLATE from "./ccms-templates/lsh-nda-mutual.json";
+import NDA_COMPANY_DISCLOSES from "./ccms-templates/lsh-nda-company-discloses.json";
+import NDA_COUNTERPARTY_DISCLOSES from "./ccms-templates/lsh-nda-counterparty-discloses.json";
 
 export const CCMS_FEATURE = "commercial_cms";
 
@@ -76,6 +78,9 @@ export interface ContractTypeSpec {
   /** Lite flow: a template document (an NDA, not a contract) — Legal decides
    *  alone, and stamping, bonds and the close-out checklist are not required. */
   lite?: boolean;
+  /** Filed straight to the repository from a signed copy (29 Sep review):
+   *  tenancy, loans, insurance — tracked for expiry and renewal, not reviewed. */
+  repositoryOnly?: boolean;
 }
 export const CONTRACT_TYPES: Record<string, ContractTypeSpec> = {
   letter_of_award:       { label: "Letter of Award",                side: "vendor", needsAward: true, loaCheck: true },
@@ -90,6 +95,10 @@ export const CONTRACT_TYPES: Record<string, ContractTypeSpec> = {
   nda:                   { label: "Non-disclosure agreement",       side: "vendor", templateId: "lsh-nda-mutual", lite: true },
   client_loa:            { label: "Client Letter of Award",         side: "client", legalAlways: true },
   client_contract:       { label: "Client contract",                side: "client", legalAlways: true },
+  tenancy_agreement:     { label: "Tenancy agreement",              side: "vendor", repositoryOnly: true },
+  loan_agreement:        { label: "Bank loan / facility agreement", side: "vendor", repositoryOnly: true },
+  insurance_policy:      { label: "Insurance policy",               side: "vendor", repositoryOnly: true },
+  other_document:        { label: "Other signed document",          side: "vendor", repositoryOnly: true },
 };
 
 /** Lite for template documents, full for contracts. Derived from the type, so
@@ -106,7 +115,20 @@ export interface ContractTemplate {
   status: string; usageNote: string; assumptions: string[]; contractTypes: string[];
   clauses: TemplateClause[];
 }
-export const TEMPLATES: ContractTemplate[] = [NDA_TEMPLATE as ContractTemplate];
+export const TEMPLATES: ContractTemplate[] = [NDA_TEMPLATE, NDA_COMPANY_DISCLOSES, NDA_COUNTERPARTY_DISCLOSES] as ContractTemplate[];
+/** The three NDA types (29 Sep review): the direction of disclosure picks the template. */
+export const NDA_DIRECTIONS: Record<string, { template: string; label: string }> = {
+  "Mutual": { template: "lsh-nda-mutual", label: "Mutual" },
+  "Company to Counterparty only": { template: "lsh-nda-company-discloses", label: "We disclose" },
+  "Counterparty to Company only": { template: "lsh-nda-counterparty-discloses", label: "They disclose" },
+};
+export const ndaDirectionFor = (templateId?: string | null) => Object.entries(NDA_DIRECTIONS).find(([, d]) => d.template === templateId)?.[0] ?? null;
+export const ndaTemplateFor = (direction?: string | null) => NDA_DIRECTIONS[direction ?? ""]?.template ?? "lsh-nda-mutual";
+/** "NDA · We disclose" — the type with its direction, from the template. */
+export const ndaKind = (templateId?: string | null) => Object.values(NDA_DIRECTIONS).find((d) => d.template === templateId)?.label ?? null;
+/** A contract's type for display, with the NDA's direction. */
+export const typeLabel = (c: { contract_type: string; template_id?: string | null }) =>
+  `${CONTRACT_TYPES[c.contract_type]?.label ?? c.contract_type}${c.contract_type === "nda" && ndaKind(c.template_id) ? ` · ${ndaKind(c.template_id)}` : ""}`;
 export const templateFile = (t: ContractTemplate) =>
   `/templates/ccms/${t.code}-${t.title.replace(/ /g, "-")}-v${t.version}.docx`;
 export const templateById = (id?: string | null) => TEMPLATES.find((t) => t.id === id);
@@ -391,6 +413,25 @@ export const OBLIGATION_CATEGORIES: Record<ObligationCategory, string> = { finan
 export const DEMO_PEOPLE: { name: string; team: ObligationCategory }[] = [
   { name: "Jeremy Teh", team: "business" }, { name: "Dabraj", team: "finance" }, { name: "Irwin", team: "legal" },
 ];
+/** The business team's checklist before Legal (29 Sep review). */
+export interface BusinessChecklist { deliverables: string; kpis: string; payment_terms: string; confirmed: boolean; by?: string | null; at?: string | null }
+/** Full-flow vendor contracts need it; an NDA or a client contract does not. */
+export const needsBusinessChecklist = (c: any) => flowOf(c) === "full" && c.side !== "client" && CONTRACT_TYPES[c.contract_type]?.side !== "client";
+
+/** Repository folders (29 Sep review): company first, then project, with a
+ *  General folder for what is not tied to a project (tenancy, company-wide NDAs). */
+export const GENERAL = "__general";
+export const projectOf = (c: any): string | null => (String(c?.project ?? "").trim() || null);
+export function projectFolders(contracts: any[], entity: string): { key: string; label: string; n: number }[] {
+  const mine = contracts.filter((c) => c.entity === entity);
+  const names = [...new Set(mine.map(projectOf).filter(Boolean))].sort() as string[];
+  const out = names.map((p) => ({ key: p, label: p, n: mine.filter((c) => projectOf(c) === p).length }));
+  const general = mine.filter((c) => !projectOf(c)).length;
+  return [...out, { key: GENERAL, label: "General", n: general }];
+}
+export const inFolder = (c: any, entity?: string, project?: string) =>
+  (!entity || c.entity === entity) && (!project || (project === GENERAL ? !projectOf(c) : projectOf(c) === project));
+
 /** A name, never an email address (older requests stored the requester's email). */
 export const contractOwner = (c: any): string => {
   const v = c?.owner_name || c?.repository?.owner || c?.requestor_name || "";
@@ -474,6 +515,30 @@ export function autoObligations(c: any, end_date: string | null | undefined, exi
     const base = c.signed_date ? new Date(c.signed_date) : new Date(); base.setDate(base.getDate() + 30);
     out.push({ id: "auto-stamping", auto: "stamping", text: "Stamp the contract (within 30 days of signing)", category: "legal", pic: defaultPic("legal"), due_date: isoDay(base), trigger: "30 days from signing", status: "open" });
   }
+  // Bonds and bank guarantees: renew or release before they lapse; the
+  // performance bond is retrieved at completion (29 Sep review).
+  const finance = defaultPic("finance");
+  for (const x of (c.securities ?? []) as Security[]) {
+    if (!["performance_bond", "bank_guarantee"].includes(x.type) || !(x.required || x.reference) || x.state === "returned" || x.state === "released") continue;
+    const label = SECURITY_TYPES.find((t) => t.id === x.type)!.label.toLowerCase();
+    if (x.valid_until && !has(`sec-${x.type}`)) {
+      const d = new Date(x.valid_until); d.setDate(d.getDate() - 14);
+      out.push({ id: `auto-sec-${x.type}`, auto: `sec-${x.type}`, text: `Renew or release the ${label} before it lapses`, category: "finance", pic: finance, due_date: isoDay(d), trigger: `14 days before ${x.valid_until}`, amount: x.amount ?? null, status: "open" });
+    }
+  }
+  const bond = (c.securities ?? []).find((x: Security) => x.type === "performance_bond" && (x.required || x.reference) && x.state !== "returned");
+  if (bond && end_date && !has("bond-return")) {
+    out.push({ id: "auto-bond-return", auto: "bond-return", text: "Retrieve the performance bond at completion", category: "finance", pic: finance, due_date: end_date, trigger: "At project completion", amount: bond.amount ?? null, status: "open" });
+  }
+  // Retention: each release stage is a Finance obligation.
+  const ret = c.retention as Retention | null | undefined;
+  const value = c.repository?.value ?? c.value ?? null;
+  (ret?.release ?? []).forEach((r, i) => {
+    if (has(`retention-${i}`) || !ret?.percent) return;
+    const amount = value ? Math.round(value * (ret.percent! / 100) * (r.percent / 100)) : null;
+    out.push({ id: `auto-retention-${i}`, auto: `retention-${i}`, text: `Release ${r.percent}% of the retention (${ret.percent}% held) at ${r.at}`, category: "finance", pic: finance,
+      due_date: r.date && /^\d{4}-\d{2}-\d{2}$/.test(r.date) ? r.date : null, trigger: r.at, amount, percent: r.percent, status: "open" });
+  });
   return out;
 }
 /** Whether a department has to clear this contract: Legal and Finance when
@@ -521,6 +586,7 @@ export function departmentChecklist(c: any, cat: ObligationCategory, obl: Obliga
     items.push(
       { label: "Request raised", done: true, note: `${displayName(c.requestor_name)} · ${String(c.created_at ?? "").slice(0, 10)}` },
       { label: "Contract owner", done: !!contractOwner(c), note: contractOwner(c) || undefined },
+      needsBusinessChecklist(c) && { label: "Business checklist for Legal", done: !!c.business_checklist?.confirmed, note: c.business_checklist?.confirmed ? `${displayName(c.business_checklist.by)}` : "Deliverables, KPIs, payment terms" },
       mine.length > 0 && validatedItem("Business", mine),
       ...approvals.map((s) => ({ label: `${s.label} approval`, done: decided(s), note: by(s) })),
       { label: "Signed", done: !!c.signed_date, note: c.signed_date ?? undefined },
@@ -541,6 +607,29 @@ export function departmentChecklist(c: any, cat: ObligationCategory, obl: Obliga
   return items.filter(Boolean) as CheckItem[];
 }
 
+/** What kind of obligation, for filtering: payments, bonds, guarantees,
+ *  retention, renewals, stamping, delivery. */
+export type ObligationKind = "payment" | "bond" | "guarantee" | "retention" | "renewal" | "stamping" | "delivery" | "other";
+export const OBLIGATION_KINDS: Record<ObligationKind, string> = {
+  payment: "Payments", bond: "Bonds", guarantee: "Guarantees", retention: "Retention", renewal: "Renewals", stamping: "Stamp duty", delivery: "Delivery", other: "Other",
+};
+export function kindOf(o: Obligation): ObligationKind {
+  const t = o.text.toLowerCase(), a = o.auto ?? "";
+  // The system's own obligations first, by their key; then the wording.
+  if (a === "stamping") return "stamping";
+  if (a.startsWith("retention")) return "retention";
+  if (a === "sec-bank_guarantee") return "guarantee";
+  if (a.startsWith("sec-") || a === "bond-return") return "bond";
+  if (a === "renewal") return "renewal";
+  if (/\bstamp/.test(t)) return "stamping";
+  if (/retention/.test(t)) return "retention";
+  if (/bank guarantee|\bbg\b/.test(t)) return "guarantee";
+  if (/\bbond\b/.test(t)) return "bond";
+  if (/\brenew|tenancy|\blease\b|insurance polic/.test(t)) return "renewal";
+  if (isPayment(o)) return "payment";
+  if (o.category === "business") return "delivery";
+  return "other";
+}
 export type ObligationBucket = "overdue" | "soon" | "later" | "nodate" | "done";
 export function obligationBucket(o: Obligation, today = new Date()): ObligationBucket {
   if (o.status === "done") return "done";
@@ -577,7 +666,7 @@ export const NDA_FIELDS: TemplateField[] = [
   { key: "date", label: "Date of Agreement", kind: "date", required: true, group: "Agreement" },
   { key: "purpose", label: "Purpose of the disclosure", kind: "textarea", required: true, group: "Agreement", hint: "What the information is exchanged for — e.g. tender for a named project, pre-qualification, a proposed joint development" },
   { key: "direction", label: "Who discloses", kind: "select", options: ["Mutual", "Company to Counterparty only", "Counterparty to Company only"], required: true, group: "Agreement" },
-  { key: "term", label: "Term", kind: "select", options: ["Two (2) years", "One (1) year", "Three (3) years"], required: true, group: "Agreement" },
+  { key: "term", label: "Term", kind: "select", options: ["Three (3) years", "Two (2) years", "One (1) year"], required: true, group: "Agreement" },
   { key: "disputes", label: "Disputes", kind: "select", options: ["Courts of Malaysia", "AIAC arbitration, Kuala Lumpur"], required: true, group: "Agreement" },
   { key: "stamp_duty", label: "Stamp duty borne by", kind: "select", options: ["Counterparty", "Company", "Both Parties equally"], required: true, group: "Agreement" },
   { key: "non_solicit", label: "Clause 13 (non-solicitation) applies", kind: "select", options: ["No", "Yes"], required: true, group: "Agreement" },
@@ -648,13 +737,26 @@ export const DECISION_LABEL: Record<Decision, string> = {
 // ── execution: bonds, insurance, levy (CMS-01 step 15) ───────────────────────
 export const SECURITY_TYPES: { id: string; label: string }[] = [
   { id: "performance_bond", label: "Performance bond" },
+  { id: "bank_guarantee", label: "Bank guarantee" },
   { id: "directors_guarantee", label: "Director's guarantee" },
   { id: "insurance_car", label: "Contractor's all-risks insurance" },
   { id: "insurance_wc", label: "Workmen's compensation / SOCSO" },
   { id: "insurance_pl", label: "Public liability insurance" },
   { id: "cidb_levy", label: "CIDB levy" },
 ];
-export interface Security { type: string; required: boolean; amount?: number | null; reference?: string; valid_until?: string | null }
+export interface Security { type: string; required: boolean; amount?: number | null; reference?: string; valid_until?: string | null;
+  /** Held while it secures the contract; returned to the issuer or released at the end. */
+  state?: "held" | "returned" | "released" }
+/** Retention (29 Sep review): a percentage of the contract value held back and
+ *  released in stages, each a Finance obligation. */
+export interface Retention { percent: number | null; release: { at: string; date?: string | null; percent: number }[] }
+export const DEFAULT_RETENTION: Retention = { percent: 5, release: [{ at: "Practical completion (CPC)", percent: 50 }, { at: "End of defects liability (CMGD)", percent: 50 }] };
+/** Contract records are kept 7 years from signing (29 Sep review), not from expiry. */
+export const RECORD_YEARS = 7;
+export const retainUntil = (c: any): string | null => {
+  const from = c?.signed_date || c?.closure?.closed_at; if (!from) return null;
+  const d = new Date(from); d.setFullYear(d.getFullYear() + RECORD_YEARS); return d.toISOString().slice(0, 10);
+};
 
 /** What a contract type needs on file before payment (ASSUMPTION: the spec's
  *  5% bond for contractors; insurance for works; CIDB levy on works). */
@@ -663,6 +765,7 @@ export function defaultSecurities(contractType: string, valueMyr: number | null)
   const bond = works && valueMyr ? Math.round(valueMyr * 0.05) : null;
   return [
     { type: "performance_bond", required: works, amount: bond },
+    { type: "bank_guarantee", required: false },
     { type: "insurance_car", required: works },
     { type: "insurance_wc", required: works },
     { type: "insurance_pl", required: works },
@@ -686,16 +789,16 @@ export const daysBetween = (from: string | Date, to: string | Date) =>
   Math.round((new Date(to).setHours(0, 0, 0, 0) - new Date(from).setHours(0, 0, 0, 0)) / 86_400_000);
 
 // ── alerts ───────────────────────────────────────────────────────────────────
-export interface Alert { kind: "expiry" | "stamping" | "security" | "confirmation"; days: number; text: string; severity: "high" | "medium" }
+export interface Alert { kind: "expiry" | "stamping" | "security" | "confirmation" | "obligation"; days: number; text: string; severity: "high" | "medium" }
 
 /** What needs attention on a contract today: expiry within 30 days, stamping
  *  against its 30-day window (flagged from day 14, urgent from day 25), a bond
  *  or policy lapsing within 30 days, a client confirmation unanswered for 7. */
-export function contractAlerts(c: any, today = new Date()): Alert[] {
+export function contractAlerts(c: any, today = new Date(), within = 30): Alert[] {
   const out: Alert[] = [];
   if (c.status === "active" && c.expiry_date) {
     const d = daysBetween(today, c.expiry_date);
-    if (d <= 30) out.push({ kind: "expiry", days: d, severity: d <= 7 ? "high" : "medium",
+    if (d <= within) out.push({ kind: "expiry", days: d, severity: d <= 7 ? "high" : "medium",
       text: d < 0 ? `Expired ${-d} day${d === -1 ? "" : "s"} ago` : `Expires in ${d} day${d === 1 ? "" : "s"} — renew, renegotiate or let lapse` });
   }
   if (c.signed_date && !c.stamping?.stamped_date && flowOf(c) === "full") {
@@ -705,13 +808,22 @@ export function contractAlerts(c: any, today = new Date()): Alert[] {
   }
   for (const x of (c.securities ?? []) as Security[]) {
     if (!x.valid_until) continue;
+    if (x.state === "returned" || x.state === "released") continue;
     const d = daysBetween(today, x.valid_until);
-    if (d <= 30) out.push({ kind: "security", days: d, severity: d <= 7 ? "high" : "medium",
+    if (d <= within) out.push({ kind: "security", days: d, severity: d <= 7 ? "high" : "medium",
       text: `${SECURITY_TYPES.find((s) => s.id === x.type)?.label ?? x.type} ${d < 0 ? "lapsed" : `lapses in ${d} days`}` });
   }
   if (c.confirmation?.sent_date && !c.confirmation?.reply_date) {
     const d = daysBetween(c.confirmation.sent_date, today);
     if (d >= 7) out.push({ kind: "confirmation", days: d, severity: "medium", text: `Client has not replied to our confirmation letter (${d} days)` });
+  }
+  // The control tower: a filed contract's open obligations due in the window.
+  if (c.repository?.obligations) {
+    for (const o of normalizeObligations(c.repository.obligations, contractOwner(c))) {
+      if (o.status === "done" || !o.due_date) continue;
+      const d = daysBetween(today, o.due_date);
+      if (d <= within) out.push({ kind: "obligation", days: d, severity: d <= 7 ? "high" : "medium", text: `${o.text} — ${o.pic}${d < 0 ? `, ${-d} days overdue` : `, due in ${d} days`}` });
+    }
   }
   return out;
 }

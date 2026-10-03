@@ -6,19 +6,22 @@ import { AppShell } from "@/components/app-shell";
 import { listCcmsContracts } from "@/lib/ccms.functions";
 import { CcmsHeader, CARD, TH, TD } from "@/components/ccms-widgets";
 import { CATEGORY_TINT, ObligationRows } from "@/components/ccms-obligations";
+import { AuditFindings } from "@/components/ccms-audit-findings";
 import {
-  CONTRACT_TYPES, DEMO_PEOPLE, OBLIGATION_CATEGORIES, contractOwner, daysBetween, entityShort, normalizeObligations, obligationBucket,
-  type Obligation, type ObligationBucket, type ObligationCategory,
-} from "@/lib/ccms";
+  CONTRACT_TYPES, DEMO_PEOPLE, LSH_ENTITIES, OBLIGATION_CATEGORIES, OBLIGATION_KINDS, contractOwner, daysBetween, entityShort, flowOf, kindOf, normalizeObligations, obligationBucket,
+  type Obligation, type ObligationBucket, type ObligationCategory, type ObligationKind, typeLabel} from "@/lib/ccms";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-type ObSearch = { person?: string; cat?: ObligationCategory; tab?: "obligations" | "owned" };
+type ObTab = "obligations" | "owned" | "stamping" | "findings";
+type ObSearch = { person?: string; cat?: ObligationCategory; kind?: ObligationKind; entity?: string; tab?: ObTab };
 export const Route = createFileRoute("/ccms/obligations")({
   validateSearch: (s: Record<string, unknown>): ObSearch => ({
     ...(typeof s.person === "string" ? { person: s.person } : {}),
     ...(["finance", "business", "legal"].includes(s.cat as string) ? { cat: s.cat as ObligationCategory } : {}),
-    ...(s.tab === "owned" ? { tab: "owned" as const } : {}),
+    ...(typeof s.kind === "string" && s.kind in OBLIGATION_KINDS ? { kind: s.kind as ObligationKind } : {}),
+    ...(typeof s.entity === "string" ? { entity: s.entity } : {}),
+    ...(["owned", "stamping", "findings"].includes(s.tab as string) ? { tab: s.tab as ObTab } : {}),
   }),
   component: Obligations,
   head: () => ({ meta: [{ title: "Commercial CMS · Obligations" }] }),
@@ -38,7 +41,7 @@ function Obligations() {
   const listFn = useServerFn(listCcmsContracts);
   const qc = useQueryClient();
   const nav = useNavigate({ from: "/ccms/obligations" });
-  const { person, cat, tab = "obligations" } = Route.useSearch();
+  const { person, cat, kind, entity, tab = "obligations" } = Route.useSearch();
   const go = (s: ObSearch) => nav({ search: (p: ObSearch) => Object.fromEntries(Object.entries({ ...p, ...s }).filter(([, v]) => v)) as ObSearch });
   const { data: rows = [], isLoading } = useQuery({ queryKey: ["ccms-contracts"], queryFn: () => listFn(), staleTime: 15_000 });
   const filed = useMemo(() => rows.filter((c: any) => c.repository && (c.status === "active" || c.status === "closed")), [rows]);
@@ -47,7 +50,12 @@ function Obligations() {
     const names = new Set<string>([...DEMO_PEOPLE.map((p) => p.name), ...all.map((x) => x.o.pic), ...filed.map((c: any) => contractOwner(c))].filter(Boolean));
     return [...names].map((n) => ({ name: n, team: DEMO_PEOPLE.find((p) => p.name === n)?.team }));
   }, [all, filed]);
-  const mine = all.filter((x) => (!person || x.o.pic === person) && (!cat || x.o.category === cat));
+  const byPerson = all.filter((x) => (!person || x.o.pic === person) && (!cat || x.o.category === cat));
+  const kinds = (Object.keys(OBLIGATION_KINDS) as ObligationKind[]).map((k) => ({ k, n: byPerson.filter((x) => x.o.status === "open" && kindOf(x.o) === k).length })).filter((x) => x.n > 0);
+  const mine = byPerson.filter((x) => !kind || kindOf(x.o) === kind);
+  // Stamp duty register: every signed full-flow contract, stamped or not, across the companies.
+  const signed = rows.filter((c: any) => c.signed_date && flowOf(c) === "full" && (!entity || c.entity === entity))
+    .sort((a: any, b: any) => Number(!!a.stamping?.stamped_date) - Number(!!b.stamping?.stamped_date) || String(a.signed_date).localeCompare(String(b.signed_date)));
   const byDue = (a: { o: Obligation }, b: { o: Obligation }) => String(a.o.due_date ?? "9999").localeCompare(String(b.o.due_date ?? "9999"));
   const refresh = () => qc.invalidateQueries({ queryKey: ["ccms-contracts"] });
   const owned = filed.filter((c: any) => !person || contractOwner(c) === person);
@@ -74,11 +82,51 @@ function Obligations() {
           <div className="ml-auto flex rounded-md border border-gray-200 p-0.5 text-sm">
             <button onClick={() => go({ tab: undefined })} className={cn("rounded px-3 py-1", tab === "obligations" ? "bg-gray-900 text-white" : "text-gray-600")}>Obligations</button>
             <button onClick={() => go({ tab: "owned" })} className={cn("rounded px-3 py-1", tab === "owned" ? "bg-gray-900 text-white" : "text-gray-600")}>Contracts Owned</button>
+            <button onClick={() => go({ tab: "stamping" })} className={cn("rounded px-3 py-1", tab === "stamping" ? "bg-gray-900 text-white" : "text-gray-600")}>Stamp Duty</button>
+            <button onClick={() => go({ tab: "findings" })} className={cn("rounded px-3 py-1", tab === "findings" ? "bg-gray-900 text-white" : "text-gray-600")}>Audit Findings</button>
           </div>
         </div>
 
+        {tab === "obligations" && kinds.length > 1 && (
+          <div className="flex flex-wrap gap-1.5">
+            <button onClick={() => go({ kind: undefined })} className={cn("rounded-md border px-2.5 py-1 text-sm", !kind ? "border-gray-900 font-semibold" : "border-gray-200 text-gray-600")}>All kinds</button>
+            {kinds.map(({ k, n }) => <button key={k} onClick={() => go({ kind: kind === k ? undefined : k })} className={cn("rounded-md border px-2.5 py-1 text-sm", kind === k ? "border-gray-900 font-semibold" : "border-gray-200 text-gray-600")}>{OBLIGATION_KINDS[k]} <span className="text-gray-500">{n}</span></button>)}
+          </div>
+        )}
         {isLoading ? <p className="flex items-center gap-2 text-sm text-gray-500"><Loader2 className="size-4 animate-spin" /> Loading…</p>
-          : tab === "owned" ? (
+          : tab === "findings" ? <AuditFindings />
+          : tab === "stamping" ? (
+            <div className={CARD}>
+              <div className="flex items-center gap-3 border-b border-gray-200 px-4 py-2.5">
+                <div className="flex-1"><h2 className="text-sm font-semibold text-gray-900">Stamp duty register</h2><p className="text-sm text-gray-600">Every signed contract: stamped within 30 days of signing, or not yet.</p></div>
+                <select value={entity ?? ""} onChange={(e) => go({ entity: e.target.value || undefined })} className="rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm">
+                  <option value="">All companies</option>{LSH_ENTITIES.map((e) => <option key={e} value={e}>{entityShort(e)}</option>)}
+                </select>
+              </div>
+              {signed.length === 0 ? <p className="p-6 text-sm text-gray-500">No signed contracts{entity ? ` for ${entityShort(entity)}` : ""}.</p> : (
+                <table className="w-full">
+                  <thead><tr className="border-b border-gray-200"><th className={TH}>Contract</th><th className={TH}>Company</th><th className={TH}>Signed</th><th className={TH}>Stamped</th><th className={TH + " text-right"}>Duty (RM)</th><th className={TH}>Certificate</th><th className={TH}>Status</th></tr></thead>
+                  <tbody>
+                    {signed.map((c: any) => {
+                      const st = c.stamping ?? {};
+                      const day = daysBetween(c.signed_date, new Date());
+                      return (
+                        <tr key={c.id} className={cn("border-b border-gray-100 last:border-0", !st.stamped_date && day > 30 && "bg-red-50/40")}>
+                          <td className={TD}><Link to="/ccms/$contractId" params={{ contractId: c.id }} className="font-medium text-blue-700 hover:underline">{c.reference_number}</Link><div className="text-sm text-gray-600">{c.counterparty_name}</div></td>
+                          <td className={TD} title={c.entity}>{entityShort(c.entity)}</td>
+                          <td className={TD}>{c.signed_date}</td>
+                          <td className={TD}>{st.stamped_date ?? "—"}</td>
+                          <td className={TD + " text-right tabular-nums"}>{st.duty != null ? Number(st.duty).toLocaleString() : "—"}</td>
+                          <td className={TD}>{st.certificate_no ?? "—"}</td>
+                          <td className={TD}>{st.stamped_date ? <span className="text-emerald-700">Stamped</span> : day > 30 ? <span className="font-semibold text-red-700">Overdue by {day - 30} days</span> : <span className={day >= 14 ? "text-amber-700" : "text-gray-700"}>Day {day} of 30</span>}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          ) : tab === "owned" ? (
             <div className={CARD}>
               {owned.length === 0 ? <p className="p-6 text-sm text-gray-500">No filed contracts owned{person ? ` by ${person}` : ""}.</p> : (
                 <table className="w-full">
@@ -89,7 +137,7 @@ function Obligations() {
                       const d = c.expiry_date ? daysBetween(new Date(), c.expiry_date) : null;
                       return (
                         <tr key={c.id} className="border-b border-gray-100 last:border-0">
-                          <td className={TD}><Link to="/ccms/$contractId" params={{ contractId: c.id }} className="font-medium text-blue-700 hover:underline">{c.reference_number}</Link><div className="text-sm text-gray-600">{CONTRACT_TYPES[c.contract_type]?.label}</div></td>
+                          <td className={TD}><Link to="/ccms/$contractId" params={{ contractId: c.id }} className="font-medium text-blue-700 hover:underline">{c.reference_number}</Link><div className="text-sm text-gray-600">{typeLabel(c)}</div></td>
                           <td className={TD} title={c.entity}>{entityShort(c.entity)}</td>
                           <td className={TD}>{c.counterparty_name}</td>
                           <td className={TD}>{contractOwner(c)}</td>

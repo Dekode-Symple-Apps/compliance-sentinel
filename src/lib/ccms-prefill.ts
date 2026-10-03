@@ -57,7 +57,7 @@ export function remember(fields: Record<string, string | null | undefined>) {
 const SEED_FORMS: Record<string, () => Record<string, any>> = {
   "request:nda": () => ({
     f: { entity: "Lim Seong Hai Lighting Sdn Bhd", vendor_name: "Awan Digital Solutions Sdn Bhd", title: "Mutual NDA — cloud ERP evaluation",
-      start_date: iso(new Date()), end_date: inYears(2), requestor_department: "Group IT",
+      start_date: iso(new Date()), end_date: inYears(3), requestor_department: "Group IT",
       scope_summary: "Share financial and project data so Awan Digital can scope a cloud ERP migration." },
     tf: { purpose: "Evaluation of a cloud ERP migration for the Group, including sharing of financial and project data." },
   }),

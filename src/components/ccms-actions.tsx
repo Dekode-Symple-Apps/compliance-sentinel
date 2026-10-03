@@ -21,7 +21,7 @@ import {
   resubmitCcmsContract, reviewCcmsDocument, saveCcmsRepository, saveCcmsSecurities, draftCcmsReturnNote } from "@/lib/ccms.functions";
 import {
   BLOCKING_FLAGS, CCMS_ROLES, DEMO_SINGLE_USER, contractOwner, normalizeObligations, particularsFromRecords, LINK_ACTIONS, SECURITY_TYPES, fillNda, flowOf, nextActions, nextApproval, paymentReady,
-  type Flag, type KeyTerms, type NextAction, type Security, type Stage,
+  DEFAULT_RETENTION, type Flag, type KeyTerms, type NextAction, type Retention, type Security, type Stage,
 } from "@/lib/ccms";
 import { recall, recallForm, remember } from "@/lib/ccms-prefill";
 import { ObligationsEditor } from "@/components/ccms-obligations";
@@ -193,7 +193,7 @@ function GenerateForm({ a, c, documents, done }: FormProps) {
   const withRecords = (p: Record<string, string>) =>
     ({ ...p, ...Object.fromEntries(Object.entries(particularsFromRecords(c.entity, c.vendor ?? null)).filter(([, x]) => x)) });
   const [tf, setTf] = useState<Record<string, string>>(() => previous ?? withRecords({
-    date: today(), direction: "Mutual", term: "Two (2) years", disputes: "Courts of Malaysia",
+    date: today(), direction: "Mutual", term: "Three (3) years", disputes: "Courts of Malaysia",
     stamp_duty: "Counterparty", non_solicit: "No", cp_form: "company", cp_country: "Malaysia", cp_name: c.counterparty_name ?? "",
     purpose: c.scope_summary ?? "",
   }));
@@ -428,13 +428,20 @@ function StampForm({ a, c, done }: FormProps) {
 function SecuritiesForm({ a, c, done }: FormProps) {
   const fn = useServerFn(saveCcmsSecurities);
   const { busy, run } = useRun();
-  const [rows, setRows] = useState<Security[]>(c.securities ?? []);
+  // Contracts recorded before the bank guarantee existed get its row too.
+  const [rows, setRows] = useState<Security[]>(() => {
+    const r = [...(c.securities ?? [])] as Security[];
+    if (!r.some((x) => x.type === "bank_guarantee")) r.splice(1, 0, { type: "bank_guarantee", required: false });
+    return r;
+  });
   const set = (i: number, patch: Partial<Security>) => setRows((r) => r.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   const ready = rows.length > 0 && paymentReady(rows);
+  const [ret, setRet] = useState<Retention>(c.retention ?? DEFAULT_RETENTION);
+  const setStage = (i: number, patch: any) => setRet((r) => ({ ...r, release: r.release.map((x, j) => (j === i ? { ...x, ...patch } : x)) }));
   return (
     <div className="space-y-3">
       <table className="w-full text-sm">
-        <thead><tr className="text-left text-xs text-gray-500"><th className="py-1 pr-2 font-semibold">Item</th><th className="pr-2 font-semibold">Required</th><th className="pr-2 font-semibold">Amount (RM)</th><th className="pr-2 font-semibold">Reference</th><th className="font-semibold">Valid until</th></tr></thead>
+        <thead><tr className="text-left text-xs text-gray-500"><th className="py-1 pr-2 font-semibold">Item</th><th className="pr-2 font-semibold">Required</th><th className="pr-2 font-semibold">Amount (RM)</th><th className="pr-2 font-semibold">Reference</th><th className="pr-2 font-semibold">Valid until</th><th className="font-semibold">State</th></tr></thead>
         <tbody>
           {rows.map((x, i) => (
             <tr key={x.type}>
@@ -442,13 +449,29 @@ function SecuritiesForm({ a, c, done }: FormProps) {
               <td className="pr-2"><input type="checkbox" checked={x.required} onChange={(e) => set(i, { required: e.target.checked })} /></td>
               <td className="pr-2"><input className={INPUT} value={x.amount ?? ""} onChange={(e) => set(i, { amount: e.target.value === "" ? null : Number(e.target.value) })} /></td>
               <td className="pr-2"><input className={INPUT} value={x.reference ?? ""} onChange={(e) => set(i, { reference: e.target.value })} placeholder={x.type === "cidb_levy" ? "Receipt no." : "Policy / bond no."} /></td>
-              <td>{x.type !== "cidb_levy" && <input type="date" className={INPUT} value={x.valid_until ?? ""} onChange={(e) => set(i, { valid_until: e.target.value || null })} />}</td>
+              <td className="pr-2">{x.type !== "cidb_levy" && <input type="date" className={INPUT} value={x.valid_until ?? ""} onChange={(e) => set(i, { valid_until: e.target.value || null })} />}</td>
+              <td>{["performance_bond", "bank_guarantee", "directors_guarantee"].includes(x.type) && (
+                <select className={INPUT} value={x.state ?? "held"} onChange={(e) => set(i, { state: e.target.value as Security["state"] })}>
+                  <option value="held">Held</option><option value="returned">Returned</option><option value="released">Released</option>
+                </select>)}</td>
             </tr>
           ))}
         </tbody>
       </table>
       <p className={cn("text-sm", ready ? "text-emerald-700" : "text-gray-600")}>{ready ? "Payment-ready." : "Payment is not ready until every required item has a reference and validity."}</p>
-      <Footer><Go busy={busy} onClick={async () => { const [ok] = await run(() => fn({ data: { contract_id: c.id, securities: rows, acting_role: a.role } }), "Saved"); if (ok) done(); }}>Save</Go></Footer>
+      <div className="rounded-md border border-gray-200 p-3 space-y-2">
+        <div className="flex items-center gap-2 text-sm"><span className="font-medium text-gray-900">Retention</span>
+          <input className={INPUT + " w-20"} value={ret.percent ?? ""} onChange={(e) => setRet({ ...ret, percent: e.target.value === "" ? null : Number(e.target.value) })} /> <span className="text-gray-600">% of the contract value, released in stages:</span></div>
+        {ret.release.map((r, i) => (
+          <div key={i} className="flex items-center gap-2 text-sm">
+            <input className={INPUT + " w-16"} value={r.percent} onChange={(e) => setStage(i, { percent: Number(e.target.value) || 0 })} /><span className="text-gray-600">% at</span>
+            <input className={INPUT + " flex-1"} value={r.at} onChange={(e) => setStage(i, { at: e.target.value })} />
+            <input type="date" className={INPUT + " w-40"} value={r.date ?? ""} onChange={(e) => setStage(i, { date: e.target.value || null })} title="Date, if known" />
+          </div>
+        ))}
+        <p className="text-xs text-gray-500">Each release becomes a Finance obligation. Leave the % blank if there is no retention.</p>
+      </div>
+      <Footer><Go busy={busy} onClick={async () => { const [ok] = await run(() => fn({ data: { contract_id: c.id, securities: rows, retention: ret.percent ? ret : null, acting_role: a.role } }), "Saved"); if (ok) done(); }}>Save</Go></Footer>
     </div>
   );
 }
@@ -503,7 +526,7 @@ function RenewForm({ a, c, done }: FormProps) {
   const fn = useServerFn(decideCcmsRenewal);
   const { busy, run } = useRun();
   const lite = flowOf(c) === "lite";
-  const nextEnd = () => { if (!c.expiry_date) return ""; const d = new Date(c.expiry_date); d.setFullYear(d.getFullYear() + (lite ? 2 : 1)); return d.toISOString().slice(0, 10); };
+  const nextEnd = () => { if (!c.expiry_date) return ""; const d = new Date(c.expiry_date); d.setFullYear(d.getFullYear() + (lite ? 3 : 1)); return d.toISOString().slice(0, 10); };
   const [newEnd, setNewEnd] = useState(nextEnd());
   const [note, setNote] = useState("");
   const decide = async (decision: "renew" | "renegotiate" | "terminate", ok: string) => {

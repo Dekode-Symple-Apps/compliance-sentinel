@@ -2,7 +2,7 @@ import { Check, Circle, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ActionBar } from "@/components/ccms-actions";
 import {
-  COMPARISON_AREAS, DECISION_LABEL, SECURITY_TYPES, contractAlerts, contractMilestones, daysBetween, displayName, flowOf, normalizeObligations, paymentReady,
+  COMPARISON_AREAS, DECISION_LABEL, SECURITY_TYPES, contractAlerts, contractMilestones, daysBetween, displayName, flowOf, normalizeObligations, paymentReady, retainUntil,
   type Decision, type Security,
 } from "@/lib/ccms";
 import { CARD, fmtMoney, SeverityIcon } from "@/components/ccms-widgets";
@@ -95,6 +95,7 @@ export function ExecutionRecord({ c }: { c: any }) {
       {!lite && <Line k="Bonds & insurance" v={secs.length ? <>{paymentReady(secs) ? "payment-ready" : "incomplete"} · {secs.map((x) => `${SECURITY_TYPES.find((t) => t.id === x.type)?.label}${x.reference ? ` ${x.reference}` : ""}${x.valid_until ? ` to ${x.valid_until}` : ""}`).join("; ")}</> : "none required"} />}
       <Line k="Repository" v={r ? `${fmtMoney(r.value, r.currency)} · ${r.start_date ?? "—"} to ${r.end_date} · ${r.notice_period || "no notice period stated"} · confirmed by ${displayName(r.confirmed_by)}` : "—"} />
       {r?.obligations?.length > 0 && <Line k="Key obligations" v={<ul className="list-disc pl-4">{normalizeObligations(r.obligations).map((o) => <li key={o.id}>{o.text}<span className="text-gray-500"> · {o.pic}{o.due_date ? ` · due ${o.due_date}` : ""}</span></li>)}</ul>} />}
+      {c.signed_date && !c.closure && <Line k="Records kept until" v={`${retainUntil(c)} (7 years from signing)`} />}
       {c.closure && <Line k={lite ? "Ended" : "Closed"} v={`${c.closure.closed_at?.slice(0, 10)} · ${displayName(c.closure.by)} · kept to ${c.closure.retain_until}${c.closure.legal_hold ? " · legal hold" : ""}${c.closure.override_reason ? ` · ${c.closure.override_reason}` : ""}`} />}
     </div>
   );

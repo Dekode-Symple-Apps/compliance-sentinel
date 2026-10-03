@@ -20,7 +20,7 @@ function Templates() {
     return TEMPLATES.filter((t) => (type === "all" || t.contractTypes.includes(type)) &&
       (!needle || [t.code, t.title, t.owner].some((v) => v.toLowerCase().includes(needle))));
   }, [q, type]);
-  const uncovered = Object.entries(CONTRACT_TYPES).filter(([k, v]) => v.side === "vendor" && !TEMPLATES.some((t) => t.contractTypes.includes(k)));
+  const uncovered = Object.entries(CONTRACT_TYPES).filter(([k, v]) => v.side === "vendor" && !v.repositoryOnly && !TEMPLATES.some((t) => t.contractTypes.includes(k)));
 
   return (
     <AppShell>
@@ -30,7 +30,7 @@ function Templates() {
           <div className="flex flex-wrap items-center gap-2">
             <select value={type} onChange={(e) => setType(e.target.value)} className="rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm">
               <option value="all">All Contract Types</option>
-              {Object.entries(CONTRACT_TYPES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              {Object.entries(CONTRACT_TYPES).filter(([, v]) => !v.repositoryOnly).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
             </select>
             <div className="ml-auto flex items-center gap-2 rounded-md border border-gray-200 px-2 py-1.5">
               <Search className="size-4 text-gray-400" />

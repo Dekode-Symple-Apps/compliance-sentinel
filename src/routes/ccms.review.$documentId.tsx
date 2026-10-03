@@ -12,7 +12,7 @@ import {
   addCcmsComment, compareCcmsAward, rereadCcmsDraftObligations, decideCcmsComment, decideCcmsCommentsBulk, decideCcmsDifference, exportCcmsDocumentWithComments, getCcmsDocument, recordCcmsReview, reviewCcmsDocument, setCcmsCommentStatus, draftCcmsReturnNote } from "@/lib/ccms.functions";
 import { CcmsHeader, StatusBadge, OutcomeText, CARD, useCcmsRole, SeverityIcon, CostChip, AiDraftButton } from "@/components/ccms-widgets";
 import { friendlyError } from "@/components/ccms-widgets";
-import { AI_ROLE, CCMS_ROLES, COMPARISON_AREAS, CONTRACT_TYPES, DECISION_LABEL, DEMO_SINGLE_USER, OBLIGATION_CATEGORIES, contractOwner, displayName, flowOf, normalizeObligations, stageTitle, roleLabel, templateById, type CcmsRole, type Decision, type Obligation, type ObligationCategory, type Stage, itemDepartment } from "@/lib/ccms";
+import { AI_ROLE, CCMS_ROLES, COMPARISON_AREAS, CONTRACT_TYPES, DECISION_LABEL, DEMO_SINGLE_USER, OBLIGATION_CATEGORIES, contractOwner, displayName, flowOf, normalizeObligations, stageTitle, roleLabel, templateById, type CcmsRole, type Decision, type Obligation, type ObligationCategory, type Stage, itemDepartment, typeLabel} from "@/lib/ccms";
 import { ObligationRows, ValidateAllButton } from "@/components/ccms-obligations";
 import { CommentBody } from "@/components/ccms-execution";
 import { RememberedTextarea } from "@/components/ccms-actions";
@@ -144,7 +144,7 @@ function ReviewScreen() {
 
   return (
     <AppShell>
-      <CcmsHeader title={`${contract.reference_number} · ${doc.file_name}`} subtitle={`${CONTRACT_TYPES[contract.contract_type]?.label} · ${doc.doc_role} v${doc.version} · review and flag — comments only, no rewriting`} />
+      <CcmsHeader title={`${contract.reference_number} · ${doc.file_name}`} subtitle={`${typeLabel(contract)} · ${doc.doc_role} v${doc.version} · review and flag — comments only, no rewriting`} />
       <div className="bg-white">
         <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-gray-200">
           <Link to="/ccms/$contractId" params={{ contractId: contract.id }} className="inline-flex items-center gap-1 text-sm text-gray-600 hover:underline"><ArrowLeft className="size-4" /> {contract.reference_number}</Link>
@@ -210,7 +210,7 @@ function ReviewScreen() {
               ) : <p className="text-sm text-gray-600">Not reviewed yet. Run the AI review to flag issues in this draft.</p>)}
 
               {tab === "template" && (!tpl ? (
-                <p className="text-sm text-gray-700">There is no approved template for a {CONTRACT_TYPES[contract.contract_type]?.label}, so this draft is non-standard and Legal vetting is mandatory. See the NDA under <Link to="/ccms/templates" className="text-blue-700 hover:underline">Templates</Link> for how a template drives the check.</p>
+                <p className="text-sm text-gray-700">There is no approved template for a {typeLabel(contract)}, so this draft is non-standard and Legal vetting is mandatory. See the NDA under <Link to="/ccms/templates" className="text-blue-700 hover:underline">Templates</Link> for how a template drives the check.</p>
               ) : !deviation ? <p className="text-sm text-gray-600">Run the AI review to compare this draft with {tpl.code}.</p> : (
                 <>
                   <p className="text-sm text-gray-700">Compared clause by clause with <b>{tpl.code} {tpl.title}</b> v{tpl.version}. Any change to a locked clause, or a missing mandatory clause, sends the draft to Legal.</p>

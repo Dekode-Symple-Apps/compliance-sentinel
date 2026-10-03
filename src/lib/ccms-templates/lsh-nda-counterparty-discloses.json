@@ -1,7 +1,7 @@
 {
-  "id": "lsh-nda-mutual",
-  "code": "LSH-CMS-T01",
-  "title": "Mutual Non-Disclosure Agreement",
+  "id": "lsh-nda-counterparty-discloses",
+  "code": "LSH-CMS-T03",
+  "title": "Non-Disclosure Agreement (Counterparty Discloses)",
   "version": "1.0",
   "effectiveDate": "2026-09-26",
   "owner": "Group Legal, Lim Seong Hai Capital Berhad",
@@ -9,10 +9,10 @@
     "nda"
   ],
   "status": "Draft for Legal adoption",
-  "usageNote": "Use for any exchange of confidential information with a vendor, subcontractor, consultant, joint-venture or development partner, landowner, or prospective client of the Lim Seong Hai group — including tender and pre-qualification exchanges. Complete Schedule 1 only. Any change to a clause marked LOCKED, or removal of a MANDATORY clause, is a deviation and routes the draft to Legal vetting.",
+  "usageNote": "Use when only the counterparty shares confidential information with the Lim Seong Hai group — e.g. a technology vendor's product details or a landowner's plans. Complete Schedule 1 only. Any change to a clause marked LOCKED, or removal of a MANDATORY clause, is a deviation and routes the draft to Legal vetting.",
   "assumptions": [
     "Prepared as a starting template pending the client's own approved form; to be adopted by Group Legal before use.",
-    "Mutual (both parties disclose). A one-way version is produced by deleting the counterparty's disclosure in Schedule 1, item 4 — that deletion alone is not a deviation.",
+    "One-way: only the Counterparty discloses Confidential Information; the Company is the Receiving Party. Review to limit the Company's own obligations as recipient: no wider duties, longer survival or uncapped remedies than the template.",
     "Governing law Malaysia; disputes to the Malaysian courts, with AIAC arbitration available as a pre-approved alternative in clause 19.3.",
     "Stamp duty on an NDA is nominal; borne by the Counterparty unless Schedule 1 says otherwise."
   ],
@@ -22,7 +22,7 @@
   },
   "recitals": [
     "The Company is an investment holding company whose Affiliates carry on the business of construction and construction-related services and solutions, the distribution of building materials, lighting products and mechanical and electrical products, the wholesale and retail of hardware and tools, the rental of machinery, and property development.",
-    "The Parties wish to exchange Confidential Information for the Purpose described in Schedule 1, and each Party is willing to disclose Confidential Information to the other on the terms of this Agreement.",
+    "The Counterparty wishes to disclose Confidential Information to the Company for the Purpose described in Schedule 1, and the Company is willing to receive it on the terms of this Agreement.",
     "The Company's shares are listed on Bursa Malaysia Securities Berhad, and some Confidential Information may be material, non-public information about the Company."
   ],
   "clauses": [
@@ -37,7 +37,7 @@
         "1.1 In this Agreement:",
         "\"Affiliate\" means, in relation to a Party, any company that is its holding company or subsidiary, or a subsidiary of its holding company, within the meaning of section 4 of the Companies Act 2016.",
         "\"Confidential Information\" means all information, in any form or medium (written, oral, electronic, visual or by inspection of any site, premises or sample), disclosed or made available by or on behalf of the Disclosing Party to the Receiving Party or its Representatives, whether before or after the date of this Agreement, in connection with the Purpose, including: (a) tender documents, bills of quantities, pricing, rates, margins, cost plans and bid strategy; (b) drawings, designs, specifications, method statements and technical data; (c) information on land, land acquisition, development plans, approvals and feasibility studies; (d) financial information, forecasts, business plans, customer, supplier and subcontractor lists and terms; (e) Personal Data; (f) Inside Information; (g) the existence and terms of this Agreement and of any discussions between the Parties; and (h) all notes, analyses, compilations and other materials prepared by the Receiving Party or its Representatives that contain or reflect any of the foregoing.",
-        "\"Disclosing Party\" means the Party disclosing Confidential Information, and \"Receiving Party\" means the Party receiving it.",
+        "\"Disclosing Party\" means the Counterparty, and \"Receiving Party\" means the Company; only the Counterparty discloses Confidential Information under this Agreement.",
         "\"Inside Information\" means information that is not generally available and that, on becoming generally available, a reasonable person would expect to have a material effect on the price or value of securities of the Company, within the meaning of Part V, Division 2 of the Capital Markets and Services Act 2007.",
         "\"Personal Data\" has the meaning given in the Personal Data Protection Act 2010.",
         "\"Purpose\" means the purpose described in item 2 of Schedule 1.",
@@ -291,7 +291,7 @@
       {
         "number": "4",
         "label": "Direction of disclosure",
-        "value": "[Mutual / Company to Counterparty only / Counterparty to Company only]"
+        "value": "Counterparty to Company only"
       },
       {
         "number": "5",

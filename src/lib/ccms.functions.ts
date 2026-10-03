@@ -6,15 +6,17 @@ import { generateWithFallback, getDefaultModel } from "@/lib/gemini";
 import { docxToText, escapeXml, looksLikeDocx } from "@/lib/docx-editor";
 import PizZip from "pizzip";
 import { FILLABLE_DOCX_BASE64 as NDA_FILLABLE } from "@/lib/ccms-templates/lsh-nda-mutual.fill";
+import { FILLABLE_DOCX_BASE64 as NDA_CO_FILLABLE } from "@/lib/ccms-templates/lsh-nda-company-discloses.fill";
+import { FILLABLE_DOCX_BASE64 as NDA_CP_FILLABLE } from "@/lib/ccms-templates/lsh-nda-counterparty-discloses.fill";
 import { addAnchoredCommentsToDocx, type AnchoredComment } from "@/lib/docx-anchored-comments";
 import { extractPdfPages } from "@/lib/pdf-pages";
 import { computeCost } from "@/lib/pricing";
 import { assertRowTenant, getCallerTenant, requireFeature } from "@/lib/tenant.functions";
 import {
   CONTRACT_TYPES, CCMS_ROLES, DEMO_SINGLE_USER, flowOf, LSH_ENTITIES, LOA_ITEMS, BLOCKING_FLAGS, AI_ROLE, roleLabel,
-  buildRoute, computeFlags, nextApproval, reviewsDone, templateById, toMyr, fillNda, displayName,
+  buildRoute, computeFlags, nextApproval, reviewsDone, templateById, toMyr, fillNda, displayName, ndaTemplateFor, needsBusinessChecklist, entityShort,
   COMPARISON_AREAS, defaultSecurities, SECURITY_TYPES, APPROVAL_BANDS, type Security, type KeyTerms,
-  autoObligations, contractOwner, normalizeObligations, straightThrough, STP_ACTOR, itemDepartment, carryValidation, VALIDATE_ROLES, type ObligationCategory,
+  autoObligations, contractOwner, normalizeObligations, straightThrough, STP_ACTOR, itemDepartment, carryValidation, VALIDATE_ROLES, retainUntil, type ObligationCategory,
   type CcmsRole, type Flag, type Stage, type VendorLite,
 } from "@/lib/ccms";
 
@@ -43,7 +45,7 @@ function costEntry(op: string, res: any, model: string) {
 
 const requireCcms = requireProduct("commercial_cms");
 /** Fill-in versions of the approved templates, by template id. */
-const FILLABLE: Record<string, string> = { "lsh-nda-mutual": NDA_FILLABLE };
+const FILLABLE: Record<string, string> = { "lsh-nda-mutual": NDA_FILLABLE, "lsh-nda-company-discloses": NDA_CO_FILLABLE, "lsh-nda-counterparty-discloses": NDA_CP_FILLABLE };
 const roleSchema = z.enum(Object.keys(CCMS_ROLES) as [CcmsRole, ...CcmsRole[]]);
 
 async function ccms(context: any) {
@@ -270,6 +272,7 @@ export const getCcmsContract = createServerFn({ method: "GET" })
 export const createCcmsContract = createServerFn({ method: "POST" })
   .middleware([requireCcms])
   .inputValidator(z.object({
+    business_checklist: z.object({ deliverables: z.string().max(4000), kpis: z.string().max(2000), payment_terms: z.string().max(2000), confirmed: z.boolean() }).optional().nullable(),
     contract_type: z.string(),
     title: z.string().min(3),
     entity: z.string().min(2),
@@ -313,7 +316,7 @@ export const createCcmsContract = createServerFn({ method: "POST" })
     const base = { ...data, value_myr };
     const flags = computeFlags({ ...base, review: null }, vendor);
     const route = buildRoute(base, flags);
-    const { acting_role, owner_name, ...fields } = data;
+    const { acting_role, owner_name, business_checklist, ...fields } = data;
     const { data: row, error } = await sb.from("ccms_contracts").insert({
       ...fields,
       side: t.side,
@@ -327,6 +330,8 @@ export const createCcmsContract = createServerFn({ method: "POST" })
     }).select().single();
     if (error) throw new Error(error.message);
     await saveOwner(sb, row.id, owner_name?.trim() || userName);
+    // Business checklist (20261003_lsh_feedback.sql) — best effort until that runs.
+    if (business_checklist) await sb.from("ccms_contracts").update({ business_checklist: { ...business_checklist, by: business_checklist.confirmed ? userName : null, at: business_checklist.confirmed ? new Date().toISOString() : null } }).eq("id", row.id);
     await logEvent(sb, {
       contract_id: row.id, event_type: "created", actor_id: userId, actor_name: userName, acting_role,
       detail: `${t.label} requested${flags.length ? ` — flags: ${flags.map((f) => f.key).join(", ")}` : ""}.`,
@@ -397,6 +402,9 @@ function reviewPrompt(contract: any, vendor: any): string {
     "YOUR JOB IS TO FLAG, NOT TO DRAFT. Never propose replacement wording. Write like a busy lawyer's margin note: short, plain, no preamble, no repetition of the clause text. Explain only when the reason is not obvious.",
     "Apply Malaysian law: Contracts Act 1950 (s.75 penalties; s.28 restraint of trade), Construction Industry Payment and Adjudication Act 2012 (conditional payment void, s.35), PDPA 2010, MACC Act 2009 s.17A, Stamp Act 1949, Companies Act 2016, CIDB Act 1994.",
     "Also check the draft matches the request: counterparty, value, dates and scope. A mismatch is a finding.",
+    ...(contract.business_checklist?.deliverables?.trim() ? ["",
+      "WHAT THE BUSINESS EXPECTS (its checklist). Check the draft covers each item; an expected item that is missing or different is a finding — say \"Expected … not in draft\" (category commercial; financial for payment terms):",
+      `Deliverables: ${contract.business_checklist.deliverables}`, `KPIs / service levels: ${contract.business_checklist.kpis || "—"}`, `Payment terms: ${contract.business_checklist.payment_terms || "—"}`] : []),
   ];
   if (tpl) {
     parts.push("", `APPROVED TEMPLATE ${tpl.code} "${tpl.title}" v${tpl.version}. Compare the draft to it clause by clause. For each template clause decide: "same" (present, substance unchanged — wording may differ slightly), "changed" (present but the substance departs from the approved position), or "missing". List any draft clause with no template counterpart under "added". A LOCKED clause that is changed or missing is always high severity.`);
@@ -404,6 +412,9 @@ function reviewPrompt(contract: any, vendor: any): string {
       parts.push(`[${c.id}] ${c.number}. ${c.title} — ${c.locked ? "LOCKED" : c.mandatory ? "MANDATORY" : "optional"}. Approved position: ${c.keyPosition}\n${c.paragraphs.join("\n")}`);
     }
   }
+  // One-way NDAs need different scrutiny (29 Sep review).
+  if (tpl?.id === "lsh-nda-company-discloses") parts.push("", "ONE-WAY NDA, THE COMPANY DISCLOSES: the Counterparty is the only recipient. Be strict on its duties — confidentiality, use only for the Purpose, return or destruction, survival, remedies. Any weakening is a finding.");
+  if (tpl?.id === "lsh-nda-counterparty-discloses") parts.push("", "ONE-WAY NDA, THE COUNTERPARTY DISCLOSES: the Company is the recipient. Look for anything that widens the Company's obligations beyond the template — broader definition, longer survival, indemnities, penalties, injunction waivers, non-solicitation or exclusivity. Flag those.");
   if (t?.loaCheck) {
     parts.push("", "LETTER OF AWARD MANDATORY ITEMS — for each, decide present / missing / unclear and quote the passage:");
     for (const i of LOA_ITEMS) parts.push(`[${i.id}] ${i.label} — ${i.hint}`);
@@ -736,6 +747,9 @@ export const recordCcmsReview = createServerFn({ method: "POST" })
     const stage = route.find((s) => s.key === data.stage);
     if (!stage) throw new Error(`This request does not need ${data.stage} review.`);
     if (data.outcome !== "cleared" && !data.note?.trim()) throw new Error("Give the reason or the comments with this outcome.");
+    // Legal reviews against what the business expects: that comes first (29 Sep review).
+    if (data.stage === "legal" && data.outcome !== "not_cleared" && needsBusinessChecklist(contract) && !contract.business_checklist?.confirmed)
+      throw new Error("The business team must confirm its checklist first (what the vendor delivers, KPIs, payment terms) — on the contract's Business tab.");
     // The document under review is the newest draft OR counterparty markup —
     // the same one routing reads. Checking drafts only let "Cleared" through
     // while the AI's threads on a returned markup were still open.
@@ -914,6 +928,11 @@ export const generateCcmsDraft = createServerFn({ method: "POST" })
     const { sb, tenantId, userId, userName } = await ccms(context);
     requireRole(data.acting_role, ["requestor", "contract_executive", "legal"], "generate a draft");
     const contract = await loadContract(sb, data.contract_id, tenantId);
+    // An NDA's template follows who discloses: mutual, we disclose, they disclose.
+    if (contract.contract_type === "nda" && data.fields.direction) {
+      const want = ndaTemplateFor(data.fields.direction);
+      if (want !== contract.template_id) { await sb.from("ccms_contracts").update({ template_id: want }).eq("id", contract.id); contract.template_id = want; }
+    }
     const tpl = templateById(contract.template_id);
     const fillable = tpl ? FILLABLE[tpl.id] : undefined;
     if (!tpl || !fillable) throw new Error("There is no approved template to generate this contract type from.");
@@ -1214,7 +1233,9 @@ export const saveCcmsSecurities = createServerFn({ method: "POST" })
   .middleware([requireCcms])
   .inputValidator(z.object({
     contract_id: z.string().uuid(),
-    securities: z.array(z.object({ type: z.string(), required: z.boolean(), amount: z.number().nullable().optional(), reference: z.string().max(200).optional(), valid_until: z.string().nullable().optional() })),
+    securities: z.array(z.object({ type: z.string(), required: z.boolean(), amount: z.number().nullable().optional(), reference: z.string().max(200).optional(), valid_until: z.string().nullable().optional(),
+      state: z.enum(["held", "returned", "released"]).optional() })),
+    retention: z.object({ percent: z.number().min(0).max(20).nullable(), release: z.array(z.object({ at: z.string().max(120), date: z.string().nullable().optional(), percent: z.number().min(0).max(100) })).max(4) }).optional().nullable(),
     acting_role: roleSchema,
   }))
   .handler(async ({ data, context }) => {
@@ -1225,6 +1246,20 @@ export const saveCcmsSecurities = createServerFn({ method: "POST" })
     const clean: Security[] = data.securities.filter((x) => SECURITY_TYPES.some((t) => t.id === x.type))
       .map((x) => ({ ...x, reference: (x.reference ?? "").trim(), valid_until: x.valid_until || null }));
     await sb.from("ccms_contracts").update({ securities: clean, updated_at: new Date().toISOString() }).eq("id", contract.id);
+    // Retention (20261003_lsh_feedback.sql) — best effort until that runs.
+    let retention = contract.retention ?? null;
+    if (data.retention !== undefined) {
+      const up = await sb.from("ccms_contracts").update({ retention: data.retention }).eq("id", contract.id);
+      if (up.error && data.retention?.percent) throw new Error("Run the database update (20261003_lsh_feedback.sql) to record retention.");
+      if (!up.error) retention = data.retention;
+    }
+    // A filed contract gets the obligations these create (renew/release bonds, retention releases).
+    if (contract.repository) {
+      const owner = contractOwner(contract);
+      const list = normalizeObligations(contract.repository.obligations, owner);
+      const add = autoObligations({ ...contract, securities: clean, retention }, contract.repository.end_date ?? contract.expiry_date, list, owner);
+      if (add.length) await sb.from("ccms_contracts").update({ repository: { ...contract.repository, obligations: [...list, ...add] } }).eq("id", contract.id);
+    }
     const req = clean.filter((x) => x.required);
     const done = req.filter((x) => x.type === "cidb_levy" ? !!x.reference : !!x.reference && !!x.valid_until);
     await logEvent(sb, { contract_id: contract.id, event_type: "securities", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
@@ -1455,6 +1490,183 @@ export const validateCcmsObligations = createServerFn({ method: "POST" })
   });
 
 // ===========================================================================
+// File a signed document (29 Sep review): upload a signed contract, tenancy,
+// loan or insurance policy; the AI proposes the company, project and type and
+// reads the key terms; a person confirms the folder and it is filed — active,
+// with its obligations. Stands in for the email intake until that is built.
+// ===========================================================================
+
+export const classifyCcmsSigned = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({ file_name: z.string().max(300), file_url: z.string().url(), mime_type: z.string().max(100).optional().nullable() }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId } = await ccms(context);
+    const { text, pdfBase64 } = await documentText({ file_name: data.file_name, file_url: data.file_url, mime_type: data.mime_type });
+    const { data: existing } = await sb.from("ccms_contracts").select("entity,project").eq("tenant_id", tenantId);
+    const projects = [...new Set((existing ?? []).filter((c: any) => c.project?.trim()).map((c: any) => `${c.entity} → ${c.project.trim()}`))].slice(0, 80);
+    const types = Object.entries(CONTRACT_TYPES).map(([k, t]) => `${k}: ${t.label}`).join("; ");
+    const prompt = `This is a signed document to file in the Lim Seong Hai group's contract repository. Say where it belongs, only from what the document shows (never guess; empty when not stated).
+Companies (the LSH party must be one of these, exactly): ${LSH_ENTITIES.join("; ")}.
+Existing projects (company → project): ${projects.join("; ") || "none yet"}.
+Document types: ${types}.
+Return ONLY JSON: {"contract_type": "one of the type keys", "entity": "the LSH company, exactly as listed, or empty", "project": "an existing project name if the document is for it, a new project name if it names one, or empty if it is not tied to a project (tenancy, company-wide agreements)", "counterparty_name": "", "title": "short title, at most 10 words", "signed_date": "yyyy-mm-dd or empty", "why": "one line: what told you the company and project"}`;
+    const parts: any[] = [{ text: prompt }];
+    if (text.trim()) parts.push({ text: `DOCUMENT (${data.file_name}):\n${text.slice(0, 60_000)}` });
+    if (pdfBase64) parts.push({ inlineData: { mimeType: "application/pdf", data: pdfBase64 } });
+    const [cls, kt] = await Promise.all([
+      generateWithFallback({ contents: [{ role: "user", parts }], config: { responseMimeType: "application/json", maxOutputTokens: 800, temperature: 0 } }, { tier: "fast" }),
+      runKeyTerms(data.file_name, text, pdfBase64),
+    ]);
+    const o = parseJson((cls as any).text ?? "") ?? {};
+    const out = kt.out ?? {};
+    const type = CONTRACT_TYPES[o.contract_type] ? o.contract_type : "other_document";
+    const entity = LSH_ENTITIES.includes(o.entity) ? o.entity : "";
+    return {
+      contract_type: type, entity, project: String(o.project ?? "").trim(), counterparty_name: String(o.counterparty_name ?? "").trim(),
+      title: String(o.title ?? "").trim() || data.file_name.replace(/\.\w+$/, ""), signed_date: /^\d{4}-\d{2}-\d{2}$/.test(o.signed_date ?? "") ? o.signed_date : "",
+      why: String(o.why ?? ""),
+      value: typeof out.value === "number" ? out.value : null, currency: String(out.currency || "MYR"),
+      start_date: out.start_date || "", end_date: out.end_date || "", notice_period: String(out.notice_period ?? ""), renewal: String(out.renewal ?? ""),
+      governing_law: String(out.governing_law ?? ""), parties: String(out.parties ?? ""),
+      obligations: normalizeObligations((Array.isArray(out.obligations) ? out.obligations : []).slice(0, 10).map((x: any, i: number) => ({ ...(typeof x === "string" ? { text: x } : x), id: `o${i + 1}` }))),
+    };
+  });
+
+export const fileCcmsSigned = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({
+    file_name: z.string().max(300), file_url: z.string().url(), mime_type: z.string().max(100).optional().nullable(),
+    contract_type: z.string(), entity: z.string().min(2), project: z.string().max(200).optional().nullable(), counterparty_name: z.string().min(2).max(300),
+    title: z.string().min(2).max(300), signed_date: z.string().optional().nullable(), value: z.number().nullable().optional(), currency: z.string().max(3).optional(),
+    start_date: z.string().optional().nullable(), end_date: z.string().optional().nullable(), notice_period: z.string().max(300).optional(), renewal: z.string().max(300).optional(),
+    governing_law: z.string().max(200).optional(), parties: z.string().max(500).optional(), obligations: z.array(z.any()).max(20).optional(), acting_role: roleSchema,
+  }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await ccms(context);
+    requireRole(data.acting_role, ["contract_executive", "legal", "contract_manager", "requestor"], "file a signed document");
+    const t = CONTRACT_TYPES[data.contract_type];
+    if (!t) throw new Error("Choose the document type.");
+    if (!LSH_ENTITIES.includes(data.entity)) throw new Error("Choose the Lim Seong Hai company.");
+    if (!data.end_date) throw new Error("Give the expiry or end date — it drives the renewal alert.");
+    const now = new Date().toISOString();
+    const signed = data.signed_date || data.start_date || now.slice(0, 10);
+    const base: any = { contract_type: data.contract_type, side: t.side, entity: data.entity, project: data.project?.trim() || null, counterparty_name: data.counterparty_name.trim(),
+      title: data.title.trim(), value: data.value ?? null, currency: data.currency || "MYR", value_myr: toMyr(data.value ?? null, data.currency || "MYR"),
+      start_date: data.start_date || null, end_date: data.end_date, expiry_date: data.end_date, signed_date: signed,
+      scope_summary: `Filed from a signed copy: ${data.title.trim()}.`, template_id: null, flags: [], approval_route: [],
+      status: "active", requestor_id: userId, requestor_name: userName, requestor_email: null, tenant_id: tenantId };
+    const { data: row, error } = await sb.from("ccms_contracts").insert(base).select().single();
+    if (error) throw new Error(error.message);
+    const owner = contractOwner(row);
+    const listed = normalizeObligations(data.obligations ?? [], owner);
+    const repository = { parties: data.parties || `${data.entity} / ${data.counterparty_name}`, value: data.value ?? null, currency: data.currency || "MYR",
+      start_date: data.start_date || null, end_date: data.end_date, notice_period: data.notice_period ?? "", renewal: data.renewal ?? "", governing_law: data.governing_law ?? "",
+      owner, obligations: [...listed, ...autoObligations(row, data.end_date, listed, owner)], confirmed_by: userName, confirmed_at: now };
+    await sb.from("ccms_contracts").update({ repository }).eq("id", row.id);
+    await saveOwner(sb, row.id, owner);
+    await sb.from("ccms_documents").insert({ contract_id: row.id, file_name: data.file_name, file_url: data.file_url, mime_type: data.mime_type ?? null, doc_role: "executed", version: 1, uploaded_by: userId, uploaded_by_name: userName });
+    await logEvent(sb, { contract_id: row.id, event_type: "filed", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
+      detail: `Filed from a signed copy to ${entityShort(data.entity)} › ${data.project?.trim() || "General"}. Expires ${data.end_date}; ${repository.obligations.length} obligation(s).` });
+    return { id: row.id, reference_number: row.reference_number };
+  });
+
+/** The business team confirms what it expects from the vendor, before Legal reviews. */
+export const saveCcmsBusinessChecklist = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({ contract_id: z.string().uuid(), checklist: z.object({ deliverables: z.string().max(4000), kpis: z.string().max(2000), payment_terms: z.string().max(2000), confirmed: z.boolean() }), acting_role: roleSchema }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userId, userName } = await ccms(context);
+    requireRole(data.acting_role, ["requestor", "contract_executive", "contract_manager", "head_of_department", "operations_manager"], "complete the business checklist");
+    const contract = await loadContract(sb, data.contract_id, tenantId);
+    if (data.checklist.confirmed && !data.checklist.deliverables.trim()) throw new Error("Say what the vendor must deliver before confirming.");
+    const now = new Date().toISOString();
+    const business_checklist = { ...data.checklist, by: data.checklist.confirmed ? userName : null, at: data.checklist.confirmed ? now : null };
+    const { error } = await sb.from("ccms_contracts").update({ business_checklist }).eq("id", contract.id);
+    if (error) throw new Error(/business_checklist/.test(error.message) ? "Run the database update (20261003_lsh_feedback.sql) first." : error.message);
+    await logEvent(sb, { contract_id: contract.id, event_type: "business_checklist", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
+      detail: data.checklist.confirmed ? "Business checklist confirmed: deliverables, KPIs and payment terms for Legal to review against." : "Business checklist saved (not yet confirmed)." });
+    return business_checklist;
+  });
+
+// ===========================================================================
+// Internal audit findings (29 Sep review): each finding tracked to closure —
+// owner, action plan, evidence, escalation to the head of department.
+// ===========================================================================
+
+const FINDINGS_TABLE_MISSING = /ccms_audit_findings/;
+export const listCcmsFindings = createServerFn({ method: "GET" })
+  .middleware([requireCcms])
+  .handler(async ({ context }) => {
+    const { sb, tenantId } = await ccms(context);
+    const { data, error } = await sb.from("ccms_audit_findings").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false });
+    if (error) return { findings: [] as any[], missing: FINDINGS_TABLE_MISSING.test(error.message) || /does not exist|schema cache/.test(error.message) };
+    return { findings: (data ?? []) as any[], missing: false };
+  });
+
+const findingFields = {
+  title: z.string().min(3).max(300), description: z.string().max(4000).optional().nullable(),
+  entity: z.string().max(200).optional().nullable(), project: z.string().max(200).optional().nullable(),
+  owner_name: z.string().max(120).optional().nullable(), hod_name: z.string().max(120).optional().nullable(),
+  action_plan: z.string().max(4000).optional().nullable(), due_date: z.string().optional().nullable(),
+};
+export const saveCcmsFinding = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({ id: z.string().uuid().optional().nullable(), ...findingFields }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userName } = await ccms(context);
+    const now = new Date().toISOString();
+    const { id, ...fields } = data;
+    const clean = { ...fields, due_date: fields.due_date || null };
+    if (id) {
+      const { data: f } = await sb.from("ccms_audit_findings").select("*").eq("id", id).single();
+      if (!f) throw new Error("Finding not found.");
+      if (f.tenant_id && f.tenant_id !== tenantId) throw new Error("Finding not found.");
+      const events = [...(f.events ?? []), { at: now, by: userName, type: "updated", detail: "Details updated." }];
+      const { error } = await sb.from("ccms_audit_findings").update({ ...clean, events, status: f.status === "open" && clean.action_plan ? "in_progress" : f.status }).eq("id", id);
+      if (error) throw new Error(error.message);
+      return { id };
+    }
+    const year = new Date().getFullYear();
+    const { data: refs } = await sb.from("ccms_audit_findings").select("ref").eq("tenant_id", tenantId).like("ref", `AF-${year}-%`);
+    const n = Math.max(0, ...(refs ?? []).map((r: any) => Number(String(r.ref).slice(8)) || 0)) + 1;
+    const ref = `AF-${year}-${String(n).padStart(3, "0")}`;
+    const { data: row, error } = await sb.from("ccms_audit_findings").insert({ ...clean, tenant_id: tenantId, ref, status: clean.action_plan ? "in_progress" : "open", created_by: userName,
+      events: [{ at: now, by: userName, type: "raised", detail: `Finding raised${clean.owner_name ? `; owner ${clean.owner_name}` : ""}.` }] }).select("id,ref").single();
+    if (error) throw new Error(FINDINGS_TABLE_MISSING.test(error.message) ? "Run the database update (20261003_lsh_feedback.sql) first." : error.message);
+    return row;
+  });
+
+export const actCcmsFinding = createServerFn({ method: "POST" })
+  .middleware([requireCcms])
+  .inputValidator(z.object({
+    id: z.string().uuid(), action: z.enum(["escalate", "resolve", "reopen", "evidence", "progress"]),
+    note: z.string().max(2000).optional().nullable(), evidence: z.object({ name: z.string().max(200), url: z.string().url() }).optional().nullable(),
+  }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userName } = await ccms(context);
+    const { data: f } = await sb.from("ccms_audit_findings").select("*").eq("id", data.id).single();
+    if (!f || (f.tenant_id && f.tenant_id !== tenantId)) throw new Error("Finding not found.");
+    const now = new Date().toISOString();
+    const patch: any = {};
+    let detail = "";
+    if (data.action === "escalate") { patch.escalated_at = now; detail = `Escalated to ${f.hod_name || "the head of department"}${data.note ? `: ${data.note}` : ""}.`; }
+    if (data.action === "resolve") {
+      if (!data.note?.trim() && !(f.evidence ?? []).length) throw new Error("Say how it was resolved, or attach evidence.");
+      Object.assign(patch, { status: "resolved", resolved_at: now }); detail = `Resolved${data.note ? `: ${data.note}` : ""}.`;
+    }
+    if (data.action === "reopen") { Object.assign(patch, { status: "in_progress", resolved_at: null }); detail = `Reopened${data.note ? `: ${data.note}` : ""}.`; }
+    if (data.action === "progress") { patch.status = f.status === "open" ? "in_progress" : f.status; detail = data.note?.trim() || "Progress noted."; }
+    if (data.action === "evidence") {
+      if (!data.evidence) throw new Error("Attach a file.");
+      patch.evidence = [...(f.evidence ?? []), { ...data.evidence, at: now, by: userName }]; detail = `Evidence added: ${data.evidence.name}.`;
+    }
+    patch.events = [...(f.events ?? []), { at: now, by: userName, type: data.action, detail }];
+    const { error } = await sb.from("ccms_audit_findings").update(patch).eq("id", f.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+// ===========================================================================
 // CMS-03: change requests, renewal and closure.
 // ===========================================================================
 
@@ -1587,9 +1799,9 @@ export const closeCcmsContract = createServerFn({ method: "POST" })
     ].filter(Boolean) as string[];
     if (open.length && !data.override_reason?.trim()) throw new Error(`Still open: ${open.join(", ")}. Close them, or override with a reason.`);
     const now = new Date();
-    const retain = new Date(now); retain.setFullYear(retain.getFullYear() + 7);
+    // Records are kept 7 years from signing (29 Sep review), not from closure.
     const closure = { checklist: k, open_at_close: open, override_reason: open.length || lite ? data.override_reason : null, legal_hold: data.legal_hold,
-      closed_at: now.toISOString(), by: userName, retain_until: retain.toISOString().slice(0, 10) };
+      closed_at: now.toISOString(), by: userName, retain_until: retainUntil({ ...c, closure: { closed_at: now.toISOString() } }) };
     await sb.from("ccms_contracts").update({ closure, status: "closed", updated_at: now.toISOString() }).eq("id", c.id);
     await logEvent(sb, { contract_id: c.id, event_type: "closed", actor_id: userId, actor_name: userName, acting_role: data.acting_role,
       detail: `${lite ? `Ended — ${data.override_reason}` : `Closed${open.length ? ` with override (${open.join(", ")}): ${data.override_reason}` : ""}`}. Retained to ${closure.retain_until}${data.legal_hold ? " — legal hold" : ""}.${c.vendor_id && works ? " Subcontractor evaluation due." : ""}` });
@@ -1604,13 +1816,13 @@ export const closeCcmsContract = createServerFn({ method: "POST" })
 // ---------------------------------------------------------------------------
 
 function intakeSystem(vendors: any[]): string {
-  const types = Object.entries(CONTRACT_TYPES).map(([k, t]) => `${k}: ${t.label} (${t.side === "vendor" ? "we award" : "we are awarded"}${t.templateId ? "; approved template, draft generated from it" : ""})`);
+  const types = Object.entries(CONTRACT_TYPES).filter(([, t]) => !t.repositoryOnly).map(([k, t]) => `${k}: ${t.label} (${t.side === "vendor" ? "we award" : "we are awarded"}${t.templateId ? "; approved template, draft generated from it" : ""})`);
   const today = new Date().toISOString().slice(0, 10);
   return `You are the Commercial Contracts Intake Assistant for the Lim Seong Hai group. You replace the contract request form: interview the requester in plain English, then propose the request.
 
 Ask AT MOST ONE question per turn and at most four in total. Be brief and warm. Today is ${today}.
 
-What a request needs: which side (vendor contract — the Company awards work; or client contract — the Company is awarded work), the contract type, the contracting entity, the vendor (or the client's name), a short title, the scope in 1–2 sentences, value and currency (not needed for an NDA), start and end dates, and the requesting department. For an NDA also: the purpose of the disclosure, who discloses (Mutual / Company to Counterparty only / Counterparty to Company only), the term (One (1) year / Two (2) years / Three (3) years).
+What a request needs: which side (vendor contract — the Company awards work; or client contract — the Company is awarded work), the contract type, the contracting entity, the vendor (or the client's name), a short title, the scope in 1–2 sentences, value and currency (not needed for an NDA), start and end dates, and the requesting department. For an NDA also: the purpose of the disclosure, who discloses (Mutual / Company to Counterparty only / Counterparty to Company only), the term (default Three (3) years; One (1) year / Two (2) years also allowed).
 
 CONTRACT TYPES (use the key): ${types.join("; ")}.
 ENTITIES: ${LSH_ENTITIES.join("; ")}.
@@ -1631,7 +1843,7 @@ Reply with ONLY JSON, no markdown:
   "side": "vendor" | "client", "contract_type": "key", "entity": "exact entity", "vendor_name": "exact vendor name or null", "counterparty_name": "client name or null",
   "title": "", "scope_summary": "", "project": "", "award_reference": "", "value": null, "currency": "MYR", "start_date": "yyyy-mm-dd or null", "end_date": "yyyy-mm-dd or null",
   "requestor_department": "", "personal_data_cross_border": false,
-  "particulars": {"purpose": "", "direction": "Mutual", "term": "Two (2) years"} }}}`;
+  "particulars": {"purpose": "", "direction": "Mutual", "term": "Three (3) years"} }}}`;
 }
 
 /** The choices shown under the assistant's question. Lists the records hold
@@ -1646,7 +1858,7 @@ function intakeAsk(ask: any, vendors: any[]): { field: string; kind: "choice" | 
     case "entity": return { field, kind: "choice", options: [...LSH_ENTITIES] };
     case "vendor": return { field, kind: "choice", options: vendors.filter((v) => ["approved", "conditional"].includes(v.status) && !v.compliance_hold).map((v) => v.name) };
     case "direction": return { field, kind: "choice", options: ["Mutual", "Company to Counterparty only", "Counterparty to Company only"] };
-    case "term": return { field, kind: "choice", options: ["One (1) year", "Two (2) years", "Three (3) years"] };
+    case "term": return { field, kind: "choice", options: ["Three (3) years", "Two (2) years", "One (1) year"] };
     case "start_date": return { field, kind: "date", options: [] };
     case "dates": return { field, kind: "dates", options: [] };
     case "value": return { field, kind: "value", options: [] };

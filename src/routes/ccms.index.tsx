@@ -1,11 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
+import { useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { listCcmsContracts } from "@/lib/ccms.functions";
 import { CcmsHeader, StatusBadge, FlagChips, CARD, TH, TD, fmtMoney, waitingOn, PRIORITY_TINT } from "@/components/ccms-widgets";
-import { CONTRACT_TYPES, contractAlerts, byPriority, contractOwner, normalizeObligations, obligationBucket, priorityOf } from "@/lib/ccms";
+import { CONTRACT_TYPES, contractAlerts, byPriority, contractOwner, normalizeObligations, obligationBucket, priorityOf, typeLabel} from "@/lib/ccms";
 import { cn } from "@/lib/utils";
 import { Plus, Loader2 } from "lucide-react";
 
@@ -20,7 +21,8 @@ function CcmsDashboard() {
 
   const open = rows.filter((c: any) => !["approved", "signed", "stamped", "rejected", "closed", "active"].includes(c.status));
   // Everything with a date on it: expiry, stamping window, lapsing bonds, client letters.
-  const alerts = rows.flatMap((c: any) => contractAlerts(c).map((a) => ({ ...a, c }))).sort((a: any, b: any) => a.days - b.days);
+  const [within, setWithin] = useState(30);
+  const alerts = rows.flatMap((c: any) => contractAlerts(c, new Date(), within).map((a) => ({ ...a, c }))).sort((a: any, b: any) => a.days - b.days);
   const stat = [
     { label: "Open requests", value: open.length },
     { label: "In review", value: rows.filter((c: any) => c.status === "in_review").length },
@@ -49,16 +51,19 @@ function CcmsDashboard() {
           })}
         </div>
 
-        {alerts.length > 0 && (
+        {(alerts.length > 0 || within !== 30) && (
           <section className={CARD}>
-            <div className="px-4 py-3 border-b border-gray-200">
-              <h2 className="text-sm font-semibold text-gray-900">Alerts · {alerts.length}</h2>
-              <p className="text-sm text-gray-600">Expiring within 30 days, stamping deadlines, lapsing bonds and insurance, unanswered client letters.</p>
+            <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-gray-200">
+              <div className="flex-1">
+                <h2 className="text-sm font-semibold text-gray-900">Due in the next {within} days · {alerts.length}</h2>
+                <p className="text-sm text-gray-600">Expiries, stamping deadlines, bonds and insurance lapsing, obligations due, unanswered client letters.</p>
+              </div>
+              <div className="flex gap-1">{[30, 60, 90].map((n) => <button key={n} onClick={() => setWithin(n)} className={cn("rounded-md border px-2.5 py-1 text-sm", within === n ? "border-gray-900 font-semibold" : "border-gray-200 text-gray-600")}>{n} days</button>)}</div>
             </div>
             <ul className="divide-y divide-gray-100">
               {alerts.map((a: any, i: number) => (
                 <li key={i} className={cn("px-4 py-2.5 flex items-center gap-3 text-sm", a.severity === "high" ? PRIORITY_TINT[1] : PRIORITY_TINT[2])}>
-                  <span className={a.severity === "high" ? "text-red-700 font-semibold w-24" : "text-amber-700 font-semibold w-24"}>{({ expiry: "Expiry", stamping: "Stamping", security: "Bond / policy", confirmation: "Client letter" } as Record<string, string>)[a.kind]}</span>
+                  <span className={a.severity === "high" ? "text-red-700 font-semibold w-24" : "text-amber-700 font-semibold w-24"}>{({ expiry: "Expiry", stamping: "Stamping", security: "Bond / policy", confirmation: "Client letter", obligation: "Obligation" } as Record<string, string>)[a.kind]}</span>
                   <Link to="/ccms/$contractId" params={{ contractId: a.c.id }} className="font-medium text-blue-700 hover:underline w-32">{a.c.reference_number}</Link>
                   <span className="text-gray-900 flex-1">{a.text}</span>
                   <span className="text-gray-600 truncate max-w-72">{a.c.title}</span>
@@ -84,7 +89,7 @@ function CcmsDashboard() {
                     return (
                       <tr key={c.id} className={cn("border-b border-gray-100 last:border-0", PRIORITY_TINT[p.rank])}>
                         <td className={TD}><Link to="/ccms/$contractId" params={{ contractId: c.id }} className="font-medium text-blue-700 hover:underline">{c.reference_number}</Link></td>
-                        <td className={TD}><div className="font-medium">{c.title}</div><div className="text-sm text-gray-600">{CONTRACT_TYPES[c.contract_type]?.label} · {c.counterparty_name}</div></td>
+                        <td className={TD}><div className="font-medium">{c.title}</div><div className="text-sm text-gray-600">{typeLabel(c)} · {c.counterparty_name}</div></td>
                         <td className={TD}><StatusBadge status={c.status} contract={c} /></td>
                         <td className={TD}><span className={p.rank === 1 ? "text-red-800" : "text-amber-800"}>{p.reason}</span></td>
                         <td className={TD}><FlagChips flags={c.flags ?? []} max={3} /></td>

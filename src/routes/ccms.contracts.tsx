@@ -6,7 +6,7 @@ import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { listCcmsContracts } from "@/lib/ccms.functions";
 import { CcmsHeader, StatusBadge, FlagChips, CARD, TH, TD, fmtMoney, PRIORITY_TINT } from "@/components/ccms-widgets";
-import { CONTRACT_TYPES, LSH_ENTITIES, byPriority, contractOwner, entityShort, priorityOf } from "@/lib/ccms";
+import { CONTRACT_TYPES, LSH_ENTITIES, byPriority, contractOwner, entityShort, priorityOf, typeLabel} from "@/lib/ccms";
 import { Plus, Loader2, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -84,7 +84,7 @@ function CcmsContracts() {
                     return (
                       <tr key={c.id} className={cn("border-b border-gray-100 last:border-0 hover:bg-gray-50/60", PRIORITY_TINT[p.rank])}>
                         <td className={TD}><Link to="/ccms/$contractId" params={{ contractId: c.id }} className="font-medium text-blue-700 hover:underline">{c.reference_number}</Link></td>
-                        <td className={TD}><div className="font-medium">{c.title}</div><div className="text-sm text-gray-600">{CONTRACT_TYPES[c.contract_type]?.label} · {c.counterparty_name}</div></td>
+                        <td className={TD}><div className="font-medium">{c.title}</div><div className="text-sm text-gray-600">{typeLabel(c)} · {c.counterparty_name}</div></td>
                         <td className={TD}><div title={c.entity}>{entityShort(c.entity)}</div>{contractOwner(c) && <div className="text-sm text-gray-500">Owner: {contractOwner(c)}</div>}</td>
                         <td className={TD}><StatusBadge status={c.status} contract={c} /></td>
                         <td className={TD}><span className={p.rank === 1 ? "text-red-800" : p.rank === 2 ? "text-amber-800" : "text-gray-600"}>{p.reason || "—"}</span></td>

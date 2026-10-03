@@ -7,7 +7,7 @@ import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import {
-  attachCcmsDocument, createCcmsContract, generateCcmsDraft, listCcmsVendors, reviewCcmsDocument,
+  attachCcmsDocument, createCcmsContract, generateCcmsDraft, listCcmsContracts, listCcmsVendors, reviewCcmsDocument,
 } from "@/lib/ccms.functions";
 import { CcmsHeader, CARD, useCcmsRole, fmtMoney } from "@/components/ccms-widgets";
 import { friendlyError } from "@/components/ccms-widgets";
@@ -21,6 +21,8 @@ import {
 import { Loader2, Upload, ArrowRight, Bot, ClipboardList } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { vendorLight } from "@/lib/vms";
+import { projectOf, ndaTemplateFor, ndaDirectionFor, needsBusinessChecklist, type BusinessChecklist } from "@/lib/ccms";
+import { BusinessChecklistFields, EMPTY_CHECKLIST } from "@/components/ccms-business-checklist";
 
 export const Route = createFileRoute("/ccms/new")({
   component: NewRequest,
@@ -40,6 +42,8 @@ function NewRequest() {
   const reviewFn = useServerFn(reviewCcmsDocument);
   const generateFn = useServerFn(generateCcmsDraft);
   const { data: vendors = [] } = useQuery({ queryKey: ["ccms-vendors"], queryFn: () => vendorsFn() });
+  const contractsFn = useServerFn(listCcmsContracts);
+  const { data: contracts = [] } = useQuery({ queryKey: ["ccms-contracts"], queryFn: () => contractsFn(), staleTime: 30_000 });
 
   const [side, setSide] = useState<"vendor" | "client">("vendor");
   const [f, setF] = useState<any>({
@@ -53,11 +57,15 @@ function NewRequest() {
   const [draftMode, setDraftMode] = useState<"generate" | "upload">("generate");
   // The templates available for this contract type; the requester picks one.
   const [tplId, setTplId] = useState<string | null>(null);
+  const [bc, setBc] = useState<BusinessChecklist>(EMPTY_CHECKLIST);
   const [tf, setTf] = useState<Record<string, string>>({
-    date: new Date().toISOString().slice(0, 10), direction: "Mutual", term: "Two (2) years",
+    date: new Date().toISOString().slice(0, 10), direction: "Mutual", term: "Three (3) years",
     disputes: "Courts of Malaysia", stamp_duty: "Counterparty", non_solicit: "No", cp_form: "company", cp_country: "Malaysia",
   });
   const setT = (k: string, v: string) => setTf((p) => ({ ...p, [k]: v }));
+  /** For an NDA, who discloses and the template are the same choice. */
+  const onField = (k: string, v: string) => { setT(k, v); if (k === "direction" && f.contract_type === "nda") setTplId(ndaTemplateFor(v)); };
+  const pickTemplate = (id: string) => { setTplId(id); const dir = ndaDirectionFor(id); if (f.contract_type === "nda" && dir) setT("direction", dir); };
   const [phase, setPhase] = useState<string | null>(null);
   const [intake, setIntake] = useState<"form" | "chat">("form");
 
@@ -91,7 +99,7 @@ function NewRequest() {
     setF((p: any) => ({ ...p, ...rest, contract_type: p.contract_type, vendor_id: vid ?? p.vendor_id }));
     pendingTf.current = snap.tf ?? null;
     const avail = TEMPLATES.filter((x) => x.contractTypes.includes(f.contract_type));
-    if (snap.tf && avail.length) { setDraftMode("generate"); setTplId(avail[0].id); }
+    if (snap.tf && avail.length) { setDraftMode("generate"); setTplId(f.contract_type === "nda" ? ndaTemplateFor(snap.tf.direction) : avail[0].id); }
     setFillTick((n) => n + 1);
   }
   const valueNum = f.value === "" ? null : Number(f.value);
@@ -112,6 +120,7 @@ function NewRequest() {
         vendor_id: side === "vendor" ? f.vendor_id || null : null,
         counterparty_name: side === "client" ? f.counterparty_name : null,
         value: valueNum, start_date: f.start_date || null, end_date: f.end_date || null, owner_name: f.owner_name?.trim() || null,
+        business_checklist: needsBusinessChecklist({ contract_type: f.contract_type, side }) && (bc.deliverables.trim() || bc.confirmed) ? bc : null,
       } });
     } catch (e: any) { toast.error(friendlyError(e)); setPhase(null); return; }
     qc.invalidateQueries({ queryKey: ["ccms-contracts"] });
@@ -151,8 +160,9 @@ function NewRequest() {
       start_date: d.start_date ?? "", end_date: d.end_date ?? "", scope_summary: d.scope_summary ?? "", requestor_department: d.requestor_department ?? "",
       personal_data_cross_border: !!d.personal_data_cross_border };
     const avail = TEMPLATES.filter((x) => x.contractTypes.includes(d.contract_type));
-    const nextTpl = avail[0] ?? null;
     const p = d.particulars ?? {};
+    // An NDA's direction picks its template: mutual, we disclose, they disclose.
+    const nextTpl = (d.contract_type === "nda" ? templateById(ndaTemplateFor(p.direction)) : null) ?? avail[0] ?? null;
     const nextTf = fromRecords(d.entity, v, { ...tf, date: d.start_date || tf.date, purpose: p.purpose || d.scope_summary || "",
       ...(p.direction ? { direction: p.direction } : {}), ...(p.term ? { term: p.term } : {}) });
     setSide(nextSide); setF(nextF); setTf(nextTf);
@@ -163,7 +173,7 @@ function NewRequest() {
     } else setIntake("form");
   }
 
-  const types = Object.entries(CONTRACT_TYPES).filter(([, v]) => v.side === side);
+  const types = Object.entries(CONTRACT_TYPES).filter(([, v]) => v.side === side && !v.repositoryOnly);
   const available = TEMPLATES.filter((x) => x.contractTypes.includes(f.contract_type));
   const mode = available.length ? draftMode : "upload";
   const tpl = mode === "generate" ? templateById(tplId) : undefined;
@@ -234,7 +244,9 @@ function NewRequest() {
 
             <div><label className={LABEL}>Title</label><input className={INPUT} value={f.title} onChange={(e) => set("title", e.target.value)} placeholder="e.g. Piling works — Block B, LSH 33" /></div>
             <div className="grid grid-cols-2 gap-4">
-              <div><label className={LABEL}>Project</label><input className={INPUT} value={f.project} onChange={(e) => set("project", e.target.value)} /></div>
+              <div><label className={LABEL}>Project</label>
+                <input className={INPUT} list="ccms-projects" value={f.project} onChange={(e) => set("project", e.target.value)} placeholder="Choose or type a new project; blank files it under General" />
+                <datalist id="ccms-projects">{[...new Set((contracts as any[]).filter((c) => c.entity === f.entity).map((c) => projectOf(c)).filter(Boolean))].sort().map((p) => <option key={p as string} value={p as string} />)}</datalist></div>
               <div>
                 <label className={LABEL}>Award reference {t?.needsAward && <span className="text-red-700">*</span>}</label>
                 <input className={INPUT} value={f.award_reference} onChange={(e) => set("award_reference", e.target.value)} placeholder="Approval Form or Board resolution no." />
@@ -265,6 +277,13 @@ function NewRequest() {
                 <datalist id="ccms-people">{DEMO_PEOPLE.map((p) => <option key={p.name} value={p.name} />)}</datalist>
               </div>
             </div>
+            {needsBusinessChecklist({ contract_type: f.contract_type, side }) && (
+              <div className="rounded-md border border-sky-200 bg-sky-50/40 p-4 space-y-2">
+                <div className="text-sm font-semibold text-gray-900">Before Legal reviews</div>
+                <p className="text-sm text-gray-600">Say what the business expects from the vendor. Legal reviews the draft against it, and the AI flags anything the draft leaves out. Legal can't clear the contract until this is confirmed.</p>
+                <BusinessChecklistFields value={bc} onChange={setBc} />
+              </div>
+            )}
             <label className="flex items-start gap-2 text-sm text-gray-800">
               <input type="checkbox" className="mt-0.5" checked={f.personal_data_cross_border} onChange={(e) => set("personal_data_cross_border", e.target.checked)} />
               Personal data will be transferred outside Malaysia under this contract
@@ -283,7 +302,7 @@ function NewRequest() {
                 <div className="space-y-2">
                   {available.map((x) => (
                     <label key={x.id} className={"flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 " + (tplId === x.id ? "border-gray-900" : "border-gray-200 hover:border-gray-400")}>
-                      <input type="radio" name="template" checked={tplId === x.id} onChange={() => setTplId(x.id)} />
+                      <input type="radio" name="template" checked={tplId === x.id} onChange={() => pickTemplate(x.id)} />
                       <span className="text-sm font-medium text-gray-900">{x.code} · {x.title}</span>
                       <span className="ml-auto text-xs text-gray-500">v{x.version} · effective {x.effectiveDate}</span>
                     </label>
@@ -291,7 +310,7 @@ function NewRequest() {
                 </div>
                 {tpl && (
                   <>
-                    <TemplateFieldsForm values={tf} onChange={setT} fallbackPurpose={f.scope_summary} />
+                    <TemplateFieldsForm values={tf} onChange={onField} fallbackPurpose={f.scope_summary} />
                     {(() => {
                       const miss = fillNda(f.entity, { ...tf, purpose: tf.purpose || f.scope_summary }).missing;
                       return miss.length

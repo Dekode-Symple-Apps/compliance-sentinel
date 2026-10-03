@@ -8,11 +8,13 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { CommentBody, ConfirmationRecord, ExecutionRecord, LifecycleRecord, Milestones } from "@/components/ccms-execution";
 import { ActionDialog } from "@/components/ccms-actions";
-import { deleteCcmsContract, getCcmsContract, setCcmsOwner } from "@/lib/ccms.functions";
+import { deleteCcmsContract, getCcmsContract, saveCcmsBusinessChecklist, setCcmsOwner } from "@/lib/ccms.functions";
+import { BusinessChecklistFields, BusinessChecklistView, EMPTY_CHECKLIST } from "@/components/ccms-business-checklist";
+import { needsBusinessChecklist, type BusinessChecklist } from "@/lib/ccms";
 import { CATEGORY_TINT, ObligationRows, ValidateAllButton } from "@/components/ccms-obligations";
 import { toast } from "sonner";
 import {
-  CcmsHeader, StatusBadge, OutcomeText, SlaText, Section, CostChip, SeverityIcon, CARD, TH, TD, fmtMoney, useCcmsRole, useConfirm, NoteText } from "@/components/ccms-widgets";
+  CcmsHeader, StatusBadge, OutcomeText, SlaText, Section, CostChip, SeverityIcon, CARD, TH, TD, fmtMoney, useCcmsRole, useConfirm, NoteText, friendlyError } from "@/components/ccms-widgets";
 import {
   AI_ROLE, CCMS_ROLES, CONTRACT_TYPES, DEMO_PEOPLE, FLAG_META, BLOCKING_FLAGS, DEMO_SINGLE_USER, OBLIGATION_CATEGORIES, SECURITY_TYPES, STRAIGHT_THROUGH, contractOwner, departmentChecklist, departmentRequired, isPayment, straightThrough, wasStraightThrough, daysBetween, entityShort, flowOf, nextApproval, normalizeObligations, obligationBucket, paymentReady, stageTitle, roleLabel, templateById, displayName,
   type Flag, type NextAction, type Obligation, type ObligationCategory, type Security, type Stage,
@@ -447,6 +449,40 @@ function ObligationsOverview({ c, obl, fromDraft, go }: { c: any; obl: Obligatio
   );
 }
 
+/** The business team's checklist before Legal: shown, and edited or confirmed here. */
+function BusinessChecklistPanel({ c, onChanged }: { c: any; onChanged: () => void }) {
+  const fn = useServerFn(saveCcmsBusinessChecklist);
+  const [role, setRole] = useCcmsRole();
+  const [edit, setEdit] = useState(false);
+  const [v, setV] = useState<BusinessChecklist>(c.business_checklist ?? EMPTY_CHECKLIST);
+  const [busy, setBusy] = useState(false);
+  const can = ["requestor", "contract_executive", "contract_manager", "head_of_department", "operations_manager"];
+  async function save() {
+    setBusy(true);
+    try {
+      const acting = can.includes(role) ? role : "requestor";
+      if (acting !== role && DEMO_SINGLE_USER) setRole(acting as any);
+      await fn({ data: { contract_id: c.id, checklist: v, acting_role: acting as any } });
+      toast.success(v.confirmed ? "Confirmed — Legal reviews against it" : "Saved"); setEdit(false); onChanged();
+    } catch (e: any) { toast.error(friendlyError(e)); } finally { setBusy(false); }
+  }
+  return (
+    <div className="border-t border-gray-100 px-4 py-3">
+      <div className="mb-2 flex items-center gap-2">
+        <span className="text-sm font-semibold text-gray-900">Before Legal reviews</span>
+        {!c.business_checklist?.confirmed && <span className="text-xs font-medium text-amber-700">Legal waits for this</span>}
+        {!edit && <button type="button" onClick={() => setEdit(true)} className="ml-auto text-sm text-blue-700 hover:underline">{c.business_checklist ? "Edit" : "Fill In"}</button>}
+      </div>
+      {edit ? (
+        <div className="space-y-2">
+          <BusinessChecklistFields value={v} onChange={setV} />
+          <div className="flex gap-2"><Button size="sm" disabled={busy} onClick={save}>{busy ? <Loader2 className="size-4 animate-spin" /> : "Save"}</Button><Button size="sm" variant="outline" onClick={() => setEdit(false)}>Cancel</Button></div>
+        </div>
+      ) : <BusinessChecklistView value={c.business_checklist} />}
+    </div>
+  );
+}
+
 /** One department's view of the contract: its checklist, the facts it works
  *  with (only those with a value), its obligations and the records behind them. */
 function DepartmentView({ cat, c, vendor, obl, fromDraft, draftDocId, reviewDocId, onChanged }: { cat: ObligationCategory; c: any; vendor: any; obl: Obligation[]; fromDraft: boolean; draftDocId?: string; reviewDocId?: string; onChanged: () => void }) {
@@ -542,6 +578,7 @@ function DepartmentView({ cat, c, vendor, obl, fromDraft, draftDocId, reviewDocI
           </div>
         )}
         {cat === "business" && c.scope_summary && <div className="border-t border-gray-100 px-4 py-3 text-sm"><span className="text-gray-500">Scope · </span><span className="whitespace-pre-wrap text-gray-900">{c.scope_summary}</span></div>}
+        {cat === "business" && needsBusinessChecklist(c) && <BusinessChecklistPanel c={c} onChanged={onChanged} />}
       </Panel>
       {mine.length > 0 && (
         <Panel title={`${OBLIGATION_CATEGORIES[cat]} obligations`}
