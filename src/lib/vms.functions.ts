@@ -3,13 +3,13 @@ import { z } from "zod";
 import { randomBytes } from "node:crypto";
 import { requireProduct } from "@/lib/feature-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { generateWithFallback } from "@/lib/gemini";
+import { generateWithFallback, searchAdverseNews } from "@/lib/gemini";
 import { documentText, parseJson } from "@/lib/ccms.functions";
 import { actorOf, assertTenant, requireRole, selfApproval } from "@/lib/actor";
 import { CCMS_ROLES, DEMO_SINGLE_USER, type CcmsRole } from "@/lib/ccms";
 import {
   ABMS_QUESTIONS, DOC_TYPES, PASS_MARK, PORTAL_FORMS, PREQUAL_AREAS, afsRatios, sameValue, validationRows, VENDOR_CATEGORIES, addMonths, coiDates, daysTo, ddMonths, docTypeFromName, docsFor,
-  needsCompliance, prequalScore, screen,
+  needsCompliance, prequalScore, screen, businessTypeOf, vendorLight, scanDue, SCAN_MONTHS, SIGNED_FORMS, CONFIDENCE_FLOOR, PREQUAL_FACTORS, factorScore, suggestFactors, BUSINESS_TYPES,
 } from "@/lib/vms";
 
 // ---------------------------------------------------------------------------
@@ -73,11 +73,13 @@ export const createVmsRequest = createServerFn({ method: "POST" })
     annual_spend: z.number().nonnegative().optional().nullable(), urgency: z.string().optional().nullable(),
     project: z.string().optional().nullable(), trade: z.string().optional().nullable(), expected_value: z.number().nonnegative().optional().nullable(),
     contact_name: z.string().optional().nullable(), contact_email: z.string().optional().nullable(),
+    business_type: z.string().optional().nullable(),
     acting_role: roleSchema,
   }))
   .handler(async ({ data, context }) => {
     const { sb, tenantId, userId, userName } = await vms(context);
     const sub = data.kind === "subcontractor";
+    if (data.business_type && !BUSINESS_TYPES[data.business_type]) throw new Error("Unknown business type.");
     if (sub) requireRole(data.acting_role, ["contract_executive", "contract_manager"], "request a subcontractor pre-qualification");
     const category = sub ? "subcontractor" : data.category;
     if (!category || !VENDOR_CATEGORIES[category]) throw new Error("Category is required.");
@@ -100,11 +102,13 @@ export const createVmsRequest = createServerFn({ method: "POST" })
       if (error) throw new Error(error.message);
       vendorId = v.id;
     }
-    const { acting_role, vendor_id, ...fields } = data;
+    const { acting_role, vendor_id, business_type, ...fields } = data;
     const { data: row, error } = await sb.from("vms_requests").insert({
       ...fields, category, vendor_id: vendorId, tenant_id: tenantId, status: "submitted", requestor_id: userId, requestor_name: userName,
     }).select().single();
     if (error) throw new Error(error.message);
+    // Business type (20261003_lsh_feedback.sql) — best effort until that runs.
+    if (business_type) { const up = await sb.from("vms_requests").update({ business_type }).eq("id", row.id); if (!up.error) row.business_type = business_type; }
     await log(sb, { request_id: row.id, vendor_id: vendorId, event_type: "created", actor_name: userName, acting_role,
       detail: `${sub ? "Subcontractor pre-qualification" : data.vendor_id ? "Re-due diligence" : "New vendor"} requested: ${data.company_name}.` });
     return row;
@@ -144,13 +148,13 @@ export const getVendorPortal = createServerFn({ method: "GET" })
   .inputValidator(z.object({ token: z.string() }))
   .handler(async ({ data }) => {
     const r = await portalRequest(data.token);
-    const { data: docs } = await admin().from("vms_documents").select("id,doc_type,file_name,status,created_at").eq("request_id", r.id).order("created_at");
+    const { data: docs } = await admin().from("vms_documents").select("id,doc_type,file_name,status,created_at,extracted->signed").eq("request_id", r.id).order("created_at");
     return {
       company: r.company_name, reference: r.reference_number, kind: r.kind, category: r.category,
       categoryLabel: VENDOR_CATEGORIES[r.category] ?? r.category, entity: r.entity,
       status: r.status, open: portalOpen(r), returnReason: r.status === "returned" ? r.return_reason : null,
-      register: r.register ?? {}, abms: r.abms ?? {}, expires: r.invite_expires,
-      required: docsFor(r.category).map((d) => ({ id: d.id, label: d.label, level: d.level, expires: d.expires })),
+      register: r.register ?? {}, abms: r.abms ?? {}, expires: r.invite_expires, businessType: r.business_type ?? null,
+      required: docsFor(r.category, businessTypeOf(r)).map((d) => ({ id: d.id, label: d.label, level: d.level, expires: d.expires })),
       documents: docs ?? [], questions: ABMS_QUESTIONS,
       // What the requester already gave us, so the vendor does not retype it.
       // Single-user demo only: lets the presenter jump from the vendor's side to the reviewer's.
@@ -170,6 +174,14 @@ async function storePortalDocument(r: any, docType: string, fileName: string, mi
     request_id: r.id, vendor_id: r.vendor_id, doc_type: docType, file_name: safe, file_url: url, uploaded_by: "Vendor",
   }).select("id,doc_type,file_name,status,created_at").single();
   if (error) throw new Error(error.message);
+  // A signed form is read at once, so the vendor sees straight away whether the signature was found.
+  if (SIGNED_FORMS[docType]) {
+    try {
+      const { extracted } = await readDocFields({ ...doc, file_url: url, file_name: safe, doc_type: docType });
+      await admin().from("vms_documents").update({ extracted }).eq("id", doc.id);
+      return { ...doc, signed: extracted.signed };
+    } catch (e) { console.error("[vms] signed form read failed", e); }
+  }
   return doc;
 }
 
@@ -190,7 +202,7 @@ export const uploadVendorPortalAuto = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const r = await portalRequest(data.token);
     if (!portalOpen(r)) throw new Error("This submission is closed.");
-    const allowed = docsFor(r.category).filter((d) => !PORTAL_FORMS.has(d.id));
+    const allowed = docsFor(r.category, businessTypeOf(r)).filter((d) => !PORTAL_FORMS.has(d.id));
     let docType = docTypeFromName(data.file_name, allowed.map((d) => d.id));
     let how: "name" | "read" = "name";
     const mime = data.mime_type || (/\.pdf$/i.test(data.file_name) ? "application/pdf" : "");
@@ -247,6 +259,7 @@ const registerSchema = z.object({
   bank_name: z.string().optional(), bank_account: z.string().optional(),
   directors: z.array(z.object({ name: z.string(), nric_last4: z.string().optional() })).optional(),
   cidb_grade: z.string().optional(), years_in_business: z.string().optional(), project_references: z.array(z.string()).optional(),
+  business_type: z.string().optional(),
 }).passthrough();
 const abmsSchema = z.object({
   answers: z.record(z.string(), z.enum(["yes", "no"])).optional(), details: z.string().optional(),
@@ -270,14 +283,14 @@ export const saveVendorPortal = createServerFn({ method: "POST" })
       if (ABMS_QUESTIONS.some((q) => !ab.answers?.[q.id])) miss.push("every integrity question (ABMS-004)");
       if (!ab.declaration_interest) miss.push("the declaration of interest (ABMS-001)");
       if (!ab.pledge) miss.push("the integrity pledge (ABMS-005)");
-      if (!ab.ctos_consent) miss.push("CTOS consent (signed or declined)");
+      if (!reg.business_type) miss.push("business type");
       if (!ab.pdpa) miss.push("PDPA consent");
       if (!ab.signatory?.trim() || !ab.designation?.trim() || !ab.signed_date) miss.push("signatory name, designation and date");
       const { data: docs } = await admin().from("vms_documents").select("doc_type").eq("request_id", r.id).neq("status", "superseded");
       const have = new Set((docs ?? []).map((d: any) => d.doc_type));
       // The register form, pre-qualification form and ABMS forms are captured in the portal itself.
       const inPortal = new Set(["register_form", "prequal_form", "abms_001", "abms_004", "abms_005", "ctos", "abc_ack"]);
-      const needed = docsFor(r.category).filter((d) => d.level === "M" && !inPortal.has(d.id) && !have.has(d.id));
+      const needed = docsFor(r.category, reg.business_type || businessTypeOf(r)).filter((d) => d.level === "M" && !inPortal.has(d.id) && !have.has(d.id));
       if (needed.length) miss.push(`documents: ${needed.map((d) => d.label).join(", ")}`);
       if (miss.length) throw new Error(`Still needed: ${miss.join("; ")}.`);
     }
@@ -343,14 +356,16 @@ async function runScreening(db: any, r: any, actor: { name: string; role: string
 async function autoVerifyDocuments(db: any, r: any): Promise<{ auto: number; left: number }> {
   const { data: docs } = await db.from("vms_documents").select("*").eq("request_id", r.id).eq("status", "uploaded");
   const { data: allDocs } = await db.from("vms_documents").select("*").eq("request_id", r.id);
-  const differs = new Set(validationRows(r, allDocs ?? []).filter((x) => x.check === "differs").map((x) => x.source?.id));
+  // A document backing a row that differs, or that is only a close or low-confidence match, waits for a person.
+  const differs = new Set(validationRows(r, allDocs ?? []).filter((x) => (x.level === "red" || x.level === "amber") && !x.confirmed).map((x) => x.source?.id));
   const company = r.register?.company_name || r.company_name;
   let auto = 0;
   for (const d of (docs ?? []) as any[]) {
     const x = d.extracted ?? {};
     const type = DOC_TYPES.find((t) => t.id === d.doc_type);
     const expiry: string | null = x.expiry || null;
-    const clean = !!d.extracted && !differs.has(d.id)
+    const signedOk = !SIGNED_FORMS[d.doc_type] || (x.signed?.form_matches && x.signed?.signature_present && (x.signed?.confidence ?? 0) >= CONFIDENCE_FLOOR);
+    const clean = !!d.extracted && !differs.has(d.id) && signedOk
       && (!x.holder || d.doc_type === "competency" || sameValue("name", x.holder, company))
       && (!type?.expires || (!!expiry && daysTo(expiry) >= 0));
     if (!clean) continue;
@@ -428,7 +443,7 @@ export const recordVmsConflictCheck = createServerFn({ method: "POST" })
 
 /** Fields to read per document type, beyond number / issuer / holder / dates. */
 const DOC_FIELDS: Record<string, string> = {
-  ssm: `"fields": {"company_name": "", "registration_no": "as printed, new and old numbers", "address": "registered address", "incorporated": "yyyy-mm-dd"}`,
+  ssm: `"fields": {"company_name": "", "registration_no": "as printed, new and old numbers", "address": "registered address", "incorporated": "yyyy-mm-dd", "business_type": "sdn_bhd" | "berhad" | "plt" | "partnership" | "sole_prop" (a Form D / business registration with one owner is sole_prop, with several owners partnership)}`,
   bank_letter: `"fields": {"bank_name": "", "account_no": "", "account_holder": "the name the account is held in"}`,
   company_profile: `"fields": {"tin": "tax identification no.", "directors": ["full names"], "contact_name": "", "contact_designation": "", "contact_phone": "", "contact_email": "", "address": "office address"}`,
   cidb: `"fields": {"grade": "e.g. G7", "registration_no": ""}`,
@@ -445,8 +460,12 @@ export async function readDocFields(doc: any): Promise<{ extracted: any; res: an
   const { text, pdfBase64 } = await documentText(doc);
   const label = DOC_TYPES.find((d) => d.id === doc.doc_type)?.label ?? "certificate";
   const afs = doc.doc_type === "afs";
-  const prompt = afs ? AFS_PROMPT : `Read this ${label} and extract, only as printed (never guess; empty string if absent).
-Return ONLY JSON: {"number": "certificate / policy / registration number", "issuer": "issuing body or insurer", "holder": "the company it is issued to", "issued": "yyyy-mm-dd", "expiry": "yyyy-mm-dd"${DOC_FIELDS[doc.doc_type] ? `, ${DOC_FIELDS[doc.doc_type]}` : ""}}`;
+  const form = SIGNED_FORMS[doc.doc_type];
+  const prompt = afs ? AFS_PROMPT : form
+    ? `This upload should be Lim Seong Hai's "${form.title}", printed from the vendor portal, completed and signed by hand (or e-signed). Look at the signature area.
+Return ONLY JSON: {"form_matches": true/false (it is this form, not another document), "signature_present": true/false (a handwritten or electronic signature in the signature area; a typed name alone is not a signature), "signatory_name": "", "signed_date": "yyyy-mm-dd", "company_name": "as written on the form", "confidence": 0.0-1.0 (how sure you are about signature_present)}`
+    : `Read this ${label} and extract, only as printed (never guess; empty string if absent).
+Return ONLY JSON: {"number": "certificate / policy / registration number", "issuer": "issuing body or insurer", "holder": "the company it is issued to", "issued": "yyyy-mm-dd", "expiry": "yyyy-mm-dd"${DOC_FIELDS[doc.doc_type] ? `, ${DOC_FIELDS[doc.doc_type]}, "confidence": {"<each key of fields>": 0.0-1.0 (how clearly it is printed and how sure you are it is the right value)}` : ""}}`;
   const parts: any[] = [{ text: prompt }];
   if (pdfBase64) parts.push({ inlineData: { mimeType: "application/pdf", data: pdfBase64 } });
   else if (text.trim()) parts.push({ text: text.slice(0, afs ? 80_000 : 40_000) });
@@ -457,8 +476,16 @@ Return ONLY JSON: {"number": "certificate / policy / registration number", "issu
   }
   const res: any = await generateWithFallback({ contents: [{ role: "user", parts }], config: { responseMimeType: "application/json", maxOutputTokens: afs ? 3000 : 1200, temperature: 0 } }, { tier: afs ? "quality" : "fast" });
   const out = parseJson(res.text ?? "") ?? {};
+  if (form) {
+    const conf = Math.max(0, Math.min(1, Number(out.confidence) || 0));
+    return { extracted: { number: "", issuer: "", holder: String(out.company_name ?? ""), issued: out.signed_date || null, expiry: null,
+      signed: { form_matches: out.form_matches === true, signature_present: out.signature_present === true, signatory_name: String(out.signatory_name ?? ""), signed_date: out.signed_date || null, confidence: conf } }, res };
+  }
   const extracted: any = { number: String(out.number ?? ""), issuer: String(out.issuer ?? ""), holder: String(out.holder ?? ""), issued: out.issued || null, expiry: out.expiry || null };
   if (out.fields && typeof out.fields === "object") extracted.fields = out.fields;
+  if (out.confidence && typeof out.confidence === "object") {
+    extracted.confidence = Object.fromEntries(Object.entries(out.confidence).filter(([, v]) => typeof v === "number").map(([k, v]) => [k, Math.max(0, Math.min(1, v as number))]));
+  }
   if (afs && out.afs && typeof out.afs === "object") extracted.afs = out.afs;
   return { extracted, res };
 }
@@ -567,12 +594,34 @@ export const verifyVmsDocument = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+/** A person confirms a field the checks could not (a close match, a
+ *  low-confidence read, or a difference that is explained). Recorded. */
+export const confirmVmsValidation = createServerFn({ method: "POST" })
+  .middleware([requireVms])
+  .inputValidator(z.object({ request_id: z.string().uuid(), key: z.string().max(40), confirm: z.boolean(), note: z.string().max(500).optional().nullable(), acting_role: roleSchema }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userName } = await vms(context);
+    requireRole(data.acting_role, ["purchasing_executive", "contract_executive", "contract_manager", "purchasing_manager"], "confirm vendor details");
+    const r = await loadRequest(sb, data.request_id, tenantId);
+    const confirms = { ...(r.validation_confirms ?? {}) };
+    if (data.confirm) confirms[data.key] = { by: userName, at: new Date().toISOString(), note: data.note ?? null }; else delete confirms[data.key];
+    const { error } = await sb.from("vms_requests").update({ validation_confirms: confirms }).eq("id", r.id);
+    if (error) throw new Error(/validation_confirms/.test(error.message) ? "Run the database update (20261003_lsh_feedback.sql) to record confirmations." : error.message);
+    await log(sb, { request_id: r.id, vendor_id: r.vendor_id, event_type: "validation", actor_name: userName, acting_role: data.acting_role,
+      detail: `${data.confirm ? "Confirmed" : "Confirmation removed"}: ${data.key.replace(/_/g, " ")}${data.note ? ` — ${data.note}` : ""}.` });
+    return { ok: true };
+  });
+
 // ── step 8 / VMS-02 step 5: the scored assessment ────────────────────────────
+
+const factorSchema = z.object({ result: z.string().min(1).max(20), remarks: z.string().max(1000).optional().nullable() });
 
 export const assessVmsRequest = createServerFn({ method: "POST" })
   .middleware([requireVms])
   .inputValidator(z.object({
-    request_id: z.string().uuid(), areas: z.record(z.string(), z.number().min(0).max(5)),
+    request_id: z.string().uuid(),
+    factors: z.object({ litigation: factorSchema, financial: factorSchema, experience: factorSchema }),
+    rationale: z.string().max(4000).optional().nullable(),
     own_conflict: z.enum(["none", "declared"]), own_conflict_details: z.string().max(1000).optional().nullable(),
     scope_fit: z.string().max(1000).optional().nullable(), acting_role: roleSchema,
   }))
@@ -588,13 +637,15 @@ export const assessVmsRequest = createServerFn({ method: "POST" })
     const { data: docs } = await sb.from("vms_documents").select("doc_type,status").eq("request_id", r.id);
     const pending = (docs ?? []).filter((d: any) => d.status === "uploaded");
     if (pending.length) throw new Error(`${pending.length} document(s) still to verify.`);
-    const total = prequalScore(data.areas);
-    const assessment = { areas: data.areas, total, pass: total >= PASS_MARK, own_conflict: data.own_conflict, own_conflict_details: data.own_conflict_details ?? null, scope_fit: data.scope_fit ?? null, by: userName, at: new Date().toISOString() };
+    for (const f of PREQUAL_FACTORS) if (!f.options.some((o) => o.v === data.factors[f.id].result)) throw new Error(`Choose a result for ${f.label.toLowerCase()}.`);
+    const total = factorScore(data.factors)!;
+    const assessment = { factors: data.factors, total, pass: total >= PASS_MARK, rationale: data.rationale?.trim() || null,
+      own_conflict: data.own_conflict, own_conflict_details: data.own_conflict_details ?? null, scope_fit: data.scope_fit ?? null, by: userName, at: new Date().toISOString() };
     const compl = needsCompliance(r.screening) || data.own_conflict === "declared" || (sub && r.conflict_check?.accounts_decision === "red_flag");
     const status = !assessment.pass ? "manager" : compl ? "compliance" : "manager";
     await sb.from("vms_requests").update({ assessment, status, updated_at: new Date().toISOString() }).eq("id", r.id);
     await log(sb, { request_id: r.id, vendor_id: r.vendor_id, event_type: "assessed", actor_name: userName, acting_role: data.acting_role,
-      detail: `Scored ${total}% (pass ${PASS_MARK}%)${assessment.pass ? "" : " — below the pass mark"}. ${compl ? "Routed to Compliance." : "Straight to approval."}${data.own_conflict === "declared" ? " Assessor declared a conflict." : ""}` });
+      detail: `Pre-qualification ${total}% (pass ${PASS_MARK}%): ${PREQUAL_FACTORS.map((f) => `${f.label} ${f.options.find((o) => o.v === data.factors[f.id].result)?.label}`).join(", ")}${assessment.pass ? "" : " — below the pass mark; approval needs a manager's override"}. ${compl ? "Routed to Compliance." : "To approval."}${data.own_conflict === "declared" ? " Assessor declared a conflict." : ""}` });
     return { total, status };
   });
 
@@ -630,7 +681,8 @@ export const decideVmsRequest = createServerFn({ method: "POST" })
   .middleware([requireVms])
   .inputValidator(z.object({
     request_id: z.string().uuid(), outcome: z.enum(["approve", "conditional", "return", "reject"]),
-    reason: z.string().max(2000).optional().nullable(), return_items: z.array(z.string()).optional(), acting_role: roleSchema,
+    reason: z.string().max(2000).optional().nullable(), return_items: z.array(z.string()).optional(),
+    override_reason: z.string().max(2000).optional().nullable(), acting_role: roleSchema,
   }))
   .handler(async ({ data, context }) => {
     const { sb, tenantId, userId, userName } = await vms(context);
@@ -640,11 +692,14 @@ export const decideVmsRequest = createServerFn({ method: "POST" })
     if (r.status !== "manager") throw new Error("Nothing is awaiting this decision.");
     if (data.outcome !== "approve" && data.outcome !== "conditional" && !data.reason?.trim()) throw new Error("A reason is required.");
     if (data.outcome === "conditional" && r.compliance?.decision !== "conditional") throw new Error("Conditional approval needs Compliance's concurrence (a conditional Compliance decision).");
-    if ((data.outcome === "approve" || data.outcome === "conditional") && r.assessment && !r.assessment.pass) throw new Error(`The assessment scored ${r.assessment.total}%, below the ${PASS_MARK}% pass mark.`);
+    // Below the pass mark the vendor can still be approved: a manager's override, with the reason on record.
+    const belowPass = (data.outcome === "approve" || data.outcome === "conditional") && r.assessment && !r.assessment.pass;
+    if (belowPass && (data.override_reason?.trim().length ?? 0) < 10) throw new Error(`The assessment scored ${r.assessment.total}%, below the ${PASS_MARK}% pass mark. To approve anyway, give the reason for the override.`);
     const self = selfApproval(r.requestor_id, userId);
     if (self.blocked) throw new Error("You raised this request and cannot approve it.");
     const now = new Date().toISOString();
-    const decision = { outcome: data.outcome, reason: data.reason ?? null, by: userName, at: now };
+    const decision: any = { outcome: data.outcome, reason: data.reason ?? null, by: userName, at: now };
+    if (belowPass) decision.override = { reason: data.override_reason!.trim(), score: r.assessment.total, pass_mark: PASS_MARK, by: userName, role: data.acting_role, at: now };
     if (data.outcome === "return") {
       await sb.from("vms_requests").update({ status: "returned", return_reason: `${data.reason}${data.return_items?.length ? ` (${data.return_items.join(", ")})` : ""}`,
         invite_expires: new Date(Date.now() + 14 * 86_400_000).toISOString(), updated_at: now }).eq("id", r.id);
@@ -670,7 +725,7 @@ export const decideVmsRequest = createServerFn({ method: "POST" })
       await sb.from("vms_requests").update({ status: data.outcome === "conditional" ? "conditional" : "approved", decision, invite_token: null, updated_at: now }).eq("id", r.id);
     }
     await log(sb, { request_id: r.id, vendor_id: r.vendor_id, event_type: "decision", actor_name: userName, acting_role: data.acting_role,
-      detail: `${CCMS_ROLES[data.acting_role]}: ${data.outcome}${data.reason ? ` — ${data.reason}` : ""}.${data.outcome === "approve" || data.outcome === "conditional" ? ` ${sub ? "Added to the Master Sub-Contractor List." : "Added to the vendor list."} Due diligence valid ${ddMonths(r.screening?.rating ?? "low")} months.` : ""}${self.note}` });
+      detail: `${CCMS_ROLES[data.acting_role]}: ${data.outcome}${belowPass ? ` by override (scored ${r.assessment.total}%, pass ${PASS_MARK}%) — ${data.override_reason!.trim()}` : ""}${data.reason ? ` — ${data.reason}` : ""}.${data.outcome === "approve" || data.outcome === "conditional" ? ` ${sub ? "Added to the Master Sub-Contractor List." : "Added to the vendor list."} Due diligence valid ${ddMonths(r.screening?.rating ?? "low")} months.` : ""}${self.note}` });
     return { ok: true };
   });
 
@@ -813,7 +868,121 @@ export const listVmsVendors = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { sb, tenantId } = await vms(context);
     const { data } = await sb.from("ccms_vendors").select("*").eq("tenant_id", tenantId).order("name");
-    return (data ?? []) as any[];
+    const ids = (data ?? []).map((v: any) => v.id);
+    const { data: docs } = ids.length ? await sb.from("vms_documents").select("vendor_id,doc_type").in("vendor_id", ids).eq("status", "verified") : { data: [] };
+    const by = new Map<string, string[]>();
+    for (const d of (docs ?? []) as any[]) by.set(d.vendor_id, [...(by.get(d.vendor_id) ?? []), d.doc_type]);
+    return (data ?? []).map((v: any) => ({ ...v, verified_types: by.get(v.id) ?? [] })) as any[];
+  });
+
+/** Columns from 20261003_lsh_feedback.sql: a clear message until it runs. */
+const needsMigration = (e: any, col: string) => { if (e && new RegExp(col).test(e.message)) throw new Error("Run the database update (20261003_lsh_feedback.sql) first."); if (e) throw new Error(e.message); };
+
+async function loadVendor(sb: any, id: string, tenantId: string) {
+  const { data: v } = await sb.from("ccms_vendors").select("*").eq("id", id).single();
+  if (!v) throw new Error("Vendor not found");
+  assertTenant(v.tenant_id, tenantId);
+  return v;
+}
+
+/** Finance allows payment to a vendor that is not yet clear (urgent works),
+ *  with the reason and what is still outstanding on record. */
+export const allowVendorPayment = createServerFn({ method: "POST" })
+  .middleware([requireVms])
+  .inputValidator(z.object({ vendor_id: z.string().uuid(), reason: z.string().max(2000), expires: z.string().optional().nullable(), revoke: z.boolean().optional(), acting_role: roleSchema }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userName } = await vms(context);
+    requireRole(data.acting_role, ["finance", "accounts"], "allow payment by override");
+    const v = await loadVendor(sb, data.vendor_id, tenantId);
+    if (!data.revoke && data.reason.trim().length < 10) throw new Error("Give the reason for allowing payment.");
+    const { data: docs } = await sb.from("vms_documents").select("doc_type").eq("vendor_id", v.id).eq("status", "verified");
+    const l = vendorLight(v, (docs ?? []).map((d: any) => d.doc_type));
+    const payment_override = data.revoke ? null : { reason: data.reason.trim(), outstanding: l.reasons, expires: data.expires || null, by: userName, role: data.acting_role, at: new Date().toISOString() };
+    const { error } = await sb.from("ccms_vendors").update({ payment_override }).eq("id", v.id);
+    needsMigration(error, "payment_override");
+    await log(sb, { request_id: null, vendor_id: v.id, event_type: "payment_override", actor_name: userName, acting_role: data.acting_role,
+      detail: data.revoke ? "Payment override withdrawn." : `Payment allowed by override${data.expires ? ` until ${data.expires}` : ""}: ${data.reason.trim()}. Outstanding: ${l.reasons.join("; ") || "nothing"}.` });
+    return { ok: true };
+  });
+
+/** AutoCount supplier creation: Purchasing asks, Finance approves.
+ *  SIMULATED until the AutoCount API details are provided — it records the
+ *  request, the approval and a supplier code, and nothing leaves the platform. */
+export const autocountSupplier = createServerFn({ method: "POST" })
+  .middleware([requireVms])
+  .inputValidator(z.object({ vendor_id: z.string().uuid(), action: z.enum(["request", "approve", "decline"]), note: z.string().max(1000).optional().nullable(), acting_role: roleSchema }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userName } = await vms(context);
+    const v = await loadVendor(sb, data.vendor_id, tenantId);
+    const now = new Date().toISOString();
+    let autocount: any;
+    if (data.action === "request") {
+      requireRole(data.acting_role, ["purchasing_executive", "purchasing_manager", "contract_executive"], "ask for an AutoCount supplier");
+      if (!["approved", "conditional"].includes(v.status)) throw new Error("Only an approved vendor can be created in AutoCount.");
+      if (v.autocount?.status === "created") throw new Error(`Already in AutoCount as ${v.autocount.supplier_code}.`);
+      autocount = { status: "requested", requested_by: userName, requested_at: now, simulated: true };
+    } else {
+      requireRole(data.acting_role, ["finance", "accounts"], "approve the AutoCount supplier");
+      if (v.autocount?.status !== "requested") throw new Error("Nothing is waiting for Finance's approval.");
+      const code = `400-${String(v.vendor_code ?? "").replace(/\D/g, "").padStart(5, "0") || String(Date.now()).slice(-5)}`;
+      autocount = data.action === "approve"
+        ? { ...v.autocount, status: "created", supplier_code: code, approved_by: userName, approved_at: now, simulated: true }
+        : { ...v.autocount, status: "declined", declined_by: userName, declined_at: now, note: data.note ?? null };
+    }
+    const { error } = await sb.from("ccms_vendors").update({ autocount }).eq("id", v.id);
+    needsMigration(error, "autocount");
+    await log(sb, { request_id: null, vendor_id: v.id, event_type: "autocount", actor_name: userName, acting_role: data.acting_role,
+      detail: data.action === "request" ? "AutoCount supplier requested." : data.action === "approve" ? `AutoCount supplier created (simulated): ${autocount.supplier_code}.` : `AutoCount supplier declined${data.note ? `: ${data.note}` : ""}.` });
+    return autocount;
+  });
+
+/** Adverse news for one vendor and its directors (web search). Kept in step
+ *  with api/vms-scan.js, the quarterly scheduled run. */
+async function scanVendor(db: any, v: any) {
+  const directors = (v.directors ?? []).map((d: any) => d.name).filter(Boolean).slice(0, 4);
+  const { result } = await searchAdverseNews({ borrowerName: v.name, entities: directors,
+    context: `Malaysian company${v.registration_no ? `, SSM ${v.registration_no}` : ""}, a vendor to a construction group. Directors: ${directors.join(", ") || "not known"}.` });
+  const now = new Date();
+  const next = new Date(now); next.setMonth(next.getMonth() + SCAN_MONTHS);
+  const adverse_news = { last_scan_at: now.toISOString(), next_scan_at: next.toISOString().slice(0, 10), found: result.foundConcerns,
+    summary: result.summary.slice(0, 3000), sources: result.sources.slice(0, 8), status: result.foundConcerns ? "to_review" : "clear", reviewed_by: null };
+  const { error } = await db.from("ccms_vendors").update({ adverse_news }).eq("id", v.id);
+  needsMigration(error, "adverse_news");
+  await db.from("vms_events").insert({ vendor_id: v.id, event_type: "scan", actor_name: "Platform",
+    detail: result.foundConcerns ? "Adverse-news scan: possible adverse news — to review." : "Adverse-news scan: nothing material found." });
+  return adverse_news;
+}
+
+/** Scan now: the vendors due this quarter (or the ones named). */
+export const scanVmsVendors = createServerFn({ method: "POST" })
+  .middleware([requireVms])
+  .inputValidator(z.object({ vendor_ids: z.array(z.string().uuid()).max(10).optional(), acting_role: roleSchema }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId } = await vms(context);
+    requireRole(data.acting_role, ["compliance", "purchasing_manager", "purchasing_executive", "finance"], "run the vendor scan");
+    const { data: vs } = await sb.from("ccms_vendors").select("*").eq("tenant_id", tenantId);
+    const todo = (vs ?? []).filter((v: any) => (data.vendor_ids?.length ? data.vendor_ids.includes(v.id) : scanDue(v))).slice(0, 10);
+    let found = 0;
+    for (let i = 0; i < todo.length; i += 3) {
+      const out = await Promise.all(todo.slice(i, i + 3).map((v: any) => scanVendor(sb, v).catch((e) => { if (/database update/.test(String(e?.message))) throw e; return null; })));
+      found += out.filter((x) => x?.found).length;
+    }
+    return { scanned: todo.length, found, remaining: (vs ?? []).filter((v: any) => scanDue(v)).length - todo.length };
+  });
+
+/** The reviewer clears or keeps a scan result. */
+export const reviewVendorScan = createServerFn({ method: "POST" })
+  .middleware([requireVms])
+  .inputValidator(z.object({ vendor_id: z.string().uuid(), outcome: z.enum(["acknowledged", "escalated"]), note: z.string().max(1000).optional().nullable(), acting_role: roleSchema }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userName } = await vms(context);
+    requireRole(data.acting_role, ["compliance", "purchasing_manager"], "review the scan result");
+    const v = await loadVendor(sb, data.vendor_id, tenantId);
+    if (!v.adverse_news) throw new Error("No scan result to review.");
+    await sb.from("ccms_vendors").update({ adverse_news: { ...v.adverse_news, status: data.outcome, reviewed_by: userName, reviewed_at: new Date().toISOString(), note: data.note ?? null } }).eq("id", v.id);
+    await log(sb, { request_id: null, vendor_id: v.id, event_type: "scan_review", actor_name: userName, acting_role: data.acting_role,
+      detail: `Adverse news ${data.outcome === "acknowledged" ? "reviewed — no action" : "escalated"}${data.note ? `: ${data.note}` : ""}.` });
+    return { ok: true };
   });
 
 // ── AI assist: drafts the reviewer edits, never a decision ─────────────────
@@ -823,7 +992,7 @@ async function requestFacts(sb: any, r: any) {
   const { data: docs, error } = await sb.from("vms_documents").select("doc_type,file_name,file_url,status,expiry_date,number,issuer,extracted").eq("request_id", r.id);
   if (error) throw new Error(error.message);
   const have = new Set((docs ?? []).map((d: any) => d.doc_type));
-  const missing = docsFor(r.category).filter((d) => d.level === "M" && !PORTAL_FORMS.has(d.id) && !have.has(d.id)).map((d) => d.label);
+  const missing = docsFor(r.category, businessTypeOf(r)).filter((d) => d.level === "M" && !PORTAL_FORMS.has(d.id) && !have.has(d.id)).map((d) => d.label);
   // The company profile says what the vendor does, since when, with whom.
   const pd = (docs ?? []).find((d: any) => d.doc_type === "company_profile");
   let profile = "";
@@ -870,9 +1039,8 @@ Return ONLY JSON: {"decision": "approve" | "conditional" | "reject", "conditions
     : data.kind === "decision"
     ? `You are the Purchasing Manager signing off. Write the reason for the decision. If anything is missing or adverse, list what the vendor must correct; otherwise summarise why it is acceptable. ${honest}
 Return ONLY JSON: {"suggested": "approve" | "return" | "reject", "bullets": ["2–5 bullets, each at most 16 words"]}`
-    : `You are the assessor. Suggest a pre-qualification score 0–5 for each area from the facts (0 = no evidence, 3 = adequate, 5 = strong). Score only on evidence actually present. A document type label lists what it may cover (e.g. "ISO 9001 / 14001 / 45001") — credit only the standard named in the file name or number, never the others. Where there is no evidence, say so and score 0–2.
-Areas: ${PREQUAL_AREAS.map((a) => `${a.id}: ${a.label}`).join("; ")}.
-Return ONLY JSON: {"areas": {"legal": 0, ...}, "why": {"legal": "at most 12 words", ...}, "scope_fit": "one line"}`;
+    : `You are helping the assessor. Do not score experience — the team judges it. From the facts, summarise the vendor's relevant experience (projects, clients, years, scale) for the team to judge, and say how well it fits the scope requested. Only what the facts show.
+Return ONLY JSON: {"experience_notes": "2–3 short lines", "scope_fit": "one line"}`;
   const res: any = await generateWithFallback({ contents: [{ role: "user", parts: [{ text: `${ask}\n\nFACTS:\n${facts}` }] }],
     config: { responseMimeType: "application/json", maxOutputTokens: 1500, temperature: 0.2 } }, { tier: "fast" });
   const out = parseJson(res.text ?? "") ?? {};
@@ -882,14 +1050,42 @@ Return ONLY JSON: {"areas": {"legal": 0, ...}, "why": {"legal": "at most 12 word
     return { decision: ["approve", "conditional", "reject"].includes(out.decision) ? out.decision : "approve", conditions: String(out.conditions ?? ""), due: due.toISOString().slice(0, 10), text: bullets(out.rationale) };
   }
   if (data.kind === "decision") return { suggested: String(out.suggested ?? ""), text: bullets(out.bullets) };
-  const areas: Record<string, number> = {}; const why: Record<string, string> = {};
-  for (const a of PREQUAL_AREAS) {
-    const n = Number(out.areas?.[a.id]);
-    if (Number.isFinite(n)) areas[a.id] = Math.max(0, Math.min(5, Math.round(n)));
-    if (typeof out.why?.[a.id] === "string") why[a.id] = out.why[a.id].slice(0, 120);
-  }
-  return { areas, why, text: String(out.scope_fit ?? "") };
+  // Litigation and financial standing come from the records themselves (CTOS, audited accounts).
+  const { data: docs } = await sb.from("vms_documents").select("doc_type,status,extracted").eq("request_id", r.id);
+  const s = suggestFactors(r, docs ?? []);
+  return { suggest: s, experience: String(out.experience_notes ?? "").slice(0, 600), text: String(out.scope_fit ?? "") };
 }
+
+/** A draft comparison of shortlisted vendors, for the team's internal
+ *  justification. The team decides; this is a first draft. */
+export const compareVmsVendors = createServerFn({ method: "POST" })
+  .middleware([requireVms])
+  .inputValidator(z.object({ request_ids: z.array(z.string().uuid()).min(2).max(5), save: z.string().max(8000).optional().nullable(), acting_role: roleSchema }))
+  .handler(async ({ data, context }) => {
+    const { sb, tenantId, userName } = await vms(context);
+    const rs = await Promise.all(data.request_ids.map((id) => loadRequest(sb, id, tenantId)));
+    if (data.save) {
+      // Saved to each request's history: the record of why the chosen vendor was selected.
+      for (const r of rs) await log(sb, { request_id: r.id, vendor_id: r.vendor_id, event_type: "comparison", actor_name: userName, acting_role: data.acting_role,
+        detail: `Shortlist comparison (${rs.map((x) => x.company_name).join(", ")}):\n${data.save}` });
+      return { text: data.save, saved: true };
+    }
+    const facts = await Promise.all(rs.map(async (r) => {
+      const { data: docs } = await sb.from("vms_documents").select("doc_type,status,extracted").eq("request_id", r.id);
+      const sf = suggestFactors(r, docs ?? []);
+      const a = r.assessment?.factors;
+      const pre = a ? PREQUAL_FACTORS.map((f) => `${f.label}: ${f.options.find((o) => o.v === a[f.id]?.result)?.label ?? "—"}${a[f.id]?.remarks ? ` (${a[f.id].remarks})` : ""}`).join("; ")
+        : `Not yet assessed. From the records: litigation ${sf.litigation?.result ?? "unknown"}; financial ${sf.financial?.result ?? "unknown"}`;
+      return `### ${r.company_name} (${r.reference_number})\nPre-qualification: ${pre}${r.assessment ? ` · score ${r.assessment.total}%` : ""}\n${await requestFacts(sb, r)}`;
+    }));
+    const prompt = `You help a procurement team compare shortlisted vendors. Write a first-draft comparison they can use for their internal justification. The team makes the decision; do not decide for them.
+For each vendor: one line each on litigation, financial standing, experience, and fit for the scope. Then 2–3 sentences on how they compare, noting trade-offs (a vendor that is not top on every factor can still be the right choice). Only what the facts show; say where information is missing.
+Plain words. Return ONLY JSON: {"text": "the comparison, using '- ' bullets under each vendor name"}
+
+${facts.join("\n\n")}`;
+    const res: any = await generateWithFallback({ contents: [{ role: "user", parts: [{ text: prompt }] }], config: { responseMimeType: "application/json", maxOutputTokens: 2000, temperature: 0.2 } }, { tier: "fast" });
+    return { text: String(parseJson(res.text ?? "")?.text ?? "").trim(), saved: false };
+  });
 
 export const vmsAiAssist = createServerFn({ method: "POST" })
   .middleware([requireVms])

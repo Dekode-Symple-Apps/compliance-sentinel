@@ -3,10 +3,26 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist/client",
   "rewrites": [
-    { "source": "/((?!api/onlyoffice-callback).*)", "destination": "/api/server" }
+    {
+      "source": "/((?!api/onlyoffice-callback|api/vms-scan).*)",
+      "destination": "/api/server"
+    }
   ],
   "functions": {
-    "api/server.js": { "maxDuration": 300 },
-    "api/onlyoffice-callback.js": { "maxDuration": 60 }
-  }
+    "api/server.js": {
+      "maxDuration": 300
+    },
+    "api/onlyoffice-callback.js": {
+      "maxDuration": 60
+    },
+    "api/vms-scan.js": {
+      "maxDuration": 300
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/vms-scan",
+      "schedule": "0 1 * * 1"
+    }
+  ]
 }

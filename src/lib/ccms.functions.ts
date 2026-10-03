@@ -143,7 +143,12 @@ export const listCcmsVendors = createServerFn({ method: "GET" })
     const { sb, tenantId } = await ccms(context);
     const { data, error } = await sb.from("ccms_vendors").select("*").eq("tenant_id", tenantId).order("name");
     if (error) throw new Error(error.message);
-    return (data ?? []) as any[];
+    // Verified document types, for the vendor's payment status light.
+    const ids = (data ?? []).map((v: any) => v.id);
+    const { data: docs } = ids.length ? await sb.from("vms_documents").select("vendor_id,doc_type").in("vendor_id", ids).eq("status", "verified") : { data: [] };
+    const by = new Map<string, string[]>();
+    for (const d of (docs ?? []) as any[]) by.set(d.vendor_id, [...(by.get(d.vendor_id) ?? []), d.doc_type]);
+    return (data ?? []).map((v: any) => ({ ...v, verified_types: by.get(v.id) ?? [] })) as any[];
   });
 
 const vendorSchema = z.object({

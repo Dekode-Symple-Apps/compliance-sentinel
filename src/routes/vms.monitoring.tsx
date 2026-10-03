@@ -8,11 +8,13 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   assessVmsCoi, escalateVmsCoi, getVmsMonitor, readVmsCertificateFile, readVmsDocument, recordVmsCoi, runVmsScan, startVmsCoiCampaign, uploadVmsRenewal, verifyVmsDocument,
+  reviewVendorScan, scanVmsVendors,
 } from "@/lib/vms.functions";
 import { CcmsHeader, CARD, TH, TD, PRIORITY_TINT, friendlyError, useCcmsRole, uploadToStorage } from "@/components/ccms-widgets";
 import { RememberedInput } from "@/components/ccms-actions";
 import { remember } from "@/lib/ccms-prefill";
-import { DOC_TYPES, coiDates, credentialAlerts, daysTo } from "@/lib/vms";
+import { DOC_TYPES, SCAN_MONTHS, coiDates, credentialAlerts, daysTo, scanDue } from "@/lib/vms";
+import { NoteText } from "@/components/ccms-widgets";
 import { CCMS_ROLES, DEMO_SINGLE_USER, displayName, type CcmsRole } from "@/lib/ccms";
 import { FileText, Loader2, Search, Sparkles, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -25,8 +27,8 @@ export const Route = createFileRoute("/vms/monitoring")({
 const INPUT = "w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gray-900";
 const LABEL = "block text-sm text-gray-700";
 
-type Kind = "doc" | "verify" | "dd" | "condition" | "coi";
-const KIND_LABEL: Record<Kind, string> = { doc: "Credential", verify: "Renewal to Verify", dd: "Due Diligence", condition: "Condition", coi: "COI Declaration" };
+type Kind = "doc" | "verify" | "dd" | "condition" | "coi" | "news";
+const KIND_LABEL: Record<Kind, string> = { doc: "Credential", verify: "Renewal to Verify", dd: "Due Diligence", condition: "Condition", coi: "COI Declaration", news: "Adverse News" };
 interface Row {
   key: string; kind: Kind; vendor_id: string; vendor: string; item: string;
   /** Days to the due date (negative = overdue); null when not date-driven. */
@@ -50,6 +52,8 @@ function Monitoring() {
   const [open, setOpen] = useState<Row | null>(null);
   const [busy, setBusy] = useState(false);
   const year = new Date().getFullYear();
+  const scanNowFn = useServerFn(scanVmsVendors);
+  const due = ((data as any)?.vendors ?? []).filter((v: any) => scanDue(v)).length;
 
   const rows: Row[] = useMemo(() => {
     if (!data) return [];
@@ -78,6 +82,14 @@ function Monitoring() {
         : needsAssess ? { label: "Assess", role: "compliance" as CcmsRole } : undefined;
       out.push({ key: `coi-${c.id}`, kind: "coi", vendor_id: c.vendor_id, vendor: vById(c.vendor_id)?.name ?? "—", item: `${year} declaration`, days, status, rank, action, record: { coi: c, vendor: vById(c.vendor_id) } });
     }
+    // The quarterly adverse-news scan: possible findings to review.
+    for (const v of vendors.filter((x: any) => x.adverse_news?.last_scan_at)) {
+      const n = v.adverse_news;
+      const rank = n.status === "to_review" || n.status === "escalated" ? 1 : 5;
+      const status = n.status === "to_review" ? "Possible Adverse News · To Review" : n.status === "escalated" ? "Escalated" : n.status === "acknowledged" ? "Reviewed · No Action" : "Clear";
+      out.push({ key: `news-${v.id}`, kind: "news", vendor_id: v.id, vendor: v.name, item: `Scanned ${String(n.last_scan_at).slice(0, 10)} · next ${n.next_scan_at ?? "—"}`, days: null, status, rank,
+        action: n.status === "to_review" ? { label: "Review", role: "compliance" } : undefined, record: { vendor: v, news: n } });
+    }
     return out.sort((a, b) => a.rank - b.rank || (a.days ?? 9999) - (b.days ?? 9999) || a.vendor.localeCompare(b.vendor));
   }, [data, year]);
 
@@ -100,13 +112,17 @@ function Monitoring() {
     <AppShell>
       <CcmsHeader title="Vendor Management" subtitle="Monitoring"
         action={<div className="flex gap-2">
+          <Button size="sm" variant="outline" disabled={busy} title={`Each approved vendor and its directors are searched for litigation, insolvency, fraud and negative press every ${SCAN_MONTHS} months.`}
+            onClick={() => act("compliance") && campaign(async () => { const r: any = await scanNowFn({ data: { acting_role: "compliance" } }); if (!r.scanned) throw new Error("Every vendor was scanned this quarter."); toast.message(`${r.scanned} scanned · ${r.found} with possible adverse news${r.remaining > 0 ? ` · ${r.remaining} more due` : ""}`); }, "Scan finished")}>
+            {busy ? <Loader2 className="size-4 animate-spin" /> : `Scan Now${due ? ` (${due} due)` : ""}`}
+          </Button>
           {!issued && <Button size="sm" variant="outline" disabled={busy} onClick={() => act("purchasing_manager") && campaign(() => startFn({ data: { year, acting_role: "purchasing_manager" } }), "Declarations issued")}>Issue {year} COI Campaign</Button>}
           {lateCoi && <Button size="sm" variant="outline" disabled={busy} onClick={() => act("purchasing_manager") && campaign(() => escFn({ data: { year, acting_role: "purchasing_manager" } }), "Escalated")}>Escalate Non-Responders</Button>}
         </div>} />
       <div className="p-6 bg-white min-h-full">
         <div className="mx-auto max-w-6xl space-y-4">
           <div className="flex flex-wrap items-center gap-2">
-            {(["all", "doc", "verify", "dd", "condition", "coi"] as const).filter((k) => k === "all" || counts(k) > 0).map((k) => (
+            {(["all", "doc", "verify", "dd", "condition", "coi", "news"] as const).filter((k) => k === "all" || counts(k) > 0).map((k) => (
               <button key={k} onClick={() => setKind(k)} className={cn("rounded-md border px-3 py-1.5 text-sm", kind === k ? "border-gray-900 font-semibold text-gray-900" : "border-gray-200 text-gray-600 hover:border-gray-400")}>
                 {k === "all" ? "All" : KIND_LABEL[k]} <span className="text-gray-500">{k === "all" ? openRows.length : counts(k)}</span>
               </button>
@@ -192,9 +208,37 @@ function RecordDialog({ row, data, onClose, onDone, act }: { row: Row; data: any
             </div>
           )}
           {row.kind === "coi" && <CoiForm row={row} as={as} onDone={onDone} />}
+          {row.kind === "news" && <NewsReview row={row} onDone={onDone} />}
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** The scan's finding, with its sources; the reviewer clears it or escalates it. */
+function NewsReview({ row, onDone }: { row: Row; onDone: () => void }) {
+  const fn = useServerFn(reviewVendorScan);
+  const [role] = useCcmsRole();
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const n = row.record.news;
+  async function go(outcome: "acknowledged" | "escalated") {
+    setBusy(true);
+    try { await fn({ data: { vendor_id: row.vendor_id, outcome, note: note || null, acting_role: ["compliance", "purchasing_manager"].includes(role) ? role : "compliance" } }); toast.success(outcome === "acknowledged" ? "Reviewed — no action" : "Escalated"); onDone(); }
+    catch (e) { toast.error(friendlyError(e)); } finally { setBusy(false); }
+  }
+  return (
+    <div className="space-y-2">
+      <div className="font-semibold text-gray-900">Scan of {String(n.last_scan_at).slice(0, 10)}</div>
+      <NoteText text={n.summary} className="rounded-md bg-gray-50 p-2 text-gray-800" />
+      {n.sources?.length > 0 && <ul className="list-disc pl-5 text-xs">{n.sources.map((x: any) => <li key={x.uri}><a href={x.uri} target="_blank" rel="noreferrer" className="text-blue-700 hover:underline">{x.title}</a></li>)}</ul>}
+      {n.status === "to_review" ? (
+        <>
+          <input className={INPUT} placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
+          <div className="flex gap-2"><Button size="sm" disabled={busy} onClick={() => go("acknowledged")}>Reviewed — No Action</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => go("escalated")}>Escalate</Button></div>
+        </>
+      ) : <p className="text-gray-600">{n.status === "clear" ? "Nothing material found." : `${n.status === "escalated" ? "Escalated" : "Reviewed"} by ${displayName(n.reviewed_by)}${n.note ? ` — ${n.note}` : ""}`}</p>}
+    </div>
   );
 }
 

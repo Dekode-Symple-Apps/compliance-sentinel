@@ -18,6 +18,16 @@ export const VENDOR_CATEGORIES: Record<string, string> = {
 };
 const CATS = Object.keys(VENDOR_CATEGORIES);
 
+/** How the business is constituted (from the SSM certificate). Sole
+ *  proprietors and partnerships give a personal guarantee (29 Sep review). */
+export const BUSINESS_TYPES: Record<string, string> = {
+  sdn_bhd: "Sdn Bhd (private limited)", berhad: "Berhad (public limited)", plt: "PLT (limited liability partnership)",
+  partnership: "Partnership", sole_prop: "Sole proprietor",
+};
+export const needsGuarantee = (bt?: string | null) => bt === "sole_prop" || bt === "partnership";
+/** The business type: what the vendor declared, else what the requester entered. */
+export const businessTypeOf = (r: any): string | null => r?.register?.business_type || r?.business_type || null;
+
 // ── the documentation matrix (spec p.4) ──────────────────────────────────────
 // M = mandatory, C = conditional (when relevant), S = suggested, - = n/a.
 // Order of the letters follows CATS above.
@@ -30,7 +40,9 @@ export const DOC_TYPES: DocType[] = [
   row("company_profile", "Company profile", false, "MMMMMMM"),
   row("ssm", "SSM company registration", false, "MMMMMMM"),
   row("prequal_form", "Pre-qualification assessment form", false, "MMMMM-M"),
-  row("ctos", "CTOS consent and report", true, "MMMMMSM"),
+  row("ctos", "CTOS report (Finance)", true, "MMMMMSM"),
+  row("ctos_consent", "CTOS consent form (signed)", false, "MMMMMSM"),
+  row("personal_guarantee", "Personal guarantee (signed)", false, "-------"),
   row("abms_001", "ABMS-001 Declaration of Interest", true, "MMMMMMM"),
   row("abms_004", "ABMS-004 Questionnaire for Third Parties", true, "MMMMMMM"),
   row("abms_005", "ABMS-005 Third Party Integrity Pledge", true, "MMMMMMM"),
@@ -46,15 +58,38 @@ export const DOC_TYPES: DocType[] = [
   row("calibration", "Calibration certificates", true, "--CC---"),
   row("abc_ack", "ABC / Whistleblowing / Code of Conduct acknowledgement", true, "MMMMMMM"),
 ];
-export const docsFor = (category: string) =>
-  DOC_TYPES.filter((d) => d.need[category] && d.need[category] !== "-").map((d) => ({ ...d, level: d.need[category] }));
+export const docsFor = (category: string, businessType?: string | null) =>
+  DOC_TYPES.filter((d) => (d.need[category] && d.need[category] !== "-") || (d.id === "personal_guarantee" && needsGuarantee(businessType)))
+    .map((d) => ({ ...d, level: d.id === "personal_guarantee" ? ("M" as Need) : d.need[category] }));
 
-/** Filled in on the vendor portal's own forms, not uploaded as files. */
+/** Not uploaded by the vendor: filled in on the portal's own forms, done by
+ *  the team (the assessment), or uploaded by Finance (the CTOS report). */
 export const PORTAL_FORMS = new Set(["register_form", "prequal_form", "abms_001", "abms_004", "abms_005", "ctos", "abc_ack"]);
+/** LSH's own forms the vendor must sign by hand: downloaded from the portal,
+ *  signed, uploaded back; the AI checks the signature. ASSUMPTION: the form
+ *  layout is a placeholder until LSH sends its own. */
+export const SIGNED_FORMS: Record<string, { title: string; body: string[] }> = {
+  ctos_consent: {
+    title: "CTOS Consent Form",
+    body: [
+      "I/We, the undersigned, on behalf of the company named below, consent to Lim Seong Hai Capital Berhad and its subsidiaries obtaining a credit report on the company and its directors from CTOS Data Systems Sdn Bhd, for vendor registration and due diligence.",
+      "This consent remains valid for the duration of our registration as a vendor, and for each renewal of due diligence.",
+    ],
+  },
+  personal_guarantee: {
+    title: "Personal Guarantee",
+    body: [
+      "In consideration of Lim Seong Hai Capital Berhad or its subsidiary (the Company) registering the business named below as a vendor, I, the undersigned owner/partner, personally guarantee the due performance of the business's obligations to the Company, including the refund of any advance paid and the remedy of defective work or goods.",
+      "This guarantee is continuing and remains in force while the business is a registered vendor of the Company.",
+    ],
+  },
+};
 
 // Bulk upload: what a file is, from its name. Specific before general — a
 // "CIDB registration" is not an SSM registration. Null when the name does not say.
 const NAME_PATTERNS: [string, RegExp][] = [
+  ["ctos_consent", /ctos.*consent|consent.*ctos/],
+  ["personal_guarantee", /guarant/],
   ["cidb", /\bcidb\b|green ?card|\bpkk\b/],
   ["calibration", /calibrat/],
   ["competency", /competen|operator|\bskm\b|chargeman|wireman/],
@@ -83,7 +118,45 @@ export const ABMS_QUESTIONS: { id: string; text: string }[] = [
   { id: "restricted_list", text: "Is the company or any director on a government or international restricted or sanctions list?" },
 ];
 
-// ── pre-qualification assessment (9 areas, pass mark 60%) — ASSUMPTION ──────
+// ── pre-qualification: three factors that inform, not block (29 Sep review) ──
+// Litigation (from CTOS), financial standing (pass/fail from the audited
+// accounts) and experience (the team's judgement). Below the pass mark the
+// vendor can still be approved by a manager's override with a recorded reason.
+export type FactorId = "litigation" | "financial" | "experience";
+export const PREQUAL_FACTORS: { id: FactorId; label: string; hint: string; options: { v: string; label: string; score: number }[] }[] = [
+  { id: "litigation", label: "Litigation", hint: "From the CTOS report: litigation, winding-up, director flags.",
+    options: [{ v: "clear", label: "Clear", score: 100 }, { v: "flag", label: "Flag", score: 0 }] },
+  { id: "financial", label: "Financial standing", hint: "Pass or fail: profitable enough to deliver, from the audited accounts.",
+    options: [{ v: "pass", label: "Pass", score: 100 }, { v: "fail", label: "Fail", score: 0 }] },
+  { id: "experience", label: "Experience", hint: "The team's judgement, from the project references and the company profile.",
+    options: [{ v: "strong", label: "Strong", score: 100 }, { v: "adequate", label: "Adequate", score: 60 }, { v: "limited", label: "Limited", score: 20 }] },
+];
+export interface FactorResult { result: string; remarks?: string | null }
+/** The average of the three factors' scores; null until all three are set. */
+export function factorScore(f: Partial<Record<FactorId, FactorResult>> | null | undefined): number | null {
+  if (!f) return null;
+  const scores = PREQUAL_FACTORS.map((x) => x.options.find((o) => o.v === f[x.id]?.result)?.score);
+  return scores.every((n) => n != null) ? Math.round(scores.reduce((a, n) => a + n!, 0) / scores.length) : null;
+}
+/** Litigation and financial standing as the records show them, for the
+ *  assessor to accept or change; null where there is no record yet. */
+export function suggestFactors(r: any, docs: any[]): { litigation: { result: string; why: string } | null; financial: { result: string; why: string } | null } {
+  const c = r.ctos ?? null;
+  const litigation = c ? (c.litigation || c.winding_up || c.director_flags
+    ? { result: "flag", why: `CTOS: ${[c.litigation && "litigation on record", c.winding_up && "winding-up petition", c.director_flags && "director flags"].filter(Boolean).join(", ")}` }
+    : { result: "clear", why: `CTOS: no litigation, winding-up or director flags${c.score != null ? ` (score ${c.score})` : ""}` }) : null;
+  const a = docs.find((d) => d.doc_type === "afs" && d.status !== "superseded" && d.extracted?.afs)?.extracted?.afs as Afs | undefined;
+  let financial: { result: string; why: string } | null = null;
+  if (a) {
+    const np = a.current?.net_profit, eq = a.current?.equity;
+    const ok = np != null && np > 0 && (eq == null || eq > 0) && !a.going_concern;
+    const m = (n?: number | null) => (n == null ? "—" : `RM${Math.round(n).toLocaleString()}`);
+    financial = { result: ok ? "pass" : "fail", why: `FY ${a.fy_end ?? "?"}: net profit ${m(np)}, equity ${m(eq)}${a.going_concern ? ", going-concern emphasis" : ""}` };
+  }
+  return { litigation, financial };
+}
+
+// ── the earlier nine-area assessment, kept so old records still read ────────
 export const PREQUAL_AREAS: { id: string; label: string }[] = [
   { id: "legal", label: "Company background and legal standing" },
   { id: "financial", label: "Financial capacity" },
@@ -164,7 +237,7 @@ export function requestMilestones(r: any, docs: any[]): { stages: VmsStage[]; ne
     { key: "register", label: "Vendor submitted", ok: !!r.submitted_by_vendor_at },
     { key: "screen", label: "Checked", ok: !!r.screening, detail: r.screening ? `${r.screening.rating} risk · auto` : undefined },
     { key: "ctos", label: sub ? "Conflict check" : "CTOS report", ok: sub ? !!r.conflict_check?.accounts_decision : !!r.ctos },
-    { key: "assess", label: sub ? "Contract Manager review" : "Documents & scoring", ok: !!r.assessment && verifiedAll, detail: r.assessment ? `${r.assessment.total}%` : undefined },
+    { key: "assess", label: sub ? "Contract Manager review" : "Documents & pre-qualification", ok: !!r.assessment && verifiedAll, detail: r.assessment ? `${r.assessment.total}%` : undefined },
     { key: "compliance", label: "Compliance", ok: !!r.compliance, skip: !compl },
     { key: "decision", label: sub ? "Head of Contracts" : "Purchasing Manager", ok: !!r.decision },
   ];
@@ -182,7 +255,7 @@ export function requestMilestones(r: any, docs: any[]): { stages: VmsStage[]; ne
     register: { text: r.status === "returned" ? "Vendor to correct the returned items and resubmit" : "Waiting for the vendor to complete the register form, documents and integrity forms", role: "vendor" },
     screen: { text: "Run screening for duplicates, related parties, blacklist and red flags", role: "purchasing_executive" },
     ctos: { text: sub ? "Accounts to approve the CTOS conflict check" : "Finance to upload the CTOS report", role: sub ? "accounts" : "finance" },
-    assess: { text: sub ? "Contract Manager: confirm scope fit, verify documents and score" : "Verify every document and score the nine areas (pass 60%)", role: sub ? "contract_manager" : "purchasing_executive" },
+    assess: { text: sub ? "Contract Manager: confirm scope fit, verify documents and assess the three factors" : "Verify every document and assess litigation, financial standing and experience (pass 60%)", role: sub ? "contract_manager" : "purchasing_executive" },
     compliance: { text: "Compliance decision: approve, conditional or reject", role: "compliance" },
     decision: { text: sub ? "Head of Contracts & Procurement: add to the Master Sub-Contractor List" : "Purchasing Manager: approve, return to vendor or reject", role: sub ? "head_contracts" : "purchasing_manager" },
   };
@@ -195,7 +268,23 @@ export function requestMilestones(r: any, docs: any[]): { stages: VmsStage[]; ne
 // only when every source that has the value agrees.
 
 export type Check = "match" | "differs" | "unconfirmed";
-export interface ValidationRow { key: string; label: string; requester?: string; vendor?: string; doc?: string; source?: { id: string; label: string; url: string }; check: Check }
+/** Green: the same, read with confidence. Amber: probably the same (a close
+ *  match, e.g. an abbreviated address) or read with low confidence — a person
+ *  confirms it. Red: different. None: no document says it. */
+export type Level = "green" | "amber" | "red" | "none";
+export const CONFIDENCE_FLOOR = 0.8;
+export interface ValidationRow {
+  key: string; label: string; requester?: string; vendor?: string; doc?: string; source?: { id: string; label: string; url: string };
+  check: Check; level: Level; confidence?: number | null; confirmed?: { by: string; at: string } | null; why?: string;
+}
+// Malaysian address abbreviations, written out before addresses are compared.
+const ADDRESS_ABBR: [RegExp, string][] = [
+  [/\bjln\b\.?/g, "jalan"], [/\btmn\b\.?/g, "taman"], [/\bkg\b\.?|\bkpg\b\.?/g, "kampung"], [/\bsg\b\.?/g, "sungai"],
+  [/\bbt\b\.?/g, "batu"], [/\blrg\b\.?/g, "lorong"], [/\bbdr\b\.?/g, "bandar"], [/\bsek\b\.?/g, "seksyen"], [/\bpsn\b\.?/g, "persiaran"],
+  [/\bblk\b\.?/g, "blok"], [/\bkws\b\.?|\bkaw\b\.?/g, "kawasan"], [/\bperind\b\.?/g, "perindustrian"], [/\bwp\b\.?/g, "wilayah persekutuan"],
+  [/\bkl\b/g, "kuala lumpur"], [/\bno\.?\s*/g, ""], [/\blot\b\s*/g, ""],
+];
+export const normAddress = (s: string) => ADDRESS_ABBR.reduce((x, [re, to]) => x.replace(re, to), s.toLowerCase()).replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
 const words = (s: string) => s.toLowerCase().replace(/\b(sdn\.?\s*bhd\.?|berhad|bhd)\b/g, " sdnbhd ").replace(/[^a-z0-9@. ]+/g, " ").split(/\s+/).filter(Boolean);
 const regCore = (s: string) => (s.match(/\d{12}/)?.[0] ?? s.replace(/\D/g, ""));
 /** Same value, allowing for format: case, punctuation, the SSM new/old number, spacing. */
@@ -211,7 +300,7 @@ export function sameValue(kind: string, a: string, b: string): boolean {
       return set(a) === set(b);
     }
     case "address": {
-      const A = new Set(words(a)), B = new Set(words(b));
+      const A = new Set(words(normAddress(a))), B = new Set(words(normAddress(b)));
       const [small, big] = A.size <= B.size ? [A, B] : [B, A];
       return [...small].filter((w) => big.has(w)).length >= Math.ceil(small.size * 0.8);
     }
@@ -223,22 +312,41 @@ export function sameValue(kind: string, a: string, b: string): boolean {
     }
   }
 }
+/** Exactly the same once format is set aside, or only close (same by the rules
+ *  above, but worded differently — e.g. an abbreviated or partial address). */
+export function exactValue(kind: string, a: string, b: string): boolean {
+  if (!a || !b) return true;
+  if (kind === "address") return normAddress(a) === normAddress(b);
+  if (kind === "name" || kind === "directors") return words(a).join(" ") === words(b).join(" ") || (kind === "directors" && sameValue(kind, a, b));
+  return sameValue(kind, a, b);
+}
 export function validationRows(r: any, docs: any[]): ValidationRow[] {
+  const confirms = r.validation_confirms ?? {};
   const reg = r.register ?? {};
   const latest = (t: string) => docs.filter((d) => d.doc_type === t && d.status !== "superseded").sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
-  const f = (t: string, k: string) => { const d = latest(t); const v = d?.extracted?.fields?.[k]; return d && v != null && v !== "" ? { v: Array.isArray(v) ? v.join(", ") : String(v), d } : null; };
+  const f = (t: string, k: string) => {
+    const d = latest(t); const v = d?.extracted?.fields?.[k];
+    const c = d?.extracted?.confidence?.[k];
+    return d && v != null && v !== "" ? { v: Array.isArray(v) ? v.join(", ") : String(v), d, c: typeof c === "number" ? c : null } : null;
+  };
   const label = (t: string) => DOC_TYPES.find((x) => x.id === t)?.label ?? t;
-  const row = (key: string, text: string, kind: string, requester: any, vendor: any, found: { v: string; d: any } | null): ValidationRow => {
+  const row = (key: string, text: string, kind: string, requester: any, vendor: any, found: { v: string; d: any; c: number | null } | null): ValidationRow => {
     const req = requester ? String(requester) : undefined, ven = vendor ? String(vendor) : undefined, doc = found?.v;
     const vals = [req, ven, doc].filter(Boolean) as string[];
     const agree = vals.every((x) => vals.every((y) => sameValue(kind, x, y)));
-    return { key, label: text, requester: req, vendor: ven, doc,
-      source: found ? { id: found.d.id, label: label(found.d.doc_type), url: found.d.file_url } : undefined,
-      check: !agree ? "differs" : doc ? "match" : "unconfirmed" };
+    const exact = vals.every((x) => vals.every((y) => exactValue(kind, x, y)));
+    const check: Check = !agree ? "differs" : doc ? "match" : "unconfirmed";
+    const lowConf = found?.c != null && found.c < CONFIDENCE_FLOOR;
+    const level: Level = check === "differs" ? "red" : check === "unconfirmed" ? "none" : !exact || lowConf ? "amber" : "green";
+    const why = check === "differs" ? "The sources disagree" : level === "amber" ? (lowConf ? `Read with ${Math.round((found!.c ?? 0) * 100)}% confidence` : "Close match, worded differently") : undefined;
+    return { key, label: text, requester: req, vendor: ven, doc, check, level, why, confidence: found?.c ?? null, confirmed: confirms[key] ?? null,
+      source: found ? { id: found.d.id, label: label(found.d.doc_type), url: found.d.file_url } : undefined };
   };
   const directors = (reg.directors ?? []).map((d: any) => d.name).filter((n: string) => n?.trim()).join(", ");
   return [
     row("company_name", "Company name", "name", r.company_name, reg.company_name, f("ssm", "company_name")),
+    row("business_type", "Business type", "name", r.business_type ? BUSINESS_TYPES[r.business_type] : null, reg.business_type ? BUSINESS_TYPES[reg.business_type] : null,
+      (() => { const x = f("ssm", "business_type"); return x ? { ...x, v: BUSINESS_TYPES[x.v] ?? x.v } : null; })()),
     row("registration_no", "SSM registration no.", "registration_no", r.registration_no, reg.registration_no, f("ssm", "registration_no")),
     row("tin", "Tax identification no. (TIN)", "tin", null, reg.tin, f("company_profile", "tin")),
     row("address", "Registered address", "address", null, reg.address, f("ssm", "address") ?? f("company_profile", "address")),
@@ -286,14 +394,19 @@ export function afsRatios(afs: Afs, annualSpend?: number | null) {
 /** The integrity checklist, flagged only where something needs a person:
  *  a Yes answer, a declared interest, or a missing pledge or consent. */
 export interface IntegrityItem { label: string; ok: boolean; note?: string }
-export function integrityChecklist(r: any): IntegrityItem[] {
+export function integrityChecklist(r: any, docs: any[] = []): IntegrityItem[] {
   const ab = r.abms ?? {};
+  const consent = docs.filter((d) => d.doc_type === "ctos_consent" && d.status !== "superseded").sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+  const signed = consent?.extracted?.signed;
   const yes = ABMS_QUESTIONS.filter((q) => ab.answers?.[q.id] === "yes");
   return [
     { label: "Integrity questionnaire (ABMS-004)", ok: !!ab.answers && yes.length === 0, note: yes.length ? `Yes to: ${yes.map((q) => q.text).join("; ")}${ab.details ? ` — ${ab.details}` : ""}` : ab.answers ? "All answered No" : "Not answered" },
     { label: "Declaration of interest (ABMS-001)", ok: ab.declaration_interest === "none", note: ab.declaration_interest === "declared" ? `Declared: ${ab.interest_details ?? ""}` : ab.declaration_interest === "none" ? "Nothing to declare" : "Not given" },
     { label: "Integrity pledge (ABMS-005)", ok: !!ab.pledge, note: ab.pledge ? "Signed" : "Not signed" },
-    { label: "CTOS consent", ok: ab.ctos_consent === "signed", note: ab.ctos_consent === "signed" ? "Given" : ab.ctos_consent === "declined" ? "Declined — Finance still runs the report" : "Not given" },
+    consent
+      ? { label: "CTOS consent form", ok: consent.status === "verified" || (!!signed?.form_matches && !!signed?.signature_present),
+          note: !consent.extracted ? "Uploaded, not read yet" : !signed?.form_matches ? "The upload is not the CTOS consent form" : signed?.signature_present ? `Signed${signed.signatory_name ? ` by ${signed.signatory_name}` : ""}${signed.signed_date ? ` on ${signed.signed_date}` : ""}` : "No signature found — check the upload" }
+      : { label: "CTOS consent", ok: ab.ctos_consent === "signed", note: ab.ctos_consent === "signed" ? "Given" : ab.ctos_consent === "declined" ? "Declined — Finance still runs the report" : "Signed form not uploaded" },
     { label: "PDPA consent", ok: !!ab.pdpa, note: ab.pdpa ? "Given" : "Not given" },
   ];
 }
@@ -370,6 +483,41 @@ export function credentialAlerts(vendors: any[], docs: any[], today = new Date()
   }
   return out.sort((a, b) => a.days - b.days);
 }
+
+// ── vendor status light (29 Sep review) ──────────────────────────────────────
+/** Documents a vendor must have verified before the first payout. */
+export const PAYOUT_DOCS = ["ssm", "bank_letter", "ctos"];
+export type Light = "green" | "yellow" | "red";
+export interface VendorLight { light: Light; label: string; reasons: string[]; outstanding: string[]; paymentAllowed: boolean; override: any | null }
+/** Green: approved, documents for payout verified, due diligence valid.
+ *  Yellow: pending items for Finance to review. Red: a blocking issue. A
+ *  Finance override can allow payment while items are still outstanding. */
+export function vendorLight(v: any, verifiedTypes: string[], today = new Date()): VendorLight {
+  const reasons: string[] = [];
+  const dd = v.dd_valid_until ? daysTo(v.dd_valid_until, today) : null;
+  const red = v.compliance_hold || ["blacklisted", "rejected", "on_hold"].includes(v.status) || (dd != null && dd < 0)
+    || (v.risk_rating === "high" && !["approved", "conditional"].includes(v.status));
+  if (v.compliance_hold) reasons.push(`On hold${v.hold_reason ? `: ${v.hold_reason}` : ""}`);
+  if (["blacklisted", "rejected"].includes(v.status)) reasons.push(v.status === "blacklisted" ? "Blacklisted" : "Rejected");
+  if (dd != null && dd < 0) reasons.push(`Due diligence lapsed ${v.dd_valid_until}`);
+  if (v.risk_rating === "high" && !["approved", "conditional"].includes(v.status)) reasons.push("High risk, not yet cleared");
+  const outstanding = PAYOUT_DOCS.filter((t) => !verifiedTypes.includes(t)).map((t) => DOC_TYPES.find((d) => d.id === t)?.label ?? t);
+  if (!["approved", "conditional"].includes(v.status) && !red) reasons.push("Onboarding not complete");
+  if (v.status === "conditional") reasons.push(`Conditional${v.conditions?.text ? `: ${v.conditions.text}` : ""}`);
+  if (dd != null && dd >= 0 && dd <= 30) reasons.push(`Due diligence due in ${dd} days`);
+  if (outstanding.length) reasons.push(`Before payout: ${outstanding.join(", ")}`);
+  const light: Light = red ? "red" : reasons.length ? "yellow" : "green";
+  const o = v.payment_override && (!v.payment_override.expires || daysTo(v.payment_override.expires, today) >= 0) ? v.payment_override : null;
+  return { light, label: light === "green" ? "Clear to pay" : light === "yellow" ? "Finance to review" : "Blocked", reasons, outstanding,
+    paymentAllowed: light === "green" || !!o, override: o };
+}
+
+/** Quarterly adverse-news scan (29 Sep review: quarterly is enough). */
+export const SCAN_MONTHS = 3;
+export const scanDue = (v: any, today = new Date()) => {
+  const last = v.adverse_news?.last_scan_at;
+  return ["approved", "conditional"].includes(v.status) && (!last || daysTo(addMonths(String(last).slice(0, 10), SCAN_MONTHS), today) <= 0);
+};
 
 /** Annual conflict-of-interest campaign: issued 5 January, due 30 January. */
 export const coiDates = (year: number) => ({ issue: `${year}-01-05`, due: `${year}-01-30` });

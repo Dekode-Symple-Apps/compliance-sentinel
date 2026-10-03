@@ -19,6 +19,8 @@ import {
   CONTRACT_TYPES, DEMO_PEOPLE, LSH_ENTITIES, FX_TO_MYR, TEMPLATES, fillNda, particularsFromRecords, templateById, toMyr,
 } from "@/lib/ccms";
 import { Loader2, Upload, ArrowRight, Bot, ClipboardList } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { vendorLight } from "@/lib/vms";
 
 export const Route = createFileRoute("/ccms/new")({
   component: NewRequest,
@@ -213,10 +215,14 @@ function NewRequest() {
                   <option value="">Select an approved vendor…</option>
                   {vendors.map((v: any) => (
                     <option key={v.id} value={v.id} disabled={v.status === "blacklisted"}>
-                      {v.name}{v.status !== "approved" ? ` — ${v.status.replace("_", " ")}` : ""}{v.related_party ? " — related party" : ""}
+                      {v.name}{v.status !== "approved" ? ` — ${v.status.replace("_", " ")}` : ""}{v.related_party ? " — related party" : ""} · {vendorLight(v, v.verified_types ?? []).label}
                     </option>
                   ))}
                 </select>
+                {vendor && (() => { const l = vendorLight(vendor, vendor.verified_types ?? []); return (
+                  <p className="mt-1 flex items-start gap-1.5 text-sm text-gray-700"><span className={cn("mt-1.5 size-2.5 shrink-0 rounded-full", l.light === "green" ? "bg-emerald-500" : l.light === "yellow" ? "bg-amber-400" : "bg-red-500")} />
+                    <span><b>{l.label}</b>{l.reasons.length ? ` — ${l.reasons.join("; ")}` : ""}{l.override ? ` · payment allowed by Finance override` : ""}</span></p>
+                ); })()}
                 {vendors.length === 0 && <p className="mt-1 text-sm text-gray-600">No vendors yet. <Link to="/ccms/vendors" className="text-blue-700 hover:underline">Add vendors</Link> first.</p>}
               </div>
             ) : (

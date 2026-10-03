@@ -8,8 +8,8 @@ import { cn } from "@/lib/utils";
 
 const TAG: Record<string, string> = { C: "If relevant", S: "Suggested" };
 
-export function RequiredDocsChecklist({ category, documents, done = [] }: { category: string; documents?: any[]; done?: string[] }) {
-  const list = docsFor(category);
+export function RequiredDocsChecklist({ category, businessType, documents, done = [] }: { category: string; businessType?: string | null; documents?: any[]; done?: string[] }) {
+  const list = docsFor(category, businessType);
   const mandatory = list.filter((d) => d.level === "M");
   const optional = list.filter((d) => d.level !== "M");
   const stateOf = (id: string) => {

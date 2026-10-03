@@ -9,11 +9,11 @@ import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import {
   assessVmsRequest, complianceVmsDecision, decideVmsRequest, getVmsRequest, inviteVmsVendor, readVmsDocument,
-  deleteVmsDocument, deleteVmsRequest, readCtosReport, recordVmsConflictCheck, recordVmsCtos, screenVmsRequest, verifyVmsDocument, vmsAiAssist,
+  deleteVmsDocument, deleteVmsRequest, readCtosReport, recordVmsConflictCheck, recordVmsCtos, screenVmsRequest, verifyVmsDocument, vmsAiAssist, confirmVmsValidation,
 } from "@/lib/vms.functions";
 import { CcmsHeader, CARD, TD, StageBar, NoteText, friendlyError, useCcmsRole, useConfirm, uploadToStorage } from "@/components/ccms-widgets";
 import {
-  ABMS_QUESTIONS, AFS_ITEMS, DOC_TYPES, PASS_MARK, PORTAL_FORMS, PREQUAL_AREAS, VENDOR_CATEGORIES, VMS_STATUS, afsRatios, daysTo, docsFor, prequalScore, requestMilestones, sameValue, validationRows, vmsActions, integrityChecklist, milestoneTarget, type Afs, type VmsAction,
+  ABMS_QUESTIONS, AFS_ITEMS, DOC_TYPES, PASS_MARK, PORTAL_FORMS, PREQUAL_AREAS, PREQUAL_FACTORS, VENDOR_CATEGORIES, VMS_STATUS, afsRatios, daysTo, docsFor, factorScore, prequalScore, requestMilestones, sameValue, suggestFactors, validationRows, vmsActions, integrityChecklist, milestoneTarget, businessTypeOf, type Afs, type FactorId, type VmsAction,
 } from "@/lib/vms";
 import { CCMS_ROLES, DEMO_SINGLE_USER, displayName, fmtMoneyPlain } from "@/lib/ccms";
 import { ArrowLeft, ChevronRight, Copy, Loader2, Sparkles, Star, Trash2, Upload } from "lucide-react";
@@ -124,7 +124,7 @@ function VmsRequestPage() {
             {r.submitted_by_vendor_at && <ScreeningSection r={r} onDone={refresh} />}
             {r.screening && !r.screening.blacklisted && (sub ? <ConflictSection r={r} onDone={refresh} /> : <CtosSection r={r} onDone={refresh} />)}
             {r.submitted_by_vendor_at && <DocumentsSection r={r} documents={documents} onDone={refresh} />}
-            {r.screening && !r.screening.blacklisted && <AssessmentSection r={r} onDone={refresh} />}
+            {r.screening && !r.screening.blacklisted && <AssessmentSection r={r} docs={documents} onDone={refresh} />}
             {(r.status === "compliance" || r.compliance) && <ComplianceSection r={r} onDone={refresh} />}
             {(r.status === "manager" || r.decision) && !(r.status === "rejected" && r.compliance?.decision === "reject") && <DecisionSection r={r} onDone={refresh} />}
           </div>
@@ -186,6 +186,12 @@ function InviteSection({ r, token, onDone }: { r: any; token: string | null; onD
   );
 }
 
+const LEVEL: Record<string, { dot: string; text: string; tone: string }> = {
+  green: { dot: "bg-emerald-500", text: "Confirmed", tone: "text-emerald-700" },
+  amber: { dot: "bg-amber-400", text: "Check", tone: "text-amber-800 font-semibold" },
+  red: { dot: "bg-red-500", text: "Differs", tone: "text-red-700 font-semibold" },
+  none: { dot: "bg-gray-300", text: "Not in documents", tone: "text-gray-500" },
+};
 const CHECK: Record<string, { icon: string; text: string; tone: string }> = {
   match: { icon: "✓", text: "Confirmed", tone: "text-emerald-700" },
   differs: { icon: "⚠", text: "Differs", tone: "text-amber-700 font-semibold" },
@@ -201,8 +207,17 @@ function SubmissionSection({ r, documents, onDone }: { r: any; documents: any[];
   const reg = r.register ?? {}, ab = r.abms ?? {};
   const docs = documents.filter((d) => d.status !== "superseded");
   const rows = validationRows(r, docs);
-  const confirmed = rows.filter((x) => x.check === "match").length, differs = rows.filter((x) => x.check === "differs").length;
+  const confirmed = rows.filter((x) => x.level === "green" || (x.confirmed && x.level !== "none")).length;
+  const differs = rows.filter((x) => x.level === "red" && !x.confirmed).length, toCheck = rows.filter((x) => x.level === "amber" && !x.confirmed).length;
   const unread = docs.filter((d) => !d.extracted);
+  const confirmFn = useServerFn(confirmVmsValidation);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const canConfirm = ["purchasing_executive", "contract_executive", "contract_manager", "purchasing_manager"].includes(role);
+  async function confirmRow(key: string, confirm: boolean) {
+    setBusyKey(key);
+    try { await confirmFn({ data: { request_id: r.id, key, confirm, acting_role: role } }); onDone(); }
+    catch (e: any) { toast.error(friendlyError(e)); } finally { setBusyKey(null); }
+  }
   const afsDoc = docs.find((d) => d.doc_type === "afs" && d.extracted?.afs);
   const afs = afsDoc?.extracted?.afs as Afs | undefined;
   const k = afs ? afsRatios(afs, r.annual_spend) : null;
@@ -215,8 +230,11 @@ function SubmissionSection({ r, documents, onDone }: { r: any; documents: any[];
         for (let i = 0; i < unread.length; i += 3) await Promise.all(unread.slice(i, i + 3).map((d) => readFn({ data: { document_id: d.id } }).catch(() => null)));
         onDone();
       }} /> : undefined}>
-      <div className={cn("rounded-md px-3 py-2 text-sm", differs ? "bg-amber-50 text-amber-900" : "bg-emerald-50 text-emerald-900")}>
-        {differs ? `⚠ ${differs} field${differs === 1 ? "" : "s"} differ from the documents — check before screening.` : `✓ ${confirmed} of ${rows.length} fields confirmed by the documents${confirmed < rows.length ? "; the rest are not stated in any document" : ""}.`}
+      <div className={cn("rounded-md px-3 py-2 text-sm", differs ? "bg-red-50 text-red-900" : toCheck ? "bg-amber-50 text-amber-900" : "bg-emerald-50 text-emerald-900")}>
+        {differs || toCheck
+          ? `${differs ? `${differs} field${differs === 1 ? "" : "s"} differ from the documents` : ""}${differs && toCheck ? "; " : ""}${toCheck ? `${toCheck} close or low-confidence match${toCheck === 1 ? "" : "es"} to confirm` : ""}. ${confirmed} of ${rows.length} confirmed.`
+          : `✓ ${confirmed} of ${rows.length} fields confirmed by the documents${confirmed < rows.length ? "; the rest are not stated in any document" : ""}.`}
+        <span className="ml-2 inline-flex items-center gap-2 text-xs text-gray-600"><span className="inline-flex items-center gap-1"><span className="size-2 rounded-full bg-emerald-500" />sure</span><span className="inline-flex items-center gap-1"><span className="size-2 rounded-full bg-amber-400" />a person checks</span><span className="inline-flex items-center gap-1"><span className="size-2 rounded-full bg-red-500" />differs</span></span>
       </div>
 
       <div className="font-semibold text-gray-900 pt-1">Company details</div>
@@ -225,13 +243,22 @@ function SubmissionSection({ r, documents, onDone }: { r: any; documents: any[];
           <thead className="bg-gray-50"><tr><th className={TH2}>Field</th><th className={TH2}>Requester entered</th><th className={TH2}>Vendor entered</th><th className={TH2}>Found in document</th><th className={TH2}>Source</th><th className={TH2}>Check</th></tr></thead>
           <tbody>
             {rows.map((x) => (
-              <tr key={x.key} className={cn("border-t border-gray-100", x.check === "differs" && "bg-amber-50/60")}>
+              <tr key={x.key} className={cn("border-t border-gray-100", !x.confirmed && x.level === "red" && "bg-red-50/50", !x.confirmed && x.level === "amber" && "bg-amber-50/60")}>
                 <td className={TD2 + " font-medium text-gray-700"}>{x.label}</td>
                 <td className={TD2 + " text-gray-900"}>{x.requester ?? <span className="text-gray-400">—</span>}</td>
                 <td className={TD2 + " text-gray-900"}>{x.vendor ?? <span className="text-gray-400">—</span>}</td>
                 <td className={TD2 + " text-gray-900"}>{x.doc ?? <span className="text-gray-400">—</span>}</td>
                 <td className={TD2}>{x.source ? <a href={x.source.url} target="_blank" rel="noreferrer" className="text-blue-700 hover:underline">{x.source.label}</a> : <span className="text-gray-400">—</span>}</td>
-                <td className={cn(TD2, "whitespace-nowrap", CHECK[x.check].tone)}>{CHECK[x.check].icon} {CHECK[x.check].text}</td>
+                <td className={cn(TD2, "whitespace-nowrap")}>
+                  <span className={cn("inline-flex items-center gap-1.5", LEVEL[x.level].tone)} title={x.why}>
+                    <span className={cn("size-2.5 rounded-full", LEVEL[x.level].dot)} />{LEVEL[x.level].text}
+                    {x.confidence != null && <span className="text-xs font-normal text-gray-500">{Math.round(x.confidence * 100)}%</span>}
+                  </span>
+                  {x.why && !x.confirmed && <div className="text-xs text-gray-500">{x.why}</div>}
+                  {x.confirmed
+                    ? <div className="text-xs text-emerald-700">✓ Confirmed by {displayName(x.confirmed.by)}{canConfirm && <button type="button" disabled={busyKey === x.key} onClick={() => confirmRow(x.key, false)} className="ml-1 text-gray-500 hover:underline">undo</button>}</div>
+                    : (x.level === "amber" || x.level === "red") && canConfirm && <button type="button" disabled={busyKey === x.key} onClick={() => confirmRow(x.key, true)} className="mt-0.5 rounded border border-gray-300 px-1.5 text-xs text-gray-800 hover:border-gray-500">{busyKey === x.key ? "…" : "Confirm"}</button>}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -304,7 +331,7 @@ function SubmissionSection({ r, documents, onDone }: { r: any; documents: any[];
       )}
 
       {(() => {
-        const items = integrityChecklist(r);
+        const items = integrityChecklist(r, docs);
         const flags = items.filter((x) => !x.ok);
         return (
           <>
@@ -424,18 +451,26 @@ function DocumentsSection({ r, documents, onDone }: { r: any; documents: any[]; 
   const { busy, run } = useRun(onDone);
   const [edit, setEdit] = useState<Record<string, any>>({});
   const can = ["purchasing_executive", "contract_executive", "contract_manager"].includes(role);
-  const required = docsFor(r.category);
+  const required = docsFor(r.category, businessTypeOf(r));
   const val = (d: any, k: string) => edit[d.id]?.[k] ?? d[k] ?? d.extracted?.[k === "issued_date" ? "issued" : k === "expiry_date" ? "expiry" : k] ?? "";
   const set = (d: any, k: string, v: string) => setEdit((e) => ({ ...e, [d.id]: { ...(e[d.id] ?? {}), [k]: v } }));
   const docs = documents.filter((d) => d.doc_type !== "ctos" && d.status !== "superseded");
   // Clean documents are verified by the checks; only the exceptions need a person.
-  const differs = new Set(validationRows(r, docs).filter((x) => x.check === "differs").map((x) => x.source?.id));
+  const vrows = validationRows(r, docs).filter((x) => !x.confirmed);
+  const differs = new Set(vrows.filter((x) => x.level === "red").map((x) => x.source?.id));
+  const close = new Set(vrows.filter((x) => x.level === "amber").map((x) => x.source?.id));
   const company = r.register?.company_name || r.company_name;
   const whyFlagged = (d: any): string => {
     const x = d.extracted ?? {};
     const exp = d.expiry_date || x.expiry;
     if (!d.extracted) return "Not read yet";
+    if (x.signed) {
+      if (!x.signed.form_matches) return "Not the right form";
+      if (!x.signed.signature_present) return "No signature found";
+      if ((x.signed.confidence ?? 0) < 0.8) return `Signature found, ${Math.round((x.signed.confidence ?? 0) * 100)}% sure — check it`;
+    }
     if (differs.has(d.id)) return "Details differ from what the vendor entered";
+    if (close.has(d.id)) return "Close or low-confidence match — confirm it in Vendor Details";
     if (x.holder && d.doc_type !== "competency" && !sameValue("name", x.holder, company)) return `Issued to ${x.holder}, not the company`;
     if (DOC_TYPES.find((t) => t.id === d.doc_type)?.expires && !exp) return "No expiry date found";
     if (exp && daysTo(exp) < 0) return `Expired ${exp}`;
@@ -451,7 +486,7 @@ function DocumentsSection({ r, documents, onDone }: { r: any; documents: any[]; 
         toast.success(`Read ${todo.length} document${todo.length === 1 ? "" : "s"} — check each field, then Verify`); onDone();
       }} />}>
       {confirmDialog}
-      <div className="rounded-md border border-gray-200 p-3"><RequiredDocsChecklist category={r.category} documents={documents}
+      <div className="rounded-md border border-gray-200 p-3"><RequiredDocsChecklist category={r.category} businessType={businessTypeOf(r)} documents={documents}
         done={[...(r.submitted_by_vendor_at ? ["register_form", "abms_001", "abms_004", "abms_005", "abc_ack"] : []), ...(r.ctos ? ["ctos"] : []), ...(r.assessment ? ["prequal_form"] : [])]} /></div>
       {docs.length === 0 && <p className="text-gray-500">No documents uploaded.</p>}
       {flagged.length > 0 && <div className="text-sm font-semibold text-amber-800">Needs a person</div>}
@@ -506,44 +541,67 @@ function DocumentsSection({ r, documents, onDone }: { r: any; documents: any[]; 
   );
 }
 
-function AssessmentSection({ r, onDone }: { r: any; onDone: () => void }) {
+function AssessmentSection({ r, docs, onDone }: { r: any; docs: any[]; onDone: () => void }) {
   const [role] = useCcmsRole();
   const fn = useServerFn(assessVmsRequest);
   const { busy, run } = useRun(onDone);
   const sub = r.kind === "subcontractor";
-  const [areas, setAreas] = useState<Record<string, number>>(r.assessment?.areas ?? {});
+  const suggested = suggestFactors(r, docs);
+  const blank = { litigation: { result: suggested.litigation?.result ?? "", remarks: "" }, financial: { result: suggested.financial?.result ?? "", remarks: "" }, experience: { result: "", remarks: "" } };
+  const [factors, setFactors] = useState<Record<FactorId, { result: string; remarks: string }>>(blank);
+  const [rationale, setRationale] = useState("");
   const [own, setOwn] = useState<"none" | "declared">("none");
   const [details, setDetails] = useState("");
   const [fit, setFit] = useState("");
-  const [why, setWhy] = useState<Record<string, string>>({});
+  const [expNotes, setExpNotes] = useState("");
   const assist = useServerFn(vmsAiAssist);
-  const total = prequalScore(areas);
+  const total = factorScore(factors);
   const who = sub ? "contract_manager" : "purchasing_executive";
-  if (r.assessment) return (
-    <Section k="assessment" title={sub ? "Contract Manager review" : "Pre-qualification assessment"}>
-      <p>Score <span className={cn("font-semibold", r.assessment.pass ? "text-emerald-700" : "text-red-700")}>{r.assessment.total}%</span> (pass {PASS_MARK}%) · {displayName(r.assessment.by)} · assessor's own conflict: {r.assessment.own_conflict}{r.assessment.scope_fit ? ` · scope fit: ${r.assessment.scope_fit}` : ""}</p>
-    </Section>
-  );
+  const title = sub ? "Contract Manager review" : "Pre-qualification";
+  const why = (id: FactorId) => id === "experience" ? expNotes : (suggested as any)[id]?.why as string | undefined;
+  if (r.assessment) {
+    const a = r.assessment;
+    return (
+      <Section k="assessment" title={title}>
+        <p>Score <span className={cn("font-semibold", a.pass ? "text-emerald-700" : "text-red-700")}>{a.total}%</span> (pass {PASS_MARK}%) · {displayName(a.by)} · assessor's own conflict: {a.own_conflict}{a.scope_fit ? ` · scope fit: ${a.scope_fit}` : ""}</p>
+        {a.factors && (
+          <table className="mt-1 w-full text-sm"><thead><tr className="text-left text-xs text-gray-500"><th className="py-1 font-medium">Factor</th><th className="font-medium">Result</th><th className="font-medium">Remarks</th></tr></thead>
+            <tbody>{PREQUAL_FACTORS.map((f) => {
+              const o = f.options.find((x) => x.v === a.factors[f.id]?.result);
+              return <tr key={f.id} className="border-t border-gray-100"><td className="py-1 pr-3 text-gray-800">{f.label}</td><td className={cn("pr-3 font-medium", (o?.score ?? 0) >= 60 ? "text-emerald-700" : "text-red-700")}>{o?.label ?? "—"}</td><td className="text-gray-700">{a.factors[f.id]?.remarks || "—"}</td></tr>;
+            })}</tbody></table>
+        )}
+        {a.rationale && <div className="mt-1"><span className="text-gray-500">Why this vendor · </span><NoteText text={a.rationale} className="inline text-gray-800" /></div>}
+        {!a.pass && !r.decision && <p className="text-amber-800">Below the pass mark: the manager can still approve, by override with a reason.</p>}
+      </Section>
+    );
+  }
   return (
-    <Section k="assessment" title={sub ? "Contract Manager review" : "Pre-qualification assessment"} sub={`Nine areas, 0–5 each; pass mark ${PASS_MARK}%. Every document must be verified first.`}>
+    <Section k="assessment" title={title} sub={`Three factors inform the decision; they do not block it. Pass mark ${PASS_MARK}% — below it, a manager can approve by override. Every document must be verified first.`}>
       {role !== who ? <Hint role={CCMS_ROLES[who as keyof typeof CCMS_ROLES]} /> : (
         <>
-          <div className="flex justify-end"><AiLink label="Suggest Scores with AI" run={async () => {
+          <div className="flex justify-end"><AiLink label="Summarise Experience with AI" run={async () => {
             const o: any = await assist({ data: { request_id: r.id, kind: "prequal" } });
-            setAreas((p) => ({ ...p, ...o.areas })); setWhy(o.why ?? {}); if (sub && o.text && !fit) setFit(o.text);
-            toast.success("Suggested — adjust any score you disagree with");
+            setExpNotes(o.experience ?? ""); if (sub && o.text && !fit) setFit(o.text);
+            toast.success("Experience summarised — the team decides the rating");
           }} /></div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-            {PREQUAL_AREAS.map((a) => (
-              <label key={a.id} title={why[a.id]} className="flex items-center justify-between gap-2 rounded-md border border-gray-200 px-2 py-1.5">
-                <span className="text-gray-800">{a.label}{why[a.id] && <span className="block text-xs text-gray-500">{why[a.id]}</span>}</span>
-                <select className={INPUT + " py-0.5"} value={areas[a.id] ?? ""} onChange={(e) => setAreas({ ...areas, [a.id]: Number(e.target.value) })}>
-                  <option value="">–</option>{[0, 1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
-                </select>
-              </label>
-            ))}
-          </div>
-          <p>Score: <span className={cn("font-semibold", total >= PASS_MARK ? "text-emerald-700" : "text-red-700")}>{total}%</span></p>
+          <table className="w-full text-sm">
+            <thead><tr className="text-left text-xs text-gray-500"><th className="w-44 py-1 font-medium">Factor</th><th className="w-40 font-medium">Result</th><th className="font-medium">Remarks</th></tr></thead>
+            <tbody>{PREQUAL_FACTORS.map((f) => (
+              <tr key={f.id} className="border-t border-gray-100 align-top">
+                <td className="py-2 pr-3"><div className="font-medium text-gray-900">{f.label}</div><div className="text-xs text-gray-500">{f.hint}</div></td>
+                <td className="py-2 pr-3">
+                  <select className={INPUT + " w-full py-1"} value={factors[f.id].result} onChange={(e) => setFactors({ ...factors, [f.id]: { ...factors[f.id], result: e.target.value } })}>
+                    <option value="">Choose…</option>{f.options.map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
+                  </select>
+                  {why(f.id) && <div className="mt-1 text-xs text-gray-500">{f.id === "experience" ? "AI summary: " : "From the records: "}{why(f.id)}</div>}
+                </td>
+                <td className="py-2"><input className={INPUT + " w-full"} placeholder="Remarks" value={factors[f.id].remarks} onChange={(e) => setFactors({ ...factors, [f.id]: { ...factors[f.id], remarks: e.target.value } })} /></td>
+              </tr>
+            ))}</tbody>
+          </table>
+          <p>Score: {total == null ? <span className="text-gray-500">choose all three</span> : <span className={cn("font-semibold", total >= PASS_MARK ? "text-emerald-700" : "text-red-700")}>{total}%{total < PASS_MARK ? " — below the pass mark; approval will need a manager's override" : ""}</span>}</p>
+          <textarea className={INPUT + " w-full min-h-14"} placeholder="Why this vendor (the selection rationale, kept for the audit trail)" value={rationale} onChange={(e) => setRationale(e.target.value)} />
           {sub && <input className={INPUT + " w-full"} placeholder="Scope fit and pricing history" value={fit} onChange={(e) => setFit(e.target.value)} />}
           <div className="flex flex-wrap items-center gap-3">
             <span className="text-gray-800">Your own conflict of interest with this vendor:</span>
@@ -551,7 +609,7 @@ function AssessmentSection({ r, onDone }: { r: any; onDone: () => void }) {
             <label className="flex items-center gap-1"><input type="radio" checked={own === "declared"} onChange={() => setOwn("declared")} /> I declare one</label>
             {own === "declared" && <input className={INPUT + " flex-1"} placeholder="Details" value={details} onChange={(e) => setDetails(e.target.value)} />}
           </div>
-          <Button size="sm" disabled={busy || Object.keys(areas).length < PREQUAL_AREAS.length} onClick={() => run(() => fn({ data: { request_id: r.id, areas, own_conflict: own, own_conflict_details: details || null, scope_fit: fit || null, acting_role: role } }), "Assessment recorded")}>Submit assessment</Button>
+          <Button size="sm" disabled={busy || total == null} onClick={() => run(() => fn({ data: { request_id: r.id, factors, rationale: rationale || null, own_conflict: own, own_conflict_details: details || null, scope_fit: fit || null, acting_role: role } }), "Pre-qualification recorded")}>Submit pre-qualification</Button>
         </>
       )}
     </Section>
@@ -596,10 +654,16 @@ function DecisionSection({ r, onDone }: { r: any; onDone: () => void }) {
   const assist = useServerFn(vmsAiAssist);
   const { busy, run } = useRun(onDone);
   const [reason, setReason] = useState("");
+  const [override, setOverride] = useState("");
   const sub = r.kind === "subcontractor";
   const who = sub ? "head_contracts" : "purchasing_manager";
+  const below = !!r.assessment && !r.assessment.pass;
   if (r.decision) return (
-    <Section k="decision" title={sub ? "Head of Contracts & Procurement" : "Purchasing Manager"}><p><span className="font-semibold">{r.decision.outcome}</span> · {displayName(r.decision.by)}</p><NoteText text={r.decision.reason} className="text-gray-700" /></Section>
+    <Section k="decision" title={sub ? "Head of Contracts & Procurement" : "Purchasing Manager"}>
+      <p><span className="font-semibold">{r.decision.outcome}</span>{r.decision.override ? " by override" : ""} · {displayName(r.decision.by)}</p>
+      {r.decision.override && <p className="rounded-md border border-amber-200 bg-amber-50/60 px-2 py-1.5 text-amber-900">Approved by override: scored {r.decision.override.score}% against a pass mark of {r.decision.override.pass_mark}%. Reason: {r.decision.override.reason}</p>}
+      <NoteText text={r.decision.reason} className="text-gray-700" />
+    </Section>
   );
   return (
     <Section k="decision" title={sub ? "Head of Contracts & Procurement" : "Purchasing Manager"} sub={sub ? "Adds the subcontractor to the Master Sub-Contractor List. Nobody approves their own submission." : "Signs off the register and pre-qualification forms. Conditional only with Compliance's concurrence; nobody approves their own submission."}>
@@ -610,9 +674,15 @@ function DecisionSection({ r, onDone }: { r: any; onDone: () => void }) {
             setReason(o.text); if (o.suggested) toast.message(`Suggested: ${o.suggested}`);
           }} /></div>
           <textarea className={INPUT + " w-full"} rows={Math.min(10, Math.max(2, reason.split("\n").length + 1))} placeholder="Reason (required to return or reject; for a return, name the items to correct)" value={reason} onChange={(e) => setReason(e.target.value)} />
+          {below && (
+            <div className="rounded-md border border-amber-200 bg-amber-50/60 p-2">
+              <p className="text-amber-900">Pre-qualification scored {r.assessment.total}%, below the {PASS_MARK}% pass mark. You can still approve — say why, for the record.</p>
+              <textarea className={INPUT + " mt-1 w-full"} rows={2} placeholder="Reason for the override (e.g. urgently needed for critical works; no other qualified vendor available)" value={override} onChange={(e) => setOverride(e.target.value)} />
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" disabled={busy} onClick={() => run(() => fn({ data: { request_id: r.id, outcome: "approve", reason, acting_role: role } }), "Approved")}>{sub ? "Add to the list" : "Approve"}</Button>
-            {r.compliance?.decision === "conditional" && <Button size="sm" variant="outline" disabled={busy} onClick={() => run(() => fn({ data: { request_id: r.id, outcome: "conditional", reason, acting_role: role } }), "Approved with conditions")}>Approve with conditions</Button>}
+            <Button size="sm" disabled={busy || (below && override.trim().length < 10)} onClick={() => run(() => fn({ data: { request_id: r.id, outcome: "approve", reason, override_reason: below ? override : null, acting_role: role } }), below ? "Approved by override" : "Approved")}>{below ? "Approve by Override" : sub ? "Add to the list" : "Approve"}</Button>
+            {r.compliance?.decision === "conditional" && <Button size="sm" variant="outline" disabled={busy || (below && override.trim().length < 10)} onClick={() => run(() => fn({ data: { request_id: r.id, outcome: "conditional", reason, override_reason: below ? override : null, acting_role: role } }), "Approved with conditions")}>Approve with conditions</Button>}
             <Button size="sm" variant="outline" disabled={busy} onClick={() => run(() => fn({ data: { request_id: r.id, outcome: "return", reason, acting_role: role } }), "Returned to the vendor")}>Return to vendor</Button>
             <Button size="sm" variant="outline" className="text-red-700" disabled={busy} onClick={() => run(() => fn({ data: { request_id: r.id, outcome: "reject", reason, acting_role: role } }), "Rejected")}>Reject</Button>
           </div>
@@ -657,7 +727,7 @@ function VendorSummary({ r, documents, onOpen }: { r: any; documents: any[]; onO
   const rows = validationRows(r, docs);
   const differs = rows.filter((x) => x.check === "differs").length;
   const confirmed = rows.filter((x) => x.check === "match").length;
-  const mandatory = docsFor(r.category).filter((d) => d.level === "M" && !PORTAL_FORMS.has(d.id));
+  const mandatory = docsFor(r.category, businessTypeOf(r)).filter((d) => d.level === "M" && !PORTAL_FORMS.has(d.id));
   const have = new Set(docs.map((d) => d.doc_type));
   const verified = docs.filter((d) => d.status === "verified").length;
   const expired = docs.filter((d) => { const e = d.expiry_date || d.extracted?.expiry; return e && daysTo(e) < 0; }).length;
@@ -672,7 +742,7 @@ function VendorSummary({ r, documents, onOpen }: { r: any; documents: any[]; onO
     { key: "screen", label: "Screening", value: s ? `${s.rating[0].toUpperCase()}${s.rating.slice(1)} risk` : "Not run", note: s ? (s.reasons.length ? `${s.reasons.length} point${s.reasons.length === 1 ? "" : "s"}` : "no issues") : "run by Purchasing", tone: !s ? "idle" : s.rating === "high" ? "bad" : s.rating === "medium" ? "warn" : "good", section: "screening" },
     ...(r.kind === "subcontractor" ? [] : [{ key: "ctos", label: "CTOS", value: r.ctos ? String(r.ctos.score ?? "—") : "Awaiting", note: r.ctos ? ([r.ctos.litigation && "litigation", r.ctos.winding_up && "winding-up", r.ctos.director_flags && "director flags"].filter(Boolean).join(", ") || "no adverse records") : "Finance uploads the report", tone: (!r.ctos ? "idle" : r.ctos.litigation || r.ctos.winding_up || r.ctos.director_flags ? "bad" : "good") as T["tone"], section: "ctos" }]),
     { key: "fin", label: "Financial standing", value: k ? `${k.currentRatio != null ? k.currentRatio.toFixed(2) : "—"}` : "No accounts", note: k ? `current ratio · ${k.flags.length ? `${k.flags.length} flag${k.flags.length === 1 ? "" : "s"}` : `margin ${k.netMargin != null ? (k.netMargin * 100).toFixed(1) + "%" : "—"}, no flags`}` : "audited accounts not provided", tone: !k ? "idle" : k.flags.length ? "warn" : "good", section: "validation" },
-    (() => { const flags = integrityChecklist(r).filter((x) => !x.ok); return { key: "int", label: "Integrity", value: flags.length ? `${flags.length} to flag` : "All clear", note: flags.length ? flags.map((x) => x.label.replace(/ \(.*\)/, "")).join(", ") : `${yes ? "" : "all No · "}pledge signed`, tone: (flags.length ? "warn" : "good") as T["tone"], section: "validation" }; })(),
+    (() => { const flags = integrityChecklist(r, docs).filter((x) => !x.ok); return { key: "int", label: "Integrity", value: flags.length ? `${flags.length} to flag` : "All clear", note: flags.length ? flags.map((x) => x.label.replace(/ \(.*\)/, "")).join(", ") : `${yes ? "" : "all No · "}pledge signed`, tone: (flags.length ? "warn" : "good") as T["tone"], section: "validation" }; })(),
     { key: "pq", label: "Pre-qualification", value: r.assessment ? `${r.assessment.total}%` : "Not scored", note: r.assessment ? (r.assessment.pass ? `pass (${PASS_MARK}%)` : `below ${PASS_MARK}%`) : `pass mark ${PASS_MARK}%`, tone: !r.assessment ? "idle" : r.assessment.pass ? "good" : "bad", section: "assessment" },
     { key: "dec", label: "Decision", value: r.decision ? String(r.decision.outcome).replace(/^\w/, (c: string) => c.toUpperCase()) : r.compliance ? `Compliance: ${r.compliance.decision}` : "Pending", note: r.decision ? displayName(r.decision.by) : r.compliance ? "awaiting Purchasing Manager" : "after scoring", tone: r.decision ? (["approve", "approved", "conditional"].includes(r.decision.outcome) ? "good" : "bad") : "idle", section: r.compliance && !r.decision ? "decision" : r.status === "compliance" ? "compliance" : "decision" },
   ];

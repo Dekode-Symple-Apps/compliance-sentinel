@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { createVmsRequest } from "@/lib/vms.functions";
 import { listVmsVendors } from "@/lib/vms.functions";
 import { CcmsHeader, CARD, useCcmsRole, friendlyError } from "@/components/ccms-widgets";
-import { VENDOR_CATEGORIES, daysTo } from "@/lib/vms";
+import { BUSINESS_TYPES, VENDOR_CATEGORIES, daysTo } from "@/lib/vms";
 import { RequiredDocsChecklist } from "@/components/vms-docs-checklist";
 import { LSH_ENTITIES } from "@/lib/ccms";
 import { Loader2 } from "lucide-react";
@@ -33,7 +33,7 @@ function NewVmsRequest() {
   const vendorsFn = useServerFn(listVmsVendors);
   const { data: vendors = [] } = useQuery({ queryKey: ["vms-vendors"], queryFn: () => vendorsFn() });
   const [kind, setKind] = useState<"onboarding" | "subcontractor" | "redd">("onboarding");
-  const [f, setF] = useState<any>({ company_name: "", registration_no: "", entity: LSH_ENTITIES[1], category: "supplier_material", goods_services: "", justification: "", annual_spend: "", urgency: "normal", project: "", trade: "", expected_value: "", contact_name: "", contact_email: "", vendor_id: "" });
+  const [f, setF] = useState<any>({ company_name: "", registration_no: "", entity: LSH_ENTITIES[1], category: "supplier_material", goods_services: "", justification: "", annual_spend: "", urgency: "normal", project: "", trade: "", expected_value: "", contact_name: "", contact_email: "", vendor_id: "", business_type: "" });
   const set = (k: string, v: any) => setF((p: any) => ({ ...p, [k]: v }));
   const [busy, setBusy] = useState(false);
   const { vendor: startVendor } = Route.useSearch();
@@ -88,6 +88,7 @@ function NewVmsRequest() {
         annual_spend: f.annual_spend === "" ? null : Number(f.annual_spend), urgency: f.urgency,
         project: f.project || null, trade: f.trade || null, expected_value: f.expected_value === "" ? null : Number(f.expected_value),
         contact_name: f.contact_name || v?.contact_name || null, contact_email: f.contact_email || v?.contact_email || null,
+        business_type: f.business_type || null,
       } });
       if (kind === "redd") rememberForm("vms:redd", { f: { vendor_id: f.vendor_id } });
       else rememberCompany({ kind, ...Object.fromEntries(FIELDS.map((k) => [k, f[k]])) });
@@ -144,6 +145,8 @@ function NewVmsRequest() {
                   )}
                 </div>
                 <div><label className={LABEL}>SSM registration no.</label><input className={INPUT} value={f.registration_no} onChange={(e) => set("registration_no", e.target.value)} /></div>
+                <div><label className={LABEL}>Business type</label><select className={INPUT} value={f.business_type} onChange={(e) => set("business_type", e.target.value)}><option value="">Not known yet — the vendor confirms it</option>{Object.entries(BUSINESS_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+                  {(f.business_type === "sole_prop" || f.business_type === "partnership") && <p className="mt-1 text-xs text-amber-800">A personal guarantee will be required.</p>}</div>
               </div>
             )}
             <div className="grid grid-cols-2 gap-4">
@@ -174,7 +177,7 @@ function NewVmsRequest() {
           <aside className={CARD + " p-4 h-fit"}>
             <h2 className="text-sm font-semibold text-gray-900">Required Documents</h2>
             <p className="text-sm text-gray-600">{VENDOR_CATEGORIES[category]}</p>
-            <div className="mt-3"><RequiredDocsChecklist category={category} /></div>
+            <div className="mt-3"><RequiredDocsChecklist category={category} businessType={f.business_type || null} /></div>
           </aside>
         </div>
       </div>

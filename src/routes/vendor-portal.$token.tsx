@@ -5,9 +5,10 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { deleteVendorPortalDocument, getVendorPortal, readVendorPortalDocuments, saveVendorPortal, uploadVendorPortalAuto, uploadVendorPortalDocument } from "@/lib/vms.functions";
-import { PORTAL_FORMS } from "@/lib/vms";
+import { BUSINESS_TYPES, PORTAL_FORMS, SIGNED_FORMS, docsFor } from "@/lib/vms";
+import { downloadSignedForm } from "@/lib/vms-forms";
 import { useConfirm } from "@/components/ccms-widgets";
-import { Check, Clock, FileText, Files, Loader2, Sparkles, Star, Trash2, TriangleAlert, Upload } from "lucide-react";
+import { Check, Clock, Download, FileText, Files, Loader2, PenLine, Sparkles, Star, Trash2, TriangleAlert, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // The vendor's own page: no account, reached from the invitation link. Every
@@ -50,7 +51,8 @@ function VendorPortal() {
   const r = (k: string, v: any) => setReg((p: any) => ({ ...p, [k]: v }));
   const a = (k: string, v: any) => setAb((p: any) => ({ ...p, [k]: v }));
   const have = new Set(d.documents.map((x: any) => x.doc_type));
-  const uploads = d.required.filter((x: any) => !PORTAL_FORMS.has(x.id));
+  // The documents follow the business type chosen on the form (a sole proprietor adds a personal guarantee).
+  const uploads = docsFor(d.category, reg.business_type || d.businessType).filter((x) => !PORTAL_FORMS.has(x.id));
 
   async function upload(docType: string, file: File) {
     if (file.size > 3_000_000) { toast.error("Files up to 3 MB, please (scan at a lower resolution if needed)."); return; }
@@ -58,9 +60,14 @@ function VendorPortal() {
     try {
       const b64 = await new Promise<string>((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(",")[1] ?? ""); fr.onerror = rej; fr.readAsDataURL(file); });
       const previous = (data?.documents ?? []).filter((x: any) => x.doc_type === docType && x.status !== "verified");
-      await uploadFn({ data: { token, doc_type: docType, file_name: file.name, mime_type: file.type || "application/octet-stream", base64: b64 } });
+      const res: any = await uploadFn({ data: { token, doc_type: docType, file_name: file.name, mime_type: file.type || "application/octet-stream", base64: b64 } });
       for (const p of previous) await deleteFn({ data: { token, document_id: p.id } }).catch(() => null); // Replace = the new file only
-      toast.success(previous.length ? "Replaced" : "Uploaded"); refetch();
+      if (res?.signed) {
+        if (!res.signed.form_matches) toast.error("This doesn't look like the form. Download it above, sign it and upload the signed copy.");
+        else if (!res.signed.signature_present) toast.error("We couldn't find a signature. Please sign the form and upload it again.");
+        else toast.success(`Signed form received${res.signed.signatory_name ? ` — signed by ${res.signed.signatory_name}` : ""}.`);
+      } else toast.success(previous.length ? "Replaced" : "Uploaded");
+      refetch();
     } catch (e: any) { toast.error(e?.message ?? "Upload failed"); } finally { setBusy(null); }
   }
   const toB64 = (file: File) => new Promise<string>((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(",")[1] ?? ""); fr.onerror = rej; fr.readAsDataURL(file); });
@@ -107,6 +114,13 @@ function VendorPortal() {
     try { await deleteFn({ data: { token, document_id: doc.id } }); toast.success("Removed"); refetch(); }
     catch (e: any) { toast.error(e?.message ?? "Could not remove it"); } finally { setBusy(null); }
   }
+  /** The business type decides the documents; save it at once so a bulk upload can file a personal guarantee. */
+  async function setBusinessType(v: string) {
+    const next = { ...reg, business_type: v };
+    setReg(next);
+    try { await saveFn({ data: { token, register: next, abms: ab, submit: false } }); refetch(); } catch { /* saved with the form later */ }
+  }
+  const party = { company: reg.company_name || d.company, registration_no: reg.registration_no, address: reg.address, business_type: reg.business_type, reference: d.reference };
   async function save(submit: boolean) {
     setBusy(submit ? "submit" : "save");
     try { await saveFn({ data: { token, register: reg, abms: ab, submit } }); toast.success(submit ? "Submitted — thank you" : "Saved"); refetch(); }
@@ -137,6 +151,13 @@ function VendorPortal() {
             title="Reads your SSM certificate, company profile and bank letter (upload them in section 2)">
             {busy === "read" ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} {busy === "read" ? "Reading…" : "Fill from Documents"}
           </button>
+        </div>
+        <div>
+          <label className={LABEL}>Business type</label>
+          <select className={INPUT} value={reg.business_type ?? ""} onChange={(e) => setBusinessType(e.target.value)}>
+            <option value="">Choose…</option>{Object.entries(BUSINESS_TYPES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+          {(reg.business_type === "sole_prop" || reg.business_type === "partnership") && <p className="mt-1 text-xs text-amber-800">A personal guarantee from the owner{reg.business_type === "partnership" ? "s" : ""} is needed — download it in section 2.</p>}
         </div>
         <div className="grid grid-cols-2 gap-3">
           {[["company_name", "Company name"], ["registration_no", "SSM registration no."], ["tin", "Tax identification no. (TIN)"], ["address", "Registered address"], ["contact_name", "Contact person"], ["contact_email", "Contact email"], ["contact_phone", "Contact phone"], ["bank_name", "Bank"], ["bank_account", "Bank account no."], ...(d.category === "subcontractor" ? [["cidb_grade", "CIDB grade and number"]] : [])].map(([k, l]) => (
@@ -196,9 +217,13 @@ function VendorPortal() {
               {have.has(x.id) && <Check className="size-3" strokeWidth={3} />}
             </span>
             <span className={cn("min-w-0 flex-1 text-sm", x.level === "M" ? "text-gray-900" : "text-gray-600")}>{x.label}
+              {SIGNED_FORMS[x.id] && <span className="block text-xs text-gray-500"><PenLine className="mr-1 inline size-3" />Download, print, sign and upload the signed copy.</span>}
               {d.documents.filter((f: any) => f.doc_type === x.id).map((f: any) => (
                 <span key={f.id} className="mt-0.5 flex items-center gap-1.5 text-xs text-gray-500">
                   <FileText className="size-3.5 shrink-0" /><span className="truncate">{f.file_name}</span>
+                  {SIGNED_FORMS[x.id] && f.signed && (f.signed.form_matches && f.signed.signature_present
+                    ? <span className="shrink-0 font-medium text-emerald-700">· Signed ✓</span>
+                    : <span className="shrink-0 font-medium text-amber-700">· {f.signed.form_matches ? "No signature found" : "Not this form"}</span>)}
                   {f.status !== "verified" && (
                     <button type="button" title="Remove this file" disabled={busy === f.id} onClick={() => remove(f)} className="shrink-0 rounded p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-600">
                       {busy === f.id ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
@@ -211,6 +236,11 @@ function VendorPortal() {
             {x.level === "M"
               ? <span title="Mandatory"><Star className="size-3.5 fill-amber-400 text-amber-400" aria-label="Mandatory" /></span>
               : <span className="w-20 text-right text-[11px] text-gray-400">{x.level === "C" ? "If relevant" : "Suggested"}</span>}
+            {SIGNED_FORMS[x.id] && (
+              <button type="button" onClick={() => downloadSignedForm(x.id, party)} className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:border-gray-500">
+                <Download className="size-4" /> Download Form
+              </button>
+            )}
             <label className={cn("inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-sm cursor-pointer hover:border-gray-500", busy === x.id && "opacity-60 pointer-events-none")}>
               {busy === x.id ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />} {have.has(x.id) ? "Replace" : "Upload"}
               <input type="file" accept=".pdf,.png,.jpg,.jpeg,.docx" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(x.id, f); e.target.value = ""; }} />
@@ -238,9 +268,7 @@ function VendorPortal() {
           <label className="flex items-center gap-2"><input type="radio" checked={ab.declaration_interest === "declared"} onChange={() => a("declaration_interest", "declared")} /> We declare an interest:</label>
           {ab.declaration_interest === "declared" && <input className={INPUT} placeholder="Person and relationship" value={ab.interest_details ?? ""} onChange={(e) => a("interest_details", e.target.value)} />}
           <label className="flex items-center gap-2 pt-1"><input type="checkbox" checked={!!ab.pledge} onChange={(e) => a("pledge", e.target.checked)} /> ABMS-005: we give the Third Party Integrity Pledge and acknowledge the Anti-Bribery, Whistleblowing and Code of Conduct policies.</label>
-          <div className="flex items-center gap-3 pt-1"><span>CTOS credit check consent:</span>
-            <label className="flex items-center gap-1"><input type="radio" checked={ab.ctos_consent === "signed"} onChange={() => a("ctos_consent", "signed")} /> I consent</label>
-            <label className="flex items-center gap-1"><input type="radio" checked={ab.ctos_consent === "declined"} onChange={() => a("ctos_consent", "declined")} /> I decline</label></div>
+          <p className="pt-1 text-gray-600">CTOS credit check consent: sign the CTOS consent form in section 2.</p>
           <label className="flex items-center gap-2"><input type="checkbox" checked={!!ab.pdpa} onChange={(e) => a("pdpa", e.target.checked)} /> We consent to our personal data being processed under the PDPA 2010 for this registration.</label>
         </div>
         <div className="grid grid-cols-3 gap-3">
